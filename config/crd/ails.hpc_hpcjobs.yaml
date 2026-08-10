@@ -1,0 +1,71 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: hpcjobs.ails.hpc
+spec:
+  group: ails.hpc
+  names:
+    kind: HpcJob
+    listKind: HpcJobList
+    plural: hpcjobs
+    singular: hpcjob
+    shortNames:
+      - hj
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              required:
+                - image
+                - slots
+              properties:
+                jobType:
+                  type: string
+                image:
+                  type: string
+                slots:
+                  type: integer
+                  format: int32
+                command:
+                  type: array
+                  items:
+                    type: string
+                queue:
+                  type: string
+                tenantNamespace:
+                  type: string
+                storageSize:
+                  type: string
+                priorityClassName:
+                  type: string
+            status:
+              type: object
+              properties:
+                phase:
+                  type: string
+                startTime:
+                  type: string
+                  format: date-time
+                completionTime:
+                  type: string
+                  format: date-time
+                coreHours:
+                  type: number
+                  format: double
+                executionDuration:
+                  type: string
+      subresources:
+        status: {}

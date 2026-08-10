@@ -1,0 +1,13 @@
+{
+  "name": "ails-hpc-monorepo",
+  "private": true,
+  "scripts": {
+    "build:go": "go build -o bin/apiserver ./cmd/apiserver && go build -o bin/controller ./cmd/controller",
+    "test:go": "go test ./...",
+    "dev:web": "pnpm --filter @ails-hpc/web dev",
+    "build:web": "pnpm --filter @ails-hpc/web build"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5"
+  }
+}

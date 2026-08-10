@@ -1,0 +1,142 @@
+name: ails-slurm-dev
+
+services:
+  slurm-db:
+    image: docker.m.daocloud.io/library/mariadb:10.11
+    container_name: slurm-db
+    hostname: slurm-db
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: slurm_acct_db
+      MYSQL_USER: slurm
+      MYSQL_PASSWORD: slurmdbpass
+    volumes:
+      - mariadb-data:/var/lib/mysql
+    networks:
+      - slurm-net
+    restart: unless-stopped
+
+  slurmdbd:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ails-slurm-node:latest
+    container_name: slurmdbd
+    hostname: slurmdbd
+    environment:
+      ROLE: slurmdbd
+    volumes:
+      - ./config/slurm.conf:/etc/slurm/slurm.conf:ro
+      - ./config/slurmdbd.conf:/etc/slurm/slurmdbd.conf.template:ro
+      - shared-storage:/shared
+    depends_on:
+      - slurm-db
+    networks:
+      - slurm-net
+    restart: unless-stopped
+
+  slurmctld:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ails-slurm-node:latest
+    container_name: slurmctld
+    hostname: slurmctld
+    environment:
+      ROLE: slurmctld
+    ports:
+      - "6817:6817"
+      - "6820:6820"
+    security_opt:
+      - seccomp:unconfined
+    cap_add:
+      - SYS_ADMIN
+      - SYS_PTRACE
+    extra_hosts:
+      - "slurmctld:127.0.0.1"
+    volumes:
+      - ./config/slurm.conf:/etc/slurm/slurm.conf:ro
+      - ./config/slurmdbd.conf:/etc/slurm/slurmdbd.conf.template:ro
+      - ./config/entrypoint.sh:/entrypoint.sh:ro
+      - slurmctld-state:/var/spool/slurmctld
+      - shared-storage:/shared
+    depends_on:
+      - slurmdbd
+    networks:
+      - slurm-net
+    restart: unless-stopped
+
+  node1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ails-slurm-node:latest
+    container_name: node1
+    hostname: node1
+    environment:
+      ROLE: slurmd
+    security_opt:
+      - seccomp:unconfined
+    cap_add:
+      - SYS_ADMIN
+    volumes:
+      - ./config/slurm.conf:/etc/slurm/slurm.conf:ro
+      - shared-storage:/shared
+    depends_on:
+      - slurmctld
+    networks:
+      - slurm-net
+    restart: unless-stopped
+
+  node2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ails-slurm-node:latest
+    container_name: node2
+    hostname: node2
+    environment:
+      ROLE: slurmd
+    security_opt:
+      - seccomp:unconfined
+    cap_add:
+      - SYS_ADMIN
+    volumes:
+      - ./config/slurm.conf:/etc/slurm/slurm.conf:ro
+      - shared-storage:/shared
+    depends_on:
+      - slurmctld
+    networks:
+      - slurm-net
+    restart: unless-stopped
+
+  node3:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ails-slurm-node:latest
+    container_name: node3
+    hostname: node3
+    environment:
+      ROLE: slurmd
+    security_opt:
+      - seccomp:unconfined
+    cap_add:
+      - SYS_ADMIN
+    volumes:
+      - ./config/slurm.conf:/etc/slurm/slurm.conf:ro
+      - shared-storage:/shared
+    depends_on:
+      - slurmctld
+    networks:
+      - slurm-net
+    restart: unless-stopped
+
+networks:
+  slurm-net:
+    driver: bridge
+
+volumes:
+  mariadb-data:
+  slurmctld-state:
+  shared-storage:
