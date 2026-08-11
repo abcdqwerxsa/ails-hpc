@@ -6,10 +6,34 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
-var defaultJWTSecret = []byte("ails-hpc-containers-jwt-secret-key-2026")
+// fallbackJWTSecret 仅在未通过 SetContainerJWTSecret 注入时的兜底密钥。
+// 生产环境应通过 AILS_CONTAINER_JWT_SECRET 注入独立密钥。
+var fallbackJWTSecret = []byte("ails-hpc-containers-jwt-secret-key-2026")
+
+// containerJWTSecret 由 cmd/apiserver 启动时注入（源自 AILS_CONTAINER_JWT_SECRET）。
+var containerJWTSecret []byte
+
+// deployHost 容器 IDE 入口 URL 的主机（由 AILS_DEPLOY_HOST 注入；历史上硬编码为 192.168.20.226）。
+var deployHost = "192.168.20.226"
+
+// SetContainerJWTSecret 注入容器代理令牌签名密钥（仅正数长度生效）。
+func SetContainerJWTSecret(b []byte) {
+	if len(b) > 0 {
+		containerJWTSecret = make([]byte, len(b))
+		copy(containerJWTSecret, b)
+	}
+}
+
+// SetDeployHost 注入容器 IDE 入口 URL 的主机（空串忽略）。
+func SetDeployHost(host string) {
+	if h := strings.TrimSpace(host); h != "" {
+		deployHost = h
+	}
+}
 
 type JWTClaims struct {
 	ContainerID string `json:"cid"`
@@ -17,11 +41,19 @@ type JWTClaims struct {
 	Exp         int64  `json:"exp"`
 }
 
-// GenerateJWTToken generates a signed JWT-like token for container auth proxy
-func GenerateJWTToken(containerID, envType string, secret []byte) (string, error) {
-	if len(secret) == 0 {
-		secret = defaultJWTSecret
+func resolveSecret(secret []byte) []byte {
+	if len(secret) > 0 {
+		return secret
 	}
+	if len(containerJWTSecret) > 0 {
+		return containerJWTSecret
+	}
+	return fallbackJWTSecret
+}
+
+// GenerateJWTToken 为容器鉴权代理生成签名 JWT-like 令牌。
+func GenerateJWTToken(containerID, envType string, secret []byte) (string, error) {
+	secret = resolveSecret(secret)
 
 	header := map[string]string{
 		"alg": "HS256",
@@ -54,11 +86,15 @@ func GenerateJWTToken(containerID, envType string, secret []byte) (string, error
 	return fmt.Sprintf("%s.%s", unsignedToken, signatureB64), nil
 }
 
-// BuildWebURL returns the complete access URL with JWT auth token and cpus query param
+// BuildWebURL 返回带 JWT 鉴权 token 与 cpus 查询参数的完整入口 URL。
+// 主机取自配置的 deployHost（原为硬编码 192.168.20.226）。
 func BuildWebURL(envType, token string, cpus int) string {
-	baseIP := "192.168.20.226"
-	if envType == "vscode" {
-		return fmt.Sprintf("http://%s:8080/vscode/?token=%s&cpus=%d", baseIP, token, cpus)
+	host := deployHost
+	if host == "" {
+		host = "192.168.20.226"
 	}
-	return fmt.Sprintf("http://%s:8888/lab?token=%s&cpus=%d", baseIP, token, cpus)
+	if envType == "vscode" {
+		return fmt.Sprintf("http://%s:8080/vscode/?token=%s&cpus=%d", host, token, cpus)
+	}
+	return fmt.Sprintf("http://%s:8888/lab?token=%s&cpus=%d", host, token, cpus)
 }
