@@ -2,51 +2,39 @@ package main
 
 import (
 	"flag"
-	"log"
 	"net/http"
 	"os"
 
-	"ails-hpc/pkg/apis"
-	"ails-hpc/pkg/auth"
 	"ails-hpc/pkg/services/billing"
+	"ails-hpc/pkg/services/cluster"
 	"ails-hpc/pkg/services/containers"
 	"ails-hpc/pkg/services/jobs"
 	"ails-hpc/pkg/services/nodes"
 	"ails-hpc/pkg/slurmrest"
 
 	"github.com/gin-gonic/gin"
-	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/clientcmd"
 )
 
+// main 是 AILS HPC Slurm 管理平台的唯一运行入口（纯 SlurmRESTd 单体）。
+//
+// 注意（安全债，后续 Phase 修复）：
+//   - 当前 /api/v1/slurm 组尚无 JWT 门禁，写接口处于无鉴权状态 —— Phase C 引入真登录、
+//     Phase E 给整组挂 JWTAuthMiddleware + RequireRole 角色矩阵。
+//   - CORS 的 OPTIONS 仍返回 24、Allow-Origin:* 与 Allow-Credentials:true 并存 —— Phase E 修正。
 func main() {
-	kubeconfig := flag.String("kubeconfig", "/etc/kubernetes/admin.conf", "Path to kubeconfig file")
 	port := flag.String("port", "8090", "Port for API server")
 	flag.Parse()
 
-	var dynamicClient dynamic.Interface
-	var kubeClient kubernetes.Interface
-
-	config, err := clientcmd.BuildConfigFromFlags("", *kubeconfig)
-	if err == nil {
-		dynamicClient, _ = dynamic.NewForConfig(config)
-		kubeClient, _ = kubernetes.NewForConfig(config)
-	} else {
-		log.Printf("Warning: Could not load kubeconfig (%v). Running Slurm REST Portal standalone mode.", err)
-	}
-
 	r := gin.Default()
 
-	// Enable CORS for Web Portal
+	// Enable CORS for Web Portal（Phase E 将修正 OPTIONS 状态码与 credentials 冲突）
 	r.Use(func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
 		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE")
 
 		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(24)
+			c.AbortWithStatus(24) // TODO(Phase E): http.StatusNoContent (204)
 			return
 		}
 		c.Next()
@@ -57,49 +45,36 @@ func main() {
 		slurmRESTURL = "http://192.168.20.226:6820"
 	}
 
-	jobHandler := &apis.JobHandler{DynamicClient: dynamicClient}
-	queueHandler := &apis.QueueHandler{DynamicClient: dynamicClient}
-	logHandler := &apis.LogHandler{KubeClient: kubeClient}
-	authHandler := &apis.AuthHandler{}
-	slurmHandler := apis.NewSlurmHandler(slurmRESTURL, "hpcuser")
+	// 共享单个 slurmrestd 客户端（懒加载 token、401/403 自动续期）
+	slurmClient := slurmrest.NewClient(slurmRESTURL, "hpcuser", "")
 
 	billingService := billing.NewBillingService()
 	billingHandler := billing.NewBillingHandler(billingService)
 
-	slurmClient := slurmrest.NewClient(slurmRESTURL, "hpcuser", "")
-	jobsService := jobs.NewJobServiceWithBilling(slurmClient, billingService)
-	jobsHandler := jobs.NewJobHandler(jobsService)
+	clusterHandler := cluster.NewClusterHandler(cluster.NewClusterService(slurmClient))
+	jobsHandler := jobs.NewJobHandler(jobs.NewJobServiceWithBilling(slurmClient, billingService))
+	nodesHandler := nodes.NewNodeHandler(nodes.NewNodeService(slurmClient))
+	containersHandler := containers.NewContainerHandler(containers.NewContainerServiceWithBilling(billingService))
 
-	nodesService := nodes.NewNodeService(slurmClient)
-	nodesHandler := nodes.NewNodeHandler(nodesService)
-
-	containersService := containers.NewContainerServiceWithBilling(billingService)
-	containersHandler := containers.NewContainerHandler(containersService)
-
-	// Public Auth & Slurm Monitoring Endpoints
-	r.POST("/api/v1/auth/login", authHandler.Login)
-	r.POST("/api/v1/auth/sso", authHandler.Login)
-
-	// Direct Slurm Portal REST APIs
+	// Direct Slurm Portal REST APIs（Phase E 将整组挂 JWT + 角色矩阵）
 	slurmGroup := r.Group("/api/v1/slurm")
 	{
-		slurmGroup.GET("/ping", slurmHandler.GetStatus)
+		slurmGroup.GET("/ping", clusterHandler.GetStatus)
 		slurmGroup.GET("/nodes", nodesHandler.GetNodes)
-		slurmGroup.POST("/nodes/:name/state", auth.RequireRole("admin"), nodesHandler.UpdateNodeState)
+		slurmGroup.POST("/nodes/:name/state", nodesHandler.UpdateNodeState) // Phase E: RequireRole(admin)
 
 		slurmGroup.GET("/jobs", jobsHandler.ListJobs)
-		slurmGroup.POST("/jobs/submit", jobsHandler.SubmitJob)
+		slurmGroup.POST("/jobs/submit", jobsHandler.SubmitJob) // Phase E: RequireRole(member,tenant_admin)
 		slurmGroup.POST("/jobs/:id/cancel", jobsHandler.CancelJob)
 		slurmGroup.POST("/jobs/:id/hold", jobsHandler.HoldJob)
 		slurmGroup.POST("/jobs/:id/requeue", jobsHandler.RequeueJob)
 
-		slurmGroup.POST("/containers/launch", containersHandler.LaunchContainer)
+		slurmGroup.POST("/containers/launch", containersHandler.LaunchContainer) // Phase E: RequireRole(member,tenant_admin)
 		slurmGroup.GET("/containers/list", containersHandler.ListContainers)
 		slurmGroup.DELETE("/containers/:id", containersHandler.RecycleContainer)
 
-		slurmGroup.GET("/partitions", slurmHandler.GetPartitions)
-		slurmGroup.POST("/launch", containersHandler.LaunchContainer)
-		billingHandler.RegisterRoutes(slurmGroup)
+		slurmGroup.GET("/partitions", clusterHandler.GetPartitions)
+		billingHandler.RegisterRoutes(slurmGroup) // Phase E: 拆为显式注册并挂 RequireRole(member,tenant_admin,ops)
 	}
 
 	// Serve Neumorphic Web Dashboard Static Portal
@@ -107,18 +82,6 @@ func main() {
 	r.GET("/", func(c *gin.Context) {
 		c.Redirect(http.StatusMovedPermanently, "/portal/")
 	})
-
-	// Protected API Routes with JWT & RBAC Middleware
-	apiGroup := r.Group("/api/v1")
-	apiGroup.Use(auth.JWTAuthMiddleware())
-	{
-		apiGroup.GET("/hpcjobs", jobHandler.ListJobs)
-		apiGroup.POST("/hpcjobs", auth.RBACRequireRole("admin", "member"), jobHandler.CreateJob)
-		apiGroup.DELETE("/hpcjobs/:name", auth.RBACRequireRole("admin", "member"), jobHandler.DeleteJob)
-		apiGroup.GET("/queues", queueHandler.GetQueueStatus)
-	}
-
-	r.GET("/ws/logs", logHandler.StreamPodLogs)
 
 	r.Run(":" + *port)
 }

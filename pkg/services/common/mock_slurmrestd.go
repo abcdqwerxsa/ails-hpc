@@ -89,6 +89,20 @@ func NewMockSlurmServer() *MockSlurmServer {
 		_ = json.NewEncoder(w).Encode(resp)
 	})
 
+	// Get Partitions endpoint
+	mux.HandleFunc("/slurm/v0.0.37/partitions", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		resp := map[string]interface{}{
+			"errors": []interface{}{},
+			"partitions": []map[string]interface{}{
+				{"name": "standard", "nodes": "node1,node2,node3", "total_cpus": 192, "total_nodes": 3},
+				{"name": "debug", "nodes": "node1", "total_cpus": 64, "total_nodes": 1},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+
 	// JobSubmit or GetJobs or JobControl handler router
 	mux.HandleFunc("/slurm/v0.0.37/jobs", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
