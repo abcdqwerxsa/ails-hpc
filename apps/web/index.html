@@ -11,6 +11,27 @@
   <!-- Toast Notification Container -->
   <div class="neu-toast-container" id="toast-container"></div>
 
+  <!-- 认证登录层（过渡，React 迁移后移除） -->
+  <div id="auth-overlay" class="modal-overlay" style="display:none;">
+    <div class="neu-modal" style="max-width:380px;padding:28px;">
+      <h2 style="margin:0 0 6px 0;font-size:18px;">AILS HPC 登录</h2>
+      <p style="color:var(--text-secondary);font-size:12px;margin:0 0 22px 0;">服务端权威认证 · 角色由登录凭证决定</p>
+      <div style="margin-bottom:14px;">
+        <label style="font-size:12px;color:var(--text-secondary);">用户名</label>
+        <input id="login-username" class="neu-input" type="text" value="admin" placeholder="username" style="width:100%;margin-top:6px;box-sizing:border-box;" autocomplete="username">
+      </div>
+      <div style="margin-bottom:14px;">
+        <label style="font-size:12px;color:var(--text-secondary);">密码</label>
+        <input id="login-password" class="neu-input" type="password" placeholder="password" style="width:100%;margin-top:6px;box-sizing:border-box;" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()">
+      </div>
+      <div id="login-error" style="color:var(--accent-rose);font-size:12px;min-height:16px;margin-bottom:10px;"></div>
+      <button class="neu-btn primary" style="width:100%;" onclick="doLogin()">登录</button>
+      <p style="color:var(--text-secondary);font-size:11px;margin:16px 0 0 0;line-height:1.7;">
+        开发账号：admin / admin123 · member / member123 · tenantadmin / tenantadmin123 · ops / ops123
+      </p>
+    </div>
+  </div>
+
   <!-- Sidebar Navigation -->
   <aside class="sidebar">
     <div class="brand-area">
@@ -73,7 +94,7 @@
       <h1 class="page-title" id="current-view-title">SLURM CLUSTER MANAGER</h1>
       <div class="header-right">
         <!-- RBAC 视角切换器 -->
-        <select class="user-role-select" id="user-role-select" onchange="switchUserRole(this.value)">
+        <select class="user-role-select" id="user-role-select" data-throwaway="React 迁移后移除" title="仅切换 UI 视图预览；实际权限以服务端为准" onchange="switchUserRole(this.value)">
           <option value="admin">System Admin (超级管理员)</option>
           <option value="member">Tenant Member (普通租户成员)</option>
           <option value="tenant_admin">Tenant Admin (租户管理员)</option>
@@ -90,6 +111,9 @@
         </div>
         <div class="icon-btn" id="theme-btn" data-tooltip="Toggle Theme Mode">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" id="theme-icon-svg"><path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z"/></svg>
+        </div>
+        <div class="icon-btn" id="logout-btn" data-tooltip="退出登录" onclick="logout()" style="cursor:pointer;">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/></svg>
         </div>
         <div class="user-profile">
           <div class="avatar">A</div>

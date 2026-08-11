@@ -1,7 +1,8 @@
 /* AILS Slurm Manager - Pure Real Slurm Data Driven Application */
 
 let currentTheme = localStorage.getItem('slurm_theme') || 'dark';
-let currentUserRole = localStorage.getItem('slurm_user_role') || 'admin';
+let currentUserRole = null;          // 由服务端 JWT 决定（登录后下发），客户端不再作为信任源
+let authToken = localStorage.getItem('ails_token') || null;
 let perfMetricsChart = null;
 let partitionChart = null;
 
@@ -15,18 +16,49 @@ document.addEventListener('DOMContentLoaded', () => {
   initGauges(0, 0, 0, 0);
   initPartitionChart([], []);
   initPerfMetricsChart();
-  
+  installFetchAuthWrapper(); // 注入 Bearer、剥离 X-User-Role、401 处理
+
+  // 已登录（token 可解析）→ 进入应用；否则弹出登录层
+  if (authToken) {
+    const info = decodeToken(authToken);
+    if (info && info.role) {
+      currentUserRole = info.role;
+      enterApp();
+      return;
+    }
+    authToken = null;
+    localStorage.removeItem('ails_token');
+  }
+  showLoginOverlay();
+});
+
+/* ============ 认证桥（过渡，React 迁移后移除）============ */
+/* 角色由服务端 JWT claims 权威；header 的 <select> 仅切换 UI 视图用于对比预览，
+   不影响服务端鉴权（member 把视图切到 admin 仍会被服务端 403）。 */
+
+// 解码 JWT payload（仅取 role 用于 UI；签名由服务端校验）
+function decodeToken(token) {
+  try {
+    const p = token.split('.')[1];
+    return JSON.parse(atob(p.replace(/-/g, '+').replace(/_/g, '/')));
+  } catch (e) { return null; }
+}
+
+function enterApp() {
+  hideLoginOverlay();
   const roleSelect = document.getElementById('user-role-select');
   if (roleSelect) roleSelect.value = currentUserRole;
   applyUserRoleUI(currentUserRole);
+  startPolling();
+}
 
+function startPolling() {
   fetchSlurmStatus();
   fetchSlurmNodes();
   fetchSlurmJobs();
   fetchSlurmPartitions();
   fetchContainerWorkspaces();
   fetchBillingUsage();
-
   setInterval(() => {
     fetchSlurmStatus();
     fetchSlurmNodes();
@@ -35,14 +67,84 @@ document.addEventListener('DOMContentLoaded', () => {
     fetchContainerWorkspaces();
     fetchBillingUsage();
   }, 5000);
-});
+}
 
-/* 四级 RBAC 权限与 UI 动态视角切换 */
+async function doLogin() {
+  const u = (document.getElementById('login-username') || {}).value || '';
+  const p = (document.getElementById('login-password') || {}).value || '';
+  const err = document.getElementById('login-error');
+  if (err) err.textContent = '';
+  try {
+    const resp = await fetch('/api/v1/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: u, password: p, orgSlug: 'hpc-lab' })
+    });
+    if (!resp.ok) {
+      if (err) err.textContent = '用户名或密码错误';
+      return;
+    }
+    const data = await resp.json();
+    authToken = (data && data.token) || null;
+    if (!authToken) { if (err) err.textContent = '登录失败：未返回令牌'; return; }
+    localStorage.setItem('ails_token', authToken);
+    currentUserRole = (data.user && data.user.role) || 'member';
+    enterApp();
+  } catch (e) {
+    if (err) err.textContent = '登录请求失败：' + e.message;
+  }
+}
+
+function logout() {
+  authToken = null;
+  localStorage.removeItem('ails_token');
+  showLoginOverlay();
+}
+
+function showLoginOverlay() {
+  const ov = document.getElementById('auth-overlay');
+  if (ov) ov.style.display = 'flex';
+}
+function hideLoginOverlay() {
+  const ov = document.getElementById('auth-overlay');
+  if (ov) ov.style.display = 'none';
+}
+
+// 401：清 token、重弹登录（幂等，避免循环）
+function handleSessionExpired() {
+  if (authToken === null) return;
+  authToken = null;
+  localStorage.removeItem('ails_token');
+  showLoginOverlay();
+  showToast('会话已过期，请重新登录', 'warn');
+}
+
+// 全局 fetch 包装：自动注入 Authorization、剥离历史可伪造的 X-User-Role 头、401 处理。
+// 这样无需逐个改 14 个 fetch 调用点与 7 处 X-User-Role 站点。
+function installFetchAuthWrapper() {
+  const _origFetch = window.fetch;
+  window.fetch = function (input, init) {
+    init = init || {};
+    const headers = new Headers(init.headers || {});
+    if (authToken && !headers.has('Authorization')) {
+      headers.set('Authorization', 'Bearer ' + authToken);
+    }
+    headers.delete('X-User-Role'); // 历史可伪造头一律剥离
+    init.headers = headers;
+    const url = typeof input === 'string' ? input : ((input && input.url) || '');
+    return _origFetch.call(this, input, init).then(resp => {
+      if (resp.status === 401 && !url.includes('/auth/login')) handleSessionExpired();
+      return resp;
+    });
+  };
+}
+
+/* 四级 RBAC 视角切换 —— 仅切换 UI 视图用于对比预览。
+   不再写 localStorage、不作信任源；实际鉴权以服务端 JWT claims 为权威。 */
 function switchUserRole(role) {
   currentUserRole = role;
-  localStorage.setItem('slurm_user_role', role);
   applyUserRoleUI(role);
-  showToast(`Switched Role View to: ${getRoleDisplayName(role)}`, 'info');
+  showToast(`已切换视图（仅预览，权限以服务端为准）：${getRoleDisplayName(role)}`, 'info');
   renderDedicatedNodesTable();
   renderDedicatedJobsTable();
 }
