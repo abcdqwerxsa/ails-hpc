@@ -11,17 +11,54 @@ import (
 	"time"
 )
 
-var secretKey = []byte("ails-hpc-secret-key-production-2026")
+// jwtSecret 由 cmd/apiserver 在启动时通过 SetSecret 注入（源自 AILS_JWT_SECRET）。
+// 留空即视为未配置：GenerateToken/VerifyToken 会返回错误，杜绝在无密钥状态下
+// 签发或信任令牌。
+var jwtSecret []byte
 
+// tokenTTL access token 生命周期，默认 24h；可由 SetTokenTTL 覆盖（Phase D 从 config 注入）。
+var tokenTTL = 24 * time.Hour
+
+const (
+	jwtIssuer  = "ails-hpc"
+	jwtAudience = "ails-hpc"
+)
+
+// SetSecret 注入 JWT 签名密钥（HS256）。必须在服务启动、签发或校验任何令牌前调用一次。
+func SetSecret(b []byte) {
+	jwtSecret = make([]byte, len(b))
+	copy(jwtSecret, b)
+}
+
+// SetTokenTTL 覆盖默认 token 生命周期（仅正数生效）。
+func SetTokenTTL(d time.Duration) {
+	if d > 0 {
+		tokenTTL = d
+	}
+}
+
+// Claims 描述 access token 的载荷。Role 为权威角色（admin/ops_admin/tenant_admin/member）。
 type Claims struct {
 	Username string `json:"username"`
-	Role     string `json:"role"` // admin, member, viewer
+	Role     string `json:"role"` // admin / ops_admin / tenant_admin / member
 	OrgSlug  string `json:"orgSlug"`
 	TenantNS string `json:"tenantNs"`
+	Iss      string `json:"iss"`
+	Aud      string `json:"aud"`
 	Exp      int64  `json:"exp"`
 }
 
+// GenerateToken 用当前 tokenTTL 签发一个新的 access token。
 func GenerateToken(username, role, orgSlug, tenantNs string) (string, error) {
+	return GenerateTokenWithTTL(username, role, orgSlug, tenantNs, tokenTTL)
+}
+
+// GenerateTokenWithTTL 用显式 TTL 签发 access token（测试用于构造过期/将过期令牌）。
+func GenerateTokenWithTTL(username, role, orgSlug, tenantNs string, ttl time.Duration) (string, error) {
+	if len(jwtSecret) == 0 {
+		return "", errors.New("jwt secret not configured")
+	}
+
 	header := map[string]string{"alg": "HS256", "typ": "JWT"}
 	headerJSON, _ := json.Marshal(header)
 	headerB64 := base64.RawURLEncoding.EncodeToString(headerJSON)
@@ -31,27 +68,34 @@ func GenerateToken(username, role, orgSlug, tenantNs string) (string, error) {
 		Role:     role,
 		OrgSlug:  orgSlug,
 		TenantNS: tenantNs,
-		Exp:      time.Now().Add(24 * time.Hour).Unix(),
+		Iss:      jwtIssuer,
+		Aud:      jwtAudience,
+		Exp:      time.Now().Add(ttl).Unix(),
 	}
 	claimsJSON, _ := json.Marshal(claims)
 	claimsB64 := base64.RawURLEncoding.EncodeToString(claimsJSON)
 
 	unsignedToken := fmt.Sprintf("%s.%s", headerB64, claimsB64)
-	h := hmac.New(sha256.New, secretKey)
+	h := hmac.New(sha256.New, jwtSecret)
 	h.Write([]byte(unsignedToken))
 	signatureB64 := base64.RawURLEncoding.EncodeToString(h.Sum(nil))
 
 	return fmt.Sprintf("%s.%s", unsignedToken, signatureB64), nil
 }
 
+// VerifyToken 校验签名、过期时间与签发方/受众，返回 Claims。
 func VerifyToken(tokenStr string) (*Claims, error) {
+	if len(jwtSecret) == 0 {
+		return nil, errors.New("jwt secret not configured")
+	}
+
 	parts := strings.Split(tokenStr, ".")
 	if len(parts) != 3 {
 		return nil, errors.New("invalid token format")
 	}
 
 	unsignedToken := fmt.Sprintf("%s.%s", parts[0], parts[1])
-	h := hmac.New(sha256.New, secretKey)
+	h := hmac.New(sha256.New, jwtSecret)
 	h.Write([]byte(unsignedToken))
 	expectedSig := base64.RawURLEncoding.EncodeToString(h.Sum(nil))
 
@@ -71,6 +115,14 @@ func VerifyToken(tokenStr string) (*Claims, error) {
 
 	if time.Now().Unix() > claims.Exp {
 		return nil, errors.New("token expired")
+	}
+
+	// 校验签发方/受众，防止跨服务令牌混用（旧令牌无 iss/aud 时放行）
+	if claims.Iss != "" && claims.Iss != jwtIssuer {
+		return nil, errors.New("invalid token issuer")
+	}
+	if claims.Aud != "" && claims.Aud != jwtAudience {
+		return nil, errors.New("invalid token audience")
 	}
 
 	return &claims, nil

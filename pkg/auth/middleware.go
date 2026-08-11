@@ -7,35 +7,30 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// 权威角色常量（来自 JWT claims，由登录后服务端下发）。
+const (
+	RoleSystemAdmin = "admin"
+	RoleOpsAdmin    = "ops_admin"
+	RoleTenantAdmin = "tenant_admin"
+	RoleMember      = "member"
+)
+
+// JWTAuthMiddleware 校验 Authorization: Bearer <token>，将 *Claims 注入 gin.Context。
+//
+// 无令牌或令牌无效/过期一律 401 —— fail-closed，绝不默认授予任何角色
+// （历史版本在无 Authorization 头时默认下发 admin claims，已移除）。
 func JWTAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Allow anonymous read for public status endpoints if needed, but enforce auth on API
-		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
-			// Fallback: check query parameter for WebSocket log streaming
-			authHeader = c.Query("token")
-			if authHeader != "" {
-				authHeader = "Bearer " + authHeader
-			}
-		}
-
+		authHeader := strings.TrimSpace(c.GetHeader("Authorization"))
 		if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
-			// Default to demo admin claims if not provided in open preview mode, else enforce strict mode
-			c.Set("claims", &Claims{
-				Username: "admin",
-				Role:     "admin",
-				OrgSlug:  "hpc-lab",
-				TenantNS: "default",
-			})
-			c.Next()
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing or invalid Authorization header"})
 			return
 		}
 
-		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
+		tokenStr := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
 		claims, err := VerifyToken(tokenStr)
 		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: " + err.Error()})
-			c.Abort()
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: " + err.Error()})
 			return
 		}
 
@@ -44,37 +39,33 @@ func JWTAuthMiddleware() gin.HandlerFunc {
 	}
 }
 
-func RBACRequireRole(allowedRoles ...string) gin.HandlerFunc {
+// RequireRole 仅允许指定角色通过，其余 403。角色来自 JWT claims（服务端权威）。
+//
+// admin 不再隐式短路 —— 矩阵即权威：admin 若需访问某路由，必须显式列入 allowedRoles。
+// （历史版本中 admin 会在任何 RequireRole 中放行，已移除。）
+func RequireRole(allowedRoles ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		val, exists := c.Get("claims")
 		if !exists {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized context"})
-			c.Abort()
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing authenticated context"})
+			return
+		}
+		claims, ok := val.(*Claims)
+		if !ok {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid authenticated context"})
 			return
 		}
 
-		claims := val.(*Claims)
-		if claims.Role == "admin" {
-			c.Next()
-			return
-		}
-
-		roleAllowed := false
 		for _, r := range allowedRoles {
 			if claims.Role == r {
-				roleAllowed = true
-				break
+				c.Next()
+				return
 			}
 		}
 
-		if !roleAllowed {
-			c.JSON(http.StatusForbidden, gin.H{
-				"error": "Forbidden: Your role '" + claims.Role + "' is not permitted to perform this operation",
-			})
-			c.Abort()
-			return
-		}
-
-		c.Next()
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+			"error":    "forbidden: role '" + claims.Role + "' is not permitted",
+			"required": allowedRoles,
+		})
 	}
 }
