@@ -4,9 +4,15 @@ import (
 	"flag"
 	"log"
 	"net/http"
+	"os"
 
 	"ails-hpc/pkg/apis"
 	"ails-hpc/pkg/auth"
+	"ails-hpc/pkg/services/billing"
+	"ails-hpc/pkg/services/containers"
+	"ails-hpc/pkg/services/jobs"
+	"ails-hpc/pkg/services/nodes"
+	"ails-hpc/pkg/slurmrest"
 
 	"github.com/gin-gonic/gin"
 	"k8s.io/client-go/dynamic"
@@ -46,11 +52,29 @@ func main() {
 		c.Next()
 	})
 
+	slurmRESTURL := os.Getenv("SLURMRESTD_URL")
+	if slurmRESTURL == "" {
+		slurmRESTURL = "http://192.168.20.226:6820"
+	}
+
 	jobHandler := &apis.JobHandler{DynamicClient: dynamicClient}
 	queueHandler := &apis.QueueHandler{DynamicClient: dynamicClient}
 	logHandler := &apis.LogHandler{KubeClient: kubeClient}
 	authHandler := &apis.AuthHandler{}
-	slurmHandler := apis.NewSlurmHandler("http://192.168.20.226:6820", "hpcuser")
+	slurmHandler := apis.NewSlurmHandler(slurmRESTURL, "hpcuser")
+
+	billingService := billing.NewBillingService()
+	billingHandler := billing.NewBillingHandler(billingService)
+
+	slurmClient := slurmrest.NewClient(slurmRESTURL, "hpcuser", "")
+	jobsService := jobs.NewJobServiceWithBilling(slurmClient, billingService)
+	jobsHandler := jobs.NewJobHandler(jobsService)
+
+	nodesService := nodes.NewNodeService(slurmClient)
+	nodesHandler := nodes.NewNodeHandler(nodesService)
+
+	containersService := containers.NewContainerServiceWithBilling(billingService)
+	containersHandler := containers.NewContainerHandler(containersService)
 
 	// Public Auth & Slurm Monitoring Endpoints
 	r.POST("/api/v1/auth/login", authHandler.Login)
@@ -60,10 +84,22 @@ func main() {
 	slurmGroup := r.Group("/api/v1/slurm")
 	{
 		slurmGroup.GET("/ping", slurmHandler.GetStatus)
-		slurmGroup.GET("/nodes", slurmHandler.GetNodes)
-		slurmGroup.GET("/jobs", slurmHandler.GetJobs)
+		slurmGroup.GET("/nodes", nodesHandler.GetNodes)
+		slurmGroup.POST("/nodes/:name/state", auth.RequireRole("admin"), nodesHandler.UpdateNodeState)
+
+		slurmGroup.GET("/jobs", jobsHandler.ListJobs)
+		slurmGroup.POST("/jobs/submit", jobsHandler.SubmitJob)
+		slurmGroup.POST("/jobs/:id/cancel", jobsHandler.CancelJob)
+		slurmGroup.POST("/jobs/:id/hold", jobsHandler.HoldJob)
+		slurmGroup.POST("/jobs/:id/requeue", jobsHandler.RequeueJob)
+
+		slurmGroup.POST("/containers/launch", containersHandler.LaunchContainer)
+		slurmGroup.GET("/containers/list", containersHandler.ListContainers)
+		slurmGroup.DELETE("/containers/:id", containersHandler.RecycleContainer)
+
 		slurmGroup.GET("/partitions", slurmHandler.GetPartitions)
-		slurmGroup.POST("/launch", slurmHandler.LaunchDevEnvironment)
+		slurmGroup.POST("/launch", containersHandler.LaunchContainer)
+		billingHandler.RegisterRoutes(slurmGroup)
 	}
 
 	// Serve Neumorphic Web Dashboard Static Portal

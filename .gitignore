@@ -8,3 +8,6 @@ bin/
 
 # Logs
 *.log
+
+# Agent orchestration transcripts (session work product, not source)
+.agents/
