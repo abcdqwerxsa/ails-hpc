@@ -40,9 +40,6 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.UsersFile != "config/users.yaml" {
 		t.Errorf("UsersFile default = %q", cfg.UsersFile)
 	}
-	if cfg.DeployHost != "192.168.20.226" {
-		t.Errorf("DeployHost default = %q", cfg.DeployHost)
-	}
 	if cfg.TokenTTL != 24*time.Hour {
 		t.Errorf("TokenTTL default = %v, want 24h", cfg.TokenTTL)
 	}
@@ -55,7 +52,6 @@ func TestLoad_Overrides(t *testing.T) {
 	t.Setenv("AILS_JWT_SECRET", "sekret")
 	t.Setenv("AILS_PORT", "9999")
 	t.Setenv("SLURMRESTD_URL", "http://slurm:6820")
-	t.Setenv("AILS_DEPLOY_HOST", "10.0.0.5")
 	t.Setenv("AILS_TOKEN_TTL", "2h")
 
 	cfg, err := config.Load()
@@ -63,7 +59,7 @@ func TestLoad_Overrides(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	if cfg.ListenPort != "9999" || cfg.SlurmRESTDURL != "http://slurm:6820" ||
-		cfg.DeployHost != "10.0.0.5" || cfg.TokenTTL != 2*time.Hour {
+		cfg.TokenTTL != 2*time.Hour {
 		t.Fatalf("env overrides not applied: %+v", cfg)
 	}
 }

@@ -68,6 +68,9 @@ func NewRouter(h Handlers) *gin.Engine {
 		billingRead := auth.RequireRole(auth.RoleMember, auth.RoleTenantAdmin, auth.RoleOpsAdmin)
 		slurm.GET("/billing/usage", billingRead, h.Billing.GetUsage)
 		slurm.GET("/billing/export", billingRead, h.Billing.ExportReport)
+
+		// Web-IDE 反向代理：/api/v1/ide/<session>/* → 计算节点上的 Jupyter/code-server
+		api.Any("/ide/:session/*any", memberWrite, h.Containers.ProxyIDE)
 	}
 
 	// 静态门户

@@ -21,8 +21,6 @@ import (
 //   - AILS_USERS_FILE            用户库 YAML，默认 config/users.yaml
 //   - SLURMRESTD_URL             slurmrestd 地址，默认 http://192.168.20.226:6820
 //   - AILS_SLURM_USER            slurm 用户名，默认 hpcuser
-//   - AILS_DEPLOY_HOST           容器 IDE 入口主机，默认 192.168.20.226
-//   - AILS_CONTAINER_JWT_SECRET  （可选）容器代理令牌密钥
 //   - AILS_TOKEN_TTL / AILS_PORT 可选
 func main() {
 	portFlag := flag.String("port", "", "Port for API server (overrides AILS_PORT; default 8090)")
@@ -36,10 +34,6 @@ func main() {
 	// 注入签名密钥与 TTL（fail-closed：无密钥已在 config.Load 阶段拒绝启动）
 	auth.SetSecret(cfg.JWTSecret)
 	auth.SetTokenTTL(cfg.TokenTTL)
-
-	// 容器 IDE 入口主机与代理密钥（替代 jwt_proxy.go 历史硬编码）
-	containers.SetDeployHost(cfg.DeployHost)
-	containers.SetContainerJWTSecret(cfg.ContainerJWTSecret)
 
 	userStore, err := auth.LoadUserStore(cfg.UsersFile)
 	if err != nil {
@@ -55,7 +49,7 @@ func main() {
 		Cluster:    cluster.NewClusterHandler(cluster.NewClusterService(slurmClient)),
 		Nodes:      nodes.NewNodeHandler(nodes.NewNodeService(slurmClient)),
 		Jobs:       jobs.NewJobHandler(jobs.NewJobService(slurmClient)),
-		Containers: containers.NewContainerHandler(containers.NewContainerService()),
+		Containers: containers.NewContainerHandler(containers.NewContainerService(slurmClient)),
 		Billing:    billing.NewBillingHandler(billingService),
 	}
 

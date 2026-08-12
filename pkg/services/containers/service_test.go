@@ -1,218 +1,237 @@
 package containers_test
 
 import (
-	"bytes"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	"ails-hpc/pkg/services/containers"
-	"github.com/gin-gonic/gin"
+	"ails-hpc/pkg/slurmrest"
 )
 
-func setupContainerTestRouter() (*gin.Engine, containers.ContainerService) {
-	gin.SetMode(gin.TestMode)
-	service := containers.NewContainerService()
-	handler := containers.NewContainerHandler(service)
+// --- fakes ---
 
-	router := gin.New()
-	router.Use(gin.Recovery())
-
-	slurmGroup := router.Group("/api/v1/slurm")
-	{
-		slurmGroup.POST("/containers/launch", handler.LaunchContainer)
-		slurmGroup.GET("/containers/list", handler.ListContainers)
-		slurmGroup.DELETE("/containers/:id", handler.RecycleContainer)
-	}
-
-	return router, service
+type fakeJobsAPI struct {
+	lastSubmit *slurmrest.SlurmJobSubmitReq
+	submitResp *slurmrest.SlurmJobSubmitResp
+	submitErr  error
+	jobs       *slurmrest.JobsResponse
+	cancelled  []int
+	cancelErr  error
 }
 
-func TestContainers_Launch_VSCodeAndJupyter(t *testing.T) {
-	router, _ := setupContainerTestRouter()
-
-	// 1. Launch VSCode
-	bodyVSCode, _ := json.Marshal(containers.ContainerLaunchRequest{
-		EnvType:  "vscode",
-		CPUs:     4,
-		MemoryMB: 8192,
-	})
-	w1 := httptest.NewRecorder()
-	req1, _ := http.NewRequest("POST", "/api/v1/slurm/containers/launch", bytes.NewBuffer(bodyVSCode))
-	req1.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(w1, req1)
-
-	if w1.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d. Body: %s", w1.Code, w1.Body.String())
+func (f *fakeJobsAPI) SubmitJob(req *slurmrest.SlurmJobSubmitReq) (*slurmrest.SlurmJobSubmitResp, error) {
+	f.lastSubmit = req
+	if f.submitErr != nil {
+		return nil, f.submitErr
 	}
-
-	var resp1 containers.ContainerLaunchResponse
-	if err := json.Unmarshal(w1.Body.Bytes(), &resp1); err != nil {
-		t.Fatalf("failed to unmarshal response: %v", err)
+	return f.submitResp, nil
+}
+func (f *fakeJobsAPI) GetJobs() (*slurmrest.JobsResponse, error) {
+	if f.jobs == nil {
+		return &slurmrest.JobsResponse{}, nil
 	}
-	if resp1.ContainerID == "" || resp1.Token == "" || resp1.WebURL == "" {
-		t.Errorf("expected valid container_id, token, and web_url, got %v", resp1)
-	}
-	if !strings.Contains(resp1.WebURL, "vscode") {
-		t.Errorf("expected web_url to contain 'vscode', got %s", resp1.WebURL)
-	}
-
-	// 2. Launch JupyterLab
-	bodyJupyter, _ := json.Marshal(containers.ContainerLaunchRequest{
-		EnvType:  "jupyter",
-		CPUs:     2,
-		MemoryMB: 4096,
-	})
-	w2 := httptest.NewRecorder()
-	req2, _ := http.NewRequest("POST", "/api/v1/slurm/containers/launch", bytes.NewBuffer(bodyJupyter))
-	req2.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(w2, req2)
-
-	if w2.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", w2.Code)
-	}
-
-	var resp2 containers.ContainerLaunchResponse
-	_ = json.Unmarshal(w2.Body.Bytes(), &resp2)
-	if resp2.EnvType != "jupyter" || !strings.Contains(resp2.WebURL, "lab") {
-		t.Errorf("expected env_type jupyter and lab web_url, got %v", resp2)
-	}
+	return f.jobs, nil
+}
+func (f *fakeJobsAPI) CancelJob(jobID int) error {
+	f.cancelled = append(f.cancelled, jobID)
+	return f.cancelErr
 }
 
-func TestContainers_Launch_UnsupportedEnvType(t *testing.T) {
-	router, _ := setupContainerTestRouter()
-
-	body, _ := json.Marshal(containers.ContainerLaunchRequest{
-		EnvType: "eclipse-ide",
-	})
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/v1/slurm/containers/launch", bytes.NewBuffer(body))
-	req.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected status 400 Bad Request, got %d", w.Code)
-	}
+type fakeMeta struct {
+	m       map[string]containers.SessionMeta
+	deleted []string
+	readErr error
 }
 
-func TestContainers_Launch_NegativeResources(t *testing.T) {
-	router, _ := setupContainerTestRouter()
-
-	body, _ := json.Marshal(containers.ContainerLaunchRequest{
-		EnvType:  "vscode",
-		CPUs:     -10,
-		MemoryMB: -4096,
-	})
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/v1/slurm/containers/launch", bytes.NewBuffer(body))
-	req.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected status 400 Bad Request, got %d", w.Code)
+func (f *fakeMeta) ReadAll() (map[string]containers.SessionMeta, error) {
+	if f.readErr != nil {
+		return nil, f.readErr
 	}
+	return f.m, nil
+}
+func (f *fakeMeta) Delete(sid string) error {
+	f.deleted = append(f.deleted, sid)
+	delete(f.m, sid)
+	return nil
 }
 
-func TestContainers_Launch_ExceedingQuotaLimit(t *testing.T) {
-	router, _ := setupContainerTestRouter()
+// jrow + jobsResp 构造 *slurmrest.JobsResponse（元素匿名结构须与 slurmrest 一致）
+type jrow struct {
+	id, cpus int
+	name, state, nodes string
+	submit             int64
+}
 
-	body, _ := json.Marshal(containers.ContainerLaunchRequest{
-		EnvType:  "vscode",
-		CPUs:     9999,
-		MemoryMB: 9999999,
-	})
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/v1/slurm/containers/launch", bytes.NewBuffer(body))
-	req.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(w, req)
+func jobsResp(rows ...jrow) *slurmrest.JobsResponse {
+	r := &slurmrest.JobsResponse{}
+	for _, x := range rows {
+		r.Jobs = append(r.Jobs, struct {
+			JobID      int    `json:"job_id"`
+			Name       string `json:"name"`
+			Partition  string `json:"partition"`
+			JobState   string `json:"job_state"`
+			Nodes      string `json:"nodes"`
+			TimeLimit  int    `json:"time_limit"`
+			SubmitTime int64  `json:"submit_time"`
+		}{JobID: x.id, Name: x.name, JobState: x.state, Nodes: x.nodes, SubmitTime: x.submit})
+	}
+	return r
+}
 
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected status 400 Bad Request for exceeding quota limit, got %d", w.Code)
+func newSvc(jobs *fakeJobsAPI, meta *fakeMeta) containers.ContainerService {
+	return containers.NewContainerServiceWithDeps(jobs, meta)
+}
+
+func containsStr(s []string, v string) bool {
+	for _, x := range s {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
+// --- LaunchContainer ---
+
+func TestLaunchContainer_SubmitsJobWithScript(t *testing.T) {
+	jobs := &fakeJobsAPI{submitResp: &slurmrest.SlurmJobSubmitResp{JobID: 42}}
+	svc := newSvc(jobs, &fakeMeta{m: map[string]containers.SessionMeta{}})
+
+	resp, err := svc.LaunchContainer(context.Background(), &containers.ContainerLaunchRequest{EnvType: "jupyter", CPUs: 4, MemoryMB: 8192, Nodes: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.ContainerID == "" || resp.Status != "STARTING" {
+		t.Fatalf("bad response: %+v", resp)
+	}
+	if want := "/api/v1/ide/" + resp.ContainerID + "/"; resp.WebURL != want {
+		t.Errorf("web_url=%q want %q", resp.WebURL, want)
+	}
+	if jobs.lastSubmit == nil {
+		t.Fatal("SubmitJob not called")
+	}
+	if jobs.lastSubmit.Job.Name != "jupyter-ide-"+resp.ContainerID {
+		t.Errorf("job name=%q", jobs.lastSubmit.Job.Name)
+	}
+	if jobs.lastSubmit.Job.CpusPerTask != 4 || jobs.lastSubmit.Job.Partition != "debug" {
+		t.Errorf("job spec mismatch: %+v", jobs.lastSubmit.Job)
+	}
+	s := jobs.lastSubmit.Script
+	for _, want := range []string{"--ServerApp.base_url=", "/shared/sessions/", "node_ip", "jupyter lab"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("script missing %q:\n%s", want, s)
+		}
 	}
 }
 
-func TestContainers_ListActiveContainers(t *testing.T) {
-	router, _ := setupContainerTestRouter()
-
-	// Launch two containers
-	b1, _ := json.Marshal(containers.ContainerLaunchRequest{EnvType: "vscode"})
-	r1, _ := http.NewRequest("POST", "/api/v1/slurm/containers/launch", bytes.NewBuffer(b1))
-	r1.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(httptest.NewRecorder(), r1)
-
-	b2, _ := json.Marshal(containers.ContainerLaunchRequest{EnvType: "jupyter"})
-	r2, _ := http.NewRequest("POST", "/api/v1/slurm/containers/launch", bytes.NewBuffer(b2))
-	r2.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(httptest.NewRecorder(), r2)
-
-	// List active containers
-	wList := httptest.NewRecorder()
-	reqList, _ := http.NewRequest("GET", "/api/v1/slurm/containers/list", nil)
-	router.ServeHTTP(wList, reqList)
-
-	if wList.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", wList.Code)
-	}
-
-	var listResp containers.ContainerListResponse
-	if err := json.Unmarshal(wList.Body.Bytes(), &listResp); err != nil {
-		t.Fatalf("failed to unmarshal list response: %v", err)
-	}
-
-	if len(listResp.Containers) < 2 {
-		t.Fatalf("expected at least 2 active containers, got %d", len(listResp.Containers))
+func TestLaunchContainer_RejectsBadEnvType(t *testing.T) {
+	svc := newSvc(&fakeJobsAPI{}, &fakeMeta{m: map[string]containers.SessionMeta{}})
+	_, err := svc.LaunchContainer(context.Background(), &containers.ContainerLaunchRequest{EnvType: "matlab"})
+	if !errors.Is(err, containers.ErrUnsupportedEnvType) {
+		t.Fatalf("want ErrUnsupportedEnvType, got %v", err)
 	}
 }
 
-func TestContainers_RecycleContainerInstance(t *testing.T) {
-	router, _ := setupContainerTestRouter()
-
-	// Launch
-	body, _ := json.Marshal(containers.ContainerLaunchRequest{EnvType: "vscode"})
-	wLaunch := httptest.NewRecorder()
-	reqLaunch, _ := http.NewRequest("POST", "/api/v1/slurm/containers/launch", bytes.NewBuffer(body))
-	reqLaunch.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(wLaunch, reqLaunch)
-
-	var launchResp containers.ContainerLaunchResponse
-	_ = json.Unmarshal(wLaunch.Body.Bytes(), &launchResp)
-	ctrID := launchResp.ContainerID
-
-	// Recycle
-	wRecycle := httptest.NewRecorder()
-	reqRecycle, _ := http.NewRequest("DELETE", "/api/v1/slurm/containers/"+ctrID, nil)
-	router.ServeHTTP(wRecycle, reqRecycle)
-
-	if wRecycle.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", wRecycle.Code)
-	}
-
-	var recycleResp containers.ContainerRecycleResponse
-	_ = json.Unmarshal(wRecycle.Body.Bytes(), &recycleResp)
-	if recycleResp.Status != "TERMINATED" {
-		t.Errorf("expected status TERMINATED, got %s", recycleResp.Status)
-	}
-
-	// Recycle again (should return 404)
-	wRecycle2 := httptest.NewRecorder()
-	reqRecycle2, _ := http.NewRequest("DELETE", "/api/v1/slurm/containers/"+ctrID, nil)
-	router.ServeHTTP(wRecycle2, reqRecycle2)
-
-	if wRecycle2.Code != http.StatusNotFound {
-		t.Fatalf("expected status 404 Not Found when recycling already recycled container, got %d", wRecycle2.Code)
+func TestLaunchContainer_SubmitError(t *testing.T) {
+	jobs := &fakeJobsAPI{submitErr: errors.New("slurmrestd down")}
+	svc := newSvc(jobs, &fakeMeta{m: map[string]containers.SessionMeta{}})
+	if _, err := svc.LaunchContainer(context.Background(), &containers.ContainerLaunchRequest{EnvType: "jupyter"}); err == nil {
+		t.Fatal("want error when SubmitJob fails")
 	}
 }
 
-func TestContainers_RecycleNonExistentContainer(t *testing.T) {
-	router, _ := setupContainerTestRouter()
+// --- ListActiveContainers ---
 
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("DELETE", "/api/v1/slurm/containers/non_existent_ctr_999", nil)
-	router.ServeHTTP(w, req)
+func TestListActiveContainers_JobStateFilter(t *testing.T) {
+	jobs := &fakeJobsAPI{jobs: jobsResp(
+		jrow{id: 1001, name: "jupyter-ide-aaa", state: "RUNNING", nodes: "node1", submit: 1},
+		jrow{id: 1002, name: "vscode-ide-bbb", state: "PENDING", submit: 2},
+		jrow{id: 1003, name: "jupyter-ide-ccc", state: "COMPLETED", nodes: "node3", submit: 3}, // STOPPED → 不列
+		jrow{id: 1004, name: "unrelated-job", state: "RUNNING", nodes: "node2", submit: 4},     // 非 IDE → 不列
+	)}
+	meta := &fakeMeta{m: map[string]containers.SessionMeta{
+		"aaa": {SessionID: "aaa", NodeIP: "10.0.0.1", Port: 8900, CPUs: 2, MemoryMB: 4096, Nodes: 1},
+		"bbb": {SessionID: "bbb", NodeIP: "10.0.0.2", Port: 8901},
+	}}
+	svc := newSvc(jobs, meta)
 
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("expected status 404 Not Found for non-existent container, got %d", w.Code)
+	list, err := svc.ListActiveContainers(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("want 2 active sessions, got %d: %+v", len(list), list)
+	}
+	byID := map[string]*containers.ContainerInstance{}
+	for _, c := range list {
+		byID[c.ID] = c
+	}
+	if byID["aaa"] == nil || byID["aaa"].Status != "RUNNING" || byID["aaa"].Node != "node1" || byID["aaa"].CPUs != 2 {
+		t.Errorf("aaa mismatch: %+v", byID["aaa"])
+	}
+	if byID["bbb"] == nil || byID["bbb"].Status != "STARTING" {
+		t.Errorf("bbb mismatch: %+v", byID["bbb"])
+	}
+}
+
+// --- RecycleContainer ---
+
+func TestRecycleContainer_CancelsJobAndDeletesMeta(t *testing.T) {
+	jobs := &fakeJobsAPI{jobs: jobsResp(jrow{id: 1001, name: "jupyter-ide-aaa", state: "RUNNING", nodes: "node1", submit: 1})}
+	meta := &fakeMeta{m: map[string]containers.SessionMeta{"aaa": {SessionID: "aaa", JobID: 1001}}}
+	svc := newSvc(jobs, meta)
+
+	if _, err := svc.RecycleContainer(context.Background(), "aaa"); err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs.cancelled) != 1 || jobs.cancelled[0] != 1001 {
+		t.Errorf("want CancelJob(1001), got %v", jobs.cancelled)
+	}
+	if !containsStr(meta.deleted, "aaa") {
+		t.Errorf("meta not deleted: %v", meta.deleted)
+	}
+}
+
+func TestRecycleContainer_NotFound(t *testing.T) {
+	svc := newSvc(&fakeJobsAPI{}, &fakeMeta{m: map[string]containers.SessionMeta{}})
+	_, err := svc.RecycleContainer(context.Background(), "ghost")
+	if !errors.Is(err, containers.ErrContainerNotFound) {
+		t.Fatalf("want ErrContainerNotFound, got %v", err)
+	}
+}
+
+// --- ProxyTarget ---
+
+func TestProxyTarget_RunningReady(t *testing.T) {
+	jobs := &fakeJobsAPI{jobs: jobsResp(jrow{id: 1001, name: "jupyter-ide-aaa", state: "RUNNING", nodes: "node1", submit: 1})}
+	meta := &fakeMeta{m: map[string]containers.SessionMeta{"aaa": {SessionID: "aaa", NodeIP: "10.0.0.1", Port: 8900}}}
+	svc := newSvc(jobs, meta)
+
+	ip, port, status, err := svc.ProxyTarget(context.Background(), "aaa")
+	if err != nil || status != "RUNNING" || ip != "10.0.0.1" || port != 8900 {
+		t.Fatalf("proxy target: ip=%s port=%d status=%s err=%v", ip, port, status, err)
+	}
+}
+
+func TestProxyTarget_StartingStatus(t *testing.T) {
+	jobs := &fakeJobsAPI{jobs: jobsResp(jrow{id: 1002, name: "jupyter-ide-bbb", state: "PENDING", submit: 1})}
+	meta := &fakeMeta{m: map[string]containers.SessionMeta{"bbb": {SessionID: "bbb", NodeIP: "10.0.0.2", Port: 8901}}}
+	svc := newSvc(jobs, meta)
+	_, _, status, err := svc.ProxyTarget(context.Background(), "bbb")
+	if err != nil {
+		t.Fatalf("starting session should not error: %v", err)
+	}
+	if status != "STARTING" {
+		t.Errorf("status=%s want STARTING", status)
+	}
+}
+
+func TestProxyTarget_UnknownSession(t *testing.T) {
+	svc := newSvc(&fakeJobsAPI{}, &fakeMeta{m: map[string]containers.SessionMeta{}})
+	_, _, _, err := svc.ProxyTarget(context.Background(), "ghost")
+	if !errors.Is(err, containers.ErrContainerNotFound) {
+		t.Fatalf("want ErrContainerNotFound, got %v", err)
 	}
 }

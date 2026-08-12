@@ -25,9 +25,9 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-// runInSlurmctld 在 slurmctld 容器内执行给定命令：先本地 docker compose exec -T，
-// 失败则退回到 SSH 远程执行。返回 stdout。FetchToken 与 SacctQuery 共享此能力。
-func runInSlurmctld(args ...string) ([]byte, error) {
+// RunInSlurmctld 在 slurmctld 容器内执行给定命令：先本地 docker compose exec -T，
+// 失败则退回到 SSH 远程执行。返回 stdout。FetchToken、SacctQuery 与会话 meta 读写共享此能力。
+func RunInSlurmctld(args ...string) ([]byte, error) {
 	localArgs := append([]string{"compose", "-f", composeFile, "exec", "-T", slurmctldService}, args...)
 	if out, err := exec.Command("docker", localArgs...).Output(); err == nil {
 		return out, nil
@@ -46,7 +46,7 @@ func runInSlurmctld(args ...string) ([]byte, error) {
 
 // FetchToken 动态获取 Slurm JWT 身份令牌（默认用户 hpcuser，24h 有效）。
 func FetchToken() string {
-	out, err := runInSlurmctld("scontrol", "token", "username="+defaultSlurmUser, "lifespan=86400")
+	out, err := RunInSlurmctld("scontrol", "token", "username="+defaultSlurmUser, "lifespan=86400")
 	if err != nil {
 		return ""
 	}
@@ -61,7 +61,7 @@ func FetchToken() string {
 // SacctQuery 在 slurmctld 容器内执行 sacct 并返回原始 stdout，供调用方按
 // --parsable2 等格式解析（用于真实 SACCT 计费）。
 func (c *Client) SacctQuery(args ...string) ([]byte, error) {
-	return runInSlurmctld(append([]string{"sacct"}, args...)...)
+	return RunInSlurmctld(append([]string{"sacct"}, args...)...)
 }
 
 // Client 封装了与原生 slurmrestd REST API 交互的客户端

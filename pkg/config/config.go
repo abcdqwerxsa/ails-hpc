@@ -17,8 +17,6 @@ type Config struct {
 	SlurmRESTDURL      string        // SLURMRESTD_URL，默认 "http://192.168.20.226:6820"
 	SlurmUserName      string        // AILS_SLURM_USER，默认 "hpcuser"
 	UsersFile          string        // AILS_USERS_FILE，默认 "config/users.yaml"
-	DeployHost         string        // AILS_DEPLOY_HOST，默认 "192.168.20.226"（容器 IDE 入口 URL 主机）
-	ContainerJWTSecret []byte        // AILS_CONTAINER_JWT_SECRET，可选（容器代理令牌密钥；空则用包内兜底）
 }
 
 // Load 从环境变量读取配置。
@@ -33,8 +31,6 @@ func Load() (*Config, error) {
 		SlurmRESTDURL:      envOr("SLURMRESTD_URL", "http://192.168.20.226:6820"),
 		SlurmUserName:      envOr("AILS_SLURM_USER", "hpcuser"),
 		UsersFile:          envOr("AILS_USERS_FILE", "config/users.yaml"),
-		DeployHost:         envOr("AILS_DEPLOY_HOST", "192.168.20.226"),
-		ContainerJWTSecret: []byte(os.Getenv("AILS_CONTAINER_JWT_SECRET")),
 	}
 	if len(cfg.JWTSecret) == 0 {
 		return nil, errors.New("AILS_JWT_SECRET is required (set it to a random >=32-byte string)")
