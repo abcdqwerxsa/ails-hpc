@@ -11,23 +11,57 @@ import (
 	"time"
 )
 
-// FetchToken 动态获取 Slurm JWT 身份令牌
-func FetchToken() string {
-	cmd := exec.Command("docker", "compose", "-f", "/opt/slurm-cluster/docker-compose.yml", "exec", "slurmctld", "scontrol", "token", "username=hpcuser", "lifespan=86400")
-	out, err := cmd.Output()
-	if err != nil {
-		cmd = exec.Command("ssh", "-o", "BatchMode=yes", "root@192.168.20.226",
-			"docker compose -f /opt/slurm-cluster/docker-compose.yml exec slurmctld scontrol token username=hpcuser lifespan=86400")
-		out, _ = cmd.Output()
-	}
+// 集群接入点。apiserver 通常与 slurmctld 容器同机部署，走本地 docker compose exec；
+// 若不在同机（如远程开发），退回到 SSH 远程执行。
+const (
+	composeFile      = "/opt/slurm-cluster/docker-compose.yml"
+	slurmctldService = "slurmctld"
+	slurmSSHHost     = "root@192.168.20.226"
+	defaultSlurmUser = "hpcuser"
+)
 
-	lines := strings.Split(string(out), "\n")
-	for _, line := range lines {
+// shellQuote 对单个命令参数做单引号转义，供 SSH 远程拼接时安全传递。
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// runInSlurmctld 在 slurmctld 容器内执行给定命令：先本地 docker compose exec -T，
+// 失败则退回到 SSH 远程执行。返回 stdout。FetchToken 与 SacctQuery 共享此能力。
+func runInSlurmctld(args ...string) ([]byte, error) {
+	localArgs := append([]string{"compose", "-f", composeFile, "exec", "-T", slurmctldService}, args...)
+	if out, err := exec.Command("docker", localArgs...).Output(); err == nil {
+		return out, nil
+	}
+	quoted := make([]string, len(args))
+	for i, a := range args {
+		quoted[i] = shellQuote(a)
+	}
+	remote := fmt.Sprintf("docker compose -f %s exec -T %s %s", composeFile, slurmctldService, strings.Join(quoted, " "))
+	out, err := exec.Command("ssh", "-o", "BatchMode=yes", slurmSSHHost, remote).Output()
+	if err != nil {
+		return nil, fmt.Errorf("run in slurmctld (%s): %w", strings.Join(args, " "), err)
+	}
+	return out, nil
+}
+
+// FetchToken 动态获取 Slurm JWT 身份令牌（默认用户 hpcuser，24h 有效）。
+func FetchToken() string {
+	out, err := runInSlurmctld("scontrol", "token", "username="+defaultSlurmUser, "lifespan=86400")
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(out), "\n") {
 		if strings.HasPrefix(line, "SLURM_JWT=") {
 			return strings.TrimSpace(strings.TrimPrefix(line, "SLURM_JWT="))
 		}
 	}
 	return ""
+}
+
+// SacctQuery 在 slurmctld 容器内执行 sacct 并返回原始 stdout，供调用方按
+// --parsable2 等格式解析（用于真实 SACCT 计费）。
+func (c *Client) SacctQuery(args ...string) ([]byte, error) {
+	return runInSlurmctld(append([]string{"sacct"}, args...)...)
 }
 
 // Client 封装了与原生 slurmrestd REST API 交互的客户端
