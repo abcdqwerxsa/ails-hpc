@@ -1,0 +1,40 @@
+# AILS HPC Slurm Manager API server (apiserver) — systemd unit.
+#
+# 由 deploy/slurm-cluster/deploy_web_portal.sh 安装到 /etc/systemd/system/。
+# 运行为专用系统用户 ails；EnvironmentFile 提供 AILS_JWT_SECRET 等（fail-closed，缺则拒启）。
+# Type=exec + ExecStartPost 轮询 /healthz：systemctl start 阻塞到“真正在服务”为止。
+#
+# 常用：
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now ails-apiserver
+#   sudo systemctl restart ails-apiserver
+#   sudo systemctl status ails-apiserver
+#   sudo journalctl -u ails-apiserver -f
+# 端口改 AILS_PORT：把 ExecStart 的 -port 与 ExecStartPost 的探活端口一起改（后续可统一读环境变量）。
+
+[Unit]
+Description=AILS HPC Slurm Manager API server
+Documentation=file:///opt/slurm-cluster/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=ails
+Group=ails
+WorkingDirectory=/opt/slurm-cluster
+EnvironmentFile=/opt/slurm-cluster/.env
+ExecStart=/opt/slurm-cluster/bin/apiserver -port 8090
+# 启动后轮询 liveness 端点，最多等 30s（取代旧的 sleep 2 + ps 探测）
+ExecStartPost=/bin/sh -c 'for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8090/healthz >/dev/null && exit 0; sleep 1; done; exit 1'
+Restart=on-failure
+RestartSec=2
+# 硬化：apiserver 不写磁盘（slog→stdout→journald，仅读 .env + users.yaml），故 strict 无需 ReadWritePaths；
+# 保留对外网络以连 slurmrestd（不加 PrivateNetwork）。
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

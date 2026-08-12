@@ -13,33 +13,47 @@ cd "$SCRIPT_DIR"
 echo "1. Building Linux x86_64 apiserver binary..."
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/apiserver ./cmd/apiserver
 
-echo "2. Syncing apiserver binary, config/ & apps/web static assets to ${REMOTE_HOST}:${REMOTE_DIR}..."
+echo "2. Syncing apiserver binary, config/, apps/web static assets & systemd unit to ${REMOTE_HOST}:${REMOTE_DIR}..."
 ssh -o BatchMode=yes ${REMOTE_HOST} "mkdir -p ${REMOTE_DIR}/bin ${REMOTE_DIR}/apps/web ${REMOTE_DIR}/config"
 rsync -avz -e "ssh -o BatchMode=yes" bin/apiserver ${REMOTE_HOST}:${REMOTE_DIR}/bin/apiserver
 rsync -avz -e "ssh -o BatchMode=yes" config/   ${REMOTE_HOST}:${REMOTE_DIR}/config/
 rsync -avz -e "ssh -o BatchMode=yes" apps/web/  ${REMOTE_HOST}:${REMOTE_DIR}/apps/web/
+rsync -avz -e "ssh -o BatchMode=yes" deploy/slurm-cluster/ails-apiserver.service \
+    ${REMOTE_HOST}:/etc/systemd/system/ails-apiserver.service
 
-echo "3. Restarting Web Portal service on remote Slurm server (192.168.20.226:${PORT})..."
+echo "3. Installing systemd service on remote Slurm server (192.168.20.226:${PORT})..."
 echo "   Requires ${REMOTE_DIR}/.env containing AILS_JWT_SECRET (server is fail-closed without it)."
 echo "   First-time setup:"
 echo "     ssh ${REMOTE_HOST} \"install -m600 /dev/null ${REMOTE_DIR}/.env && printf 'AILS_JWT_SECRET=%s\\\\n' \\\"\$(openssl rand -hex 32)\\\" >> ${REMOTE_DIR}/.env\""
 ssh -o BatchMode=yes ${REMOTE_HOST} "
-  killall apiserver || true
+  set -e
+  # 1) 一次性确保专用系统用户 ails（最小权限运行 apiserver）
+  id ails >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin ails
+
+  # 2) 归属：binary/config/web 给 ails 可读；.env（含 JWT secret）仅 ails 可读
   chmod +x ${REMOTE_DIR}/bin/apiserver
-  cd ${REMOTE_DIR}
-  # 加载运行时环境变量（必须含 AILS_JWT_SECRET，否则服务 fail-closed 拒绝启动）
-  if [ -f ${REMOTE_DIR}/.env ]; then set -a; . ${REMOTE_DIR}/.env; set +a; fi
-  nohup ./bin/apiserver -port ${PORT} > /var/log/slurm-web-portal.log 2>&1 &
-  sleep 2
-  if ps aux | grep -v grep | grep -q './bin/apiserver'; then
-    echo 'apiserver process: running'
+  chown -R ails:ails ${REMOTE_DIR}
+  if [ -f ${REMOTE_DIR}/.env ]; then chown ails:ails ${REMOTE_DIR}/.env && chmod 600 ${REMOTE_DIR}/.env; fi
+
+  # 3) systemd 接管：崩溃自重启（Restart=on-failure），启动确认探活 /healthz（ExecStartPost）
+  chmod 644 /etc/systemd/system/ails-apiserver.service
+  systemctl daemon-reload
+  systemctl enable ails-apiserver >/dev/null
+  systemctl restart ails-apiserver || true   # 失败也继续，交给下面的验证块打印排障日志
+
+  # 4) 验证：is-active + /healthz 探活；失败则打印 journalctl 排障
+  if systemctl is-active --quiet ails-apiserver && curl -fsS http://127.0.0.1:${PORT}/healthz >/dev/null; then
+    echo 'apiserver: active (systemd, user=ails)'
   else
-    echo '!!! apiserver FAILED TO START — see /var/log/slurm-web-portal.log !!!'
-    echo '    (most likely ${REMOTE_DIR}/.env is missing AILS_JWT_SECRET)'
-    tail -n 20 /var/log/slurm-web-portal.log || true
+    echo '!!! apiserver FAILED TO START !!!'
+    echo '--- last 30 journal lines ---'
+    journalctl -u ails-apiserver -n 30 --no-pager || true
+    echo '    (most likely ${REMOTE_DIR}/.env is missing AILS_JWT_SECRET, or curl not installed on remote)'
     exit 1
   fi
 "
 
 echo "=== Slurm Web Portal Deployed Successfully! ==="
+echo "Manage with:  ssh ${REMOTE_HOST} 'systemctl {status,restart,stop} ails-apiserver'"
+echo "Logs:         ssh ${REMOTE_HOST} 'journalctl -u ails-apiserver -f'"
 echo "Access Portal UI via: http://192.168.20.226:${PORT}/portal/"
