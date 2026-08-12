@@ -35,7 +35,11 @@ ssh -o BatchMode=yes ${REMOTE_HOST} "
   chown -R ails:ails ${REMOTE_DIR}
   if [ -f ${REMOTE_DIR}/.env ]; then chown ails:ails ${REMOTE_DIR}/.env && chmod 600 ${REMOTE_DIR}/.env; fi
 
-  # 3) systemd 接管：崩溃自重启（Restart=on-failure），启动确认探活 /healthz（ExecStartPost）
+  # 3) systemd 接管：先停 systemd 实例（若有）+ 清理任何遗留 apiserver 进程，
+  #    再 reload/restart。首次从旧 nohup 部署迁移时，旧进程仍占 :8090，不清掉则
+  #    systemd 新进程绑端口失败、ExecStartPost 探活打到旧进程（无 /healthz）→ 超时失败。
+  systemctl stop ails-apiserver 2>/dev/null || true
+  pkill -f 'bin/apiserver' 2>/dev/null || true
   chmod 644 /etc/systemd/system/ails-apiserver.service
   systemctl daemon-reload
   systemctl enable ails-apiserver >/dev/null
