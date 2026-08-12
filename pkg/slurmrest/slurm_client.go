@@ -276,7 +276,7 @@ type SlurmJobSubmitReq struct {
 	Job    struct {
 		Name                    string            `json:"name,omitempty"`
 		Partition               string            `json:"partition,omitempty"`
-		Nodes                   []int             `json:"nodes,omitempty"`
+		MinimumNodes            int               `json:"minimum_nodes,omitempty"`
 		Tasks                   int               `json:"tasks,omitempty"`
 		CpusPerTask             int               `json:"cpus_per_task,omitempty"`
 		CurrentWorkingDirectory string            `json:"current_working_directory,omitempty"`

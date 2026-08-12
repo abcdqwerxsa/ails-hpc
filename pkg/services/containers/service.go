@@ -121,14 +121,23 @@ func (s *containerServiceImpl) LaunchContainer(ctx context.Context, req *Contain
 	subReq.Job.Name = envType + ideJobNamePrefix + sessionID
 	subReq.Job.Partition = idePartition
 	subReq.Job.Tasks = 1
-	subReq.Job.Nodes = []int{nodes}
+	subReq.Job.MinimumNodes = nodes
 	subReq.Job.CpusPerTask = cpus
 	subReq.Job.TimeLimit = ideTimeLimit
 	subReq.Job.CurrentWorkingDirectory = "/shared"
+	// Slurm 21.08 slurmrestd 要求 environment 为非空 dict，否则拒绝提交
+	subReq.Job.Environment = map[string]string{
+		"PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+		"HOME": "/shared",
+	}
 
 	resp, err := s.jobs.SubmitJob(subReq)
 	if err != nil {
 		return nil, fmt.Errorf("submit ide job: %w", err)
+	}
+	if resp == nil || resp.JobID == 0 {
+		// slurmrestd 用 200+errors[] 返回逻辑失败；此处兜底，避免把失败误报为成功
+		return nil, fmt.Errorf("slurmrestd rejected ide job submission (no job_id returned)")
 	}
 
 	inst := &ContainerInstance{
@@ -264,22 +273,26 @@ func (s *containerServiceImpl) ProxyTarget(ctx context.Context, sessionID string
 
 // buildIDEScript 生成在计算节点上拉起 IDE 应用并回写连接信息的 sbatch 脚本。
 // 应用 auth 关闭——访问由 apiserver 的 JWT 网关守门；base_url 对齐反代前缀。
+// 注意：不使用 set -u，且节点名取自 hostname -s（容器主机名即 Slurm 节点名），
+// 避免引用可能未设置的 Slurm 环境变量导致脚本在写 meta 前就失败。
 func buildIDEScript(envType, sessionID string, port, cpus, memoryMB, nodes int) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "#!/bin/bash\n")
 	fmt.Fprintf(&b, "# AILS interactive dev session env=%s session=%s port=%d cpus=%d mem=%d nodes=%d\n",
 		envType, sessionID, port, cpus, memoryMB, nodes)
-	fmt.Fprintf(&b, "set -u\n")
 	fmt.Fprintf(&b, "SESSION_ID=%q\n", sessionID)
 	fmt.Fprintf(&b, "PORT=%d\n", port)
 	fmt.Fprintf(&b, "BASE_URL=%q\n", ideBaseURLPath+"/"+sessionID)
+	fmt.Fprintf(&b, "NODE_NAME=$(hostname -s)\n")
 	fmt.Fprintf(&b, "NODE_IP=$(hostname -I | awk '{print $1}')\n")
 	fmt.Fprintf(&b, "mkdir -p /shared/sessions\n")
 	// 应用启动前先回写连接信息，apiserver 据此反代
 	fmt.Fprintf(&b, "cat > /shared/sessions/${SESSION_ID}.json <<EOF\n")
-	fmt.Fprintf(&b, "{\"session_id\":\"${SESSION_ID}\",\"job_id\":${SLURM_JOB_ID},\"node\":\"${SLURMD_NODENAME}\",\"node_ip\":\"${NODE_IP}\",\"port\":${PORT},\"env_type\":\"%s\",\"cpus\":%d,\"memory_mb\":%d,\"nodes\":%d}\n",
+	fmt.Fprintf(&b, "{\"session_id\":\"${SESSION_ID}\",\"job_id\":${SLURM_JOB_ID:-0},\"node\":\"${NODE_NAME}\",\"node_ip\":\"${NODE_IP}\",\"port\":${PORT},\"env_type\":\"%s\",\"cpus\":%d,\"memory_mb\":%d,\"nodes\":%d}\n",
 		envType, cpus, memoryMB, nodes)
 	fmt.Fprintf(&b, "EOF\n")
+	// 应用输出重定向到会话日志，便于排查启动失败
+	fmt.Fprintf(&b, "exec > /shared/sessions/${SESSION_ID}.log 2>&1\n")
 	switch envType {
 	case "jupyter":
 		// base_url 对齐反代前缀；token 置空（由 apiserver JWT 网关守门）

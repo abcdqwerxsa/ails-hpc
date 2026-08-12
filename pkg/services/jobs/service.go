@@ -85,7 +85,7 @@ func (s *jobServiceImpl) SubmitJob(ctx context.Context, req *SubmitJobRequest) (
 		if partition != "standard" {
 			slurmReq.Job.Partition = partition
 		}
-		slurmReq.Job.Nodes = []int{nodesCount}
+		slurmReq.Job.MinimumNodes = nodesCount
 		slurmReq.Job.Tasks = req.Tasks
 		slurmReq.Job.CpusPerTask = req.CpusPerTask
 		slurmReq.Job.CurrentWorkingDirectory = req.CurrentWorkingDirectory
