@@ -1,7 +1,5 @@
 package billing
 
-import "time"
-
 // UsageQueryParam contains request query filters for /api/v1/slurm/billing/usage
 type UsageQueryParam struct {
 	User      string `form:"user"`
@@ -49,15 +47,19 @@ type ExportChartResponse struct {
 	Series []float64 `json:"series"` // e.g. [10.0, 5.0, 1.5]
 }
 
-// AccountAuditRecord tracks individual job or workspace billing audit items
-type AccountAuditRecord struct {
-	ID           string    `json:"id"`
-	Type         string    `json:"type"` // "job" or "container"
-	User         string    `json:"user"`
-	Project      string    `json:"project"`
-	CPUs         int       `json:"cpus"`
-	MemoryMB     int       `json:"memory_mb"`
-	GPUs         int       `json:"gpus"`
-	DurationSecs float64   `json:"duration_secs"`
-	CreatedAt    time.Time `json:"created_at"`
+// SacctRow 是解析后的一条 sacct 作业记录（来自 --parsable2 --noheader 输出），
+// 字段顺序与 service.go 的 sacctFormat 一致。
+type SacctRow struct {
+	JobID      string
+	User       string
+	Account    string
+	Partition  string
+	JobName    string
+	State      string
+	ElapsedRaw int64  // 秒
+	AllocCPUS  int
+	AllocTRES  string // 如 "cpu=4,mem=...,gres/gpu=1,node=1"
+	ReqMem     string // 如 "3000M"、"4G"、"0"
+	Start      string
+	End        string
 }

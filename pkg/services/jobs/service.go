@@ -8,7 +8,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"ails-hpc/pkg/services/billing"
 	"ails-hpc/pkg/slurmrest"
 )
 
@@ -23,21 +22,15 @@ type JobService interface {
 }
 
 type jobServiceImpl struct {
-	client         *slurmrest.Client
-	billingService billing.BillingService
-	mu             sync.RWMutex
-	localJobs      map[int]*JobSummary
+	client    *slurmrest.Client
+	mu        sync.RWMutex
+	localJobs map[int]*JobSummary
 }
 
 func NewJobService(client *slurmrest.Client) JobService {
-	return NewJobServiceWithBilling(client, nil)
-}
-
-func NewJobServiceWithBilling(client *slurmrest.Client, billingSvc billing.BillingService) JobService {
 	return &jobServiceImpl{
-		client:         client,
-		billingService: billingSvc,
-		localJobs:      make(map[int]*JobSummary),
+		client:    client,
+		localJobs: make(map[int]*JobSummary),
 	}
 }
 
@@ -127,20 +120,6 @@ func (s *jobServiceImpl) SubmitJob(ctx context.Context, req *SubmitJobRequest) (
 	s.mu.Lock()
 	s.localJobs[jobID] = summary
 	s.mu.Unlock()
-
-	if s.billingService != nil {
-		s.billingService.RecordJobUsage(billing.AccountAuditRecord{
-			ID:           fmt.Sprintf("job-%d", jobID),
-			Type:         "job",
-			User:         "hpcuser",
-			Project:      "default",
-			CPUs:         cpus,
-			MemoryMB:     4096,
-			GPUs:         0,
-			DurationSecs: 3600,
-			CreatedAt:    time.Now(),
-		})
-	}
 
 	return &SubmitJobResponse{
 		Code:      200,

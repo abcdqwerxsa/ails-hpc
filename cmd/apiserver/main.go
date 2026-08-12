@@ -48,14 +48,14 @@ func main() {
 
 	// 共享单个 slurmrestd 客户端（懒加载 token、401/403 自动续期）
 	slurmClient := slurmrest.NewClient(cfg.SlurmRESTDURL, cfg.SlurmUserName, "")
-	billingService := billing.NewBillingService()
+	billingService := billing.NewBillingService(slurmClient)
 
 	handlers := Handlers{
 		Auth:       auth.NewAuthHandler(userStore),
 		Cluster:    cluster.NewClusterHandler(cluster.NewClusterService(slurmClient)),
 		Nodes:      nodes.NewNodeHandler(nodes.NewNodeService(slurmClient)),
-		Jobs:       jobs.NewJobHandler(jobs.NewJobServiceWithBilling(slurmClient, billingService)),
-		Containers: containers.NewContainerHandler(containers.NewContainerServiceWithBilling(billingService)),
+		Jobs:       jobs.NewJobHandler(jobs.NewJobService(slurmClient)),
+		Containers: containers.NewContainerHandler(containers.NewContainerService()),
 		Billing:    billing.NewBillingHandler(billingService),
 	}
 

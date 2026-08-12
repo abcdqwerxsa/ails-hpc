@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -22,6 +23,13 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// zeroSacctFetcher 返回空作业历史，让计费路由在无集群的矩阵测试里仍能 200。
+type zeroSacctFetcher struct{}
+
+func (zeroSacctFetcher) Query(ctx context.Context, user string, start, end time.Time) ([]billing.SacctRow, error) {
+	return nil, nil
+}
+
 // setupTestRouter 构造一个接入真实 NewRouter 的测试路由：
 //   - 内存四角色用户库（admin/member/tenant_admin/ops，明文 *123）
 //   - common.MockSlurmServer 承载 slurmrestd v0.0.37 调用
@@ -35,7 +43,7 @@ func setupTestRouter(t *testing.T) (*gin.Engine, *common.MockSlurmServer) {
 	t.Cleanup(mock.Close)
 
 	slurmClient := slurmrest.NewClient(mock.URL, "hpcuser", "test-token")
-	billingService := billing.NewBillingService()
+	billingService := billing.NewBillingServiceWithFetcher(zeroSacctFetcher{})
 
 	store := auth.NewUserStoreFromList([]auth.User{
 		{Username: "admin", PasswordHash: hashPw("admin123"), Role: auth.RoleSystemAdmin, OrgSlug: "hpc-lab", TenantNS: "default"},
@@ -48,8 +56,8 @@ func setupTestRouter(t *testing.T) (*gin.Engine, *common.MockSlurmServer) {
 		Auth:       auth.NewAuthHandler(store),
 		Cluster:    cluster.NewClusterHandler(cluster.NewClusterService(slurmClient)),
 		Nodes:      nodes.NewNodeHandler(nodes.NewNodeService(slurmClient)),
-		Jobs:       jobs.NewJobHandler(jobs.NewJobServiceWithBilling(slurmClient, billingService)),
-		Containers: containers.NewContainerHandler(containers.NewContainerServiceWithBilling(billingService)),
+		Jobs:       jobs.NewJobHandler(jobs.NewJobService(slurmClient)),
+		Containers: containers.NewContainerHandler(containers.NewContainerService()),
 		Billing:    billing.NewBillingHandler(billingService),
 	}
 	return NewRouter(h), mock

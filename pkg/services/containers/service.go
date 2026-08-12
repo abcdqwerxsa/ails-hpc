@@ -9,7 +9,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"ails-hpc/pkg/services/billing"
 )
 
 var (
@@ -28,19 +27,13 @@ type ContainerService interface {
 }
 
 type containerServiceImpl struct {
-	mu             sync.RWMutex
-	containers     map[string]*ContainerInstance
-	billingService billing.BillingService
+	mu         sync.RWMutex
+	containers map[string]*ContainerInstance
 }
 
 func NewContainerService() ContainerService {
-	return NewContainerServiceWithBilling(nil)
-}
-
-func NewContainerServiceWithBilling(billingSvc billing.BillingService) ContainerService {
 	return &containerServiceImpl{
-		containers:     make(map[string]*ContainerInstance),
-		billingService: billingSvc,
+		containers: make(map[string]*ContainerInstance),
 	}
 }
 
@@ -102,20 +95,6 @@ func (s *containerServiceImpl) LaunchContainer(ctx context.Context, req *Contain
 	s.mu.Lock()
 	s.containers[containerID] = instance
 	s.mu.Unlock()
-
-	if s.billingService != nil {
-		s.billingService.RecordContainerUsage(billing.AccountAuditRecord{
-			ID:           instance.ID,
-			Type:         "container",
-			User:         "hpcuser",
-			Project:      "default",
-			CPUs:         cpus,
-			MemoryMB:     memoryMB,
-			GPUs:         1,
-			DurationSecs: 3600,
-			CreatedAt:    time.Now(),
-		})
-	}
 
 	return &ContainerLaunchResponse{
 		ContainerID: instance.ID,
