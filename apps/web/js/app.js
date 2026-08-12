@@ -472,7 +472,8 @@ async function fetchSlurmNodes() {
       if (matrix) {
         const total = allNodesData.length;
         let activeCount = 0;
-        let totalCpus = 0;
+        let totalCpus = 0, totalAllocCpus = 0;
+        let totalMem = 0, totalAllocMem = 0;
 
         matrix.innerHTML = '';
         allNodesData.forEach(n => {
@@ -481,6 +482,9 @@ async function fetchSlurmNodes() {
           if (isUp) activeCount++;
           const cpusCount = n.cpus || 64;
           totalCpus += cpusCount;
+          totalAllocCpus += (n.alloc_cpus || 0);
+          totalMem += (n.real_memory || 0);
+          totalAllocMem += (n.alloc_memory || 0);
 
           let chipClass = 'idle';
           if (stateStr.includes('alloc') || stateStr.includes('busy')) chipClass = 'amber';
@@ -512,17 +516,25 @@ async function fetchSlurmNodes() {
         if (nodesNum) nodesNum.textContent = `${activeCount} / ${total}`;
         if (nodesSub) nodesSub.textContent = `+${activePct}% Operational`;
 
-        if (cpuNum) cpuNum.textContent = `0%`;
-        if (cpuSub) cpuSub.textContent = `idle (${totalCpus} cores)`;
-        if (memNum) memNum.textContent = `0%`;
-        if (memSub) memSub.textContent = `optimal`;
+        // 真实利用率：Σalloc / Σtotal（数据来自 slurmrestd /nodes 的 alloc_cpus/alloc_memory）
+        const cpuPct = totalCpus > 0 ? Math.round((totalAllocCpus / totalCpus) * 100) : 0;
+        const memPct = totalMem > 0 ? Math.round((totalAllocMem / totalMem) * 100) : 0;
+        if (cpuNum) cpuNum.textContent = `${cpuPct}%`;
+        if (cpuSub) cpuSub.textContent = `${totalAllocCpus}/${totalCpus} cores allocated`;
+        if (memNum) memNum.textContent = `${memPct}%`;
+        if (memSub) memSub.textContent = `${totalAllocMem}/${totalMem} MB allocated`;
 
-        initGauges(activePct, 0, 0, 0);
+        initGauges(activePct, 0, cpuPct, memPct);
 
         if (perfMetricsChart) {
-          const dataCpu = perfMetricsChart.data.datasets[0].data;
-          dataCpu.shift();
-          dataCpu.push(0);
+          const cpuSeries = perfMetricsChart.data.datasets[0].data;
+          cpuSeries.shift();
+          cpuSeries.push(cpuPct);
+          if (perfMetricsChart.data.datasets[1]) {
+            const memSeries = perfMetricsChart.data.datasets[1].data;
+            memSeries.shift();
+            memSeries.push(memPct);
+          }
           perfMetricsChart.update();
         }
       }

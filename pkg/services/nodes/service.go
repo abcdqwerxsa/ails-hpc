@@ -71,13 +71,18 @@ func (s *nodeServiceImpl) ListNodes(ctx context.Context) ([]*NodeStateInfo, erro
 					if sn.Cores > 0 {
 						existing.Cores = sn.Cores
 					}
+					// 实时利用率字段（idle 时为 0）
+					existing.AllocCPUs = sn.AllocCPUs
+					existing.AllocMemory = sn.AllocMemory
 				} else {
 					s.nodes[sn.Name] = &NodeStateInfo{
-						Name:       sn.Name,
-						State:      sn.State,
-						CPUs:       sn.CPUs,
-						RealMemory: sn.RealMemory,
-						Cores:      sn.Cores,
+						Name:        sn.Name,
+						State:       sn.State,
+						CPUs:        sn.CPUs,
+						AllocCPUs:   sn.AllocCPUs,
+						RealMemory:  sn.RealMemory,
+						AllocMemory: sn.AllocMemory,
+						Cores:       sn.Cores,
 					}
 				}
 			}
@@ -90,24 +95,28 @@ func (s *nodeServiceImpl) ListNodes(ctx context.Context) ([]*NodeStateInfo, erro
 	for _, name := range orderedNames {
 		if n, ok := s.nodes[name]; ok {
 			result = append(result, &NodeStateInfo{
-				Name:       n.Name,
-				State:      n.State,
-				CPUs:       n.CPUs,
-				RealMemory: n.RealMemory,
-				Cores:      n.Cores,
-				Reason:     n.Reason,
+				Name:        n.Name,
+				State:       n.State,
+				CPUs:        n.CPUs,
+				AllocCPUs:   n.AllocCPUs,
+				RealMemory:  n.RealMemory,
+				AllocMemory: n.AllocMemory,
+				Cores:       n.Cores,
+				Reason:      n.Reason,
 			})
 		}
 	}
 	for name, n := range s.nodes {
 		if name != "node1" && name != "node2" && name != "node3" {
 			result = append(result, &NodeStateInfo{
-				Name:       n.Name,
-				State:      n.State,
-				CPUs:       n.CPUs,
-				RealMemory: n.RealMemory,
-				Cores:      n.Cores,
-				Reason:     n.Reason,
+				Name:        n.Name,
+				State:       n.State,
+				CPUs:        n.CPUs,
+				AllocCPUs:   n.AllocCPUs,
+				RealMemory:  n.RealMemory,
+				AllocMemory: n.AllocMemory,
+				Cores:       n.Cores,
+				Reason:      n.Reason,
 			})
 		}
 	}

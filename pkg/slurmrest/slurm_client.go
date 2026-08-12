@@ -190,11 +190,13 @@ func (c *Client) Ping() (*PingResponse, error) {
 type NodesResponse struct {
 	Errors []interface{} `json:"errors"`
 	Nodes  []struct {
-		Name       string `json:"name"`
-		State      string `json:"state"`
-		CPUs       int    `json:"cpus"`
-		RealMemory int    `json:"real_memory"`
-		Cores      int    `json:"cores"`
+		Name        string `json:"name"`
+		State       string `json:"state"`
+		CPUs        int    `json:"cpus"`
+		AllocCPUs   int    `json:"alloc_cpus"`
+		RealMemory  int    `json:"real_memory"`
+		AllocMemory int    `json:"alloc_memory"`
+		Cores       int    `json:"cores"`
 	} `json:"nodes"`
 }
 
