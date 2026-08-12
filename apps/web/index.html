@@ -8,10 +8,34 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
+  <!-- Toast Notification Container -->
+  <div class="neu-toast-container" id="toast-container"></div>
+
+  <!-- 认证登录层（过渡，React 迁移后移除） -->
+  <div id="auth-overlay" class="modal-overlay" style="display:none;">
+    <div class="neu-modal" style="max-width:380px;padding:28px;">
+      <h2 style="margin:0 0 6px 0;font-size:18px;">AILS HPC 登录</h2>
+      <p style="color:var(--text-secondary);font-size:12px;margin:0 0 22px 0;">服务端权威认证 · 角色由登录凭证决定</p>
+      <div style="margin-bottom:14px;">
+        <label style="font-size:12px;color:var(--text-secondary);">用户名</label>
+        <input id="login-username" class="neu-input" type="text" value="admin" placeholder="username" style="width:100%;margin-top:6px;box-sizing:border-box;" autocomplete="username">
+      </div>
+      <div style="margin-bottom:14px;">
+        <label style="font-size:12px;color:var(--text-secondary);">密码</label>
+        <input id="login-password" class="neu-input" type="password" placeholder="password" style="width:100%;margin-top:6px;box-sizing:border-box;" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()">
+      </div>
+      <div id="login-error" style="color:var(--accent-rose);font-size:12px;min-height:16px;margin-bottom:10px;"></div>
+      <button class="neu-btn primary" style="width:100%;" onclick="doLogin()">登录</button>
+      <p style="color:var(--text-secondary);font-size:11px;margin:16px 0 0 0;line-height:1.7;">
+        开发账号：admin / admin123 · member / member123 · tenantadmin / tenantadmin123 · ops / ops123
+      </p>
+    </div>
+  </div>
+
   <!-- Sidebar Navigation -->
   <aside class="sidebar">
     <div class="brand-area">
-      <!-- 方案 A 像素级九宫格点阵 Logo SVG -->
+      <!-- 像素级九宫格点阵 Logo SVG -->
       <svg class="dot-logo-svg" viewBox="0 0 40 40">
         <circle cx="8" cy="8" r="3.5" fill="#06B6D4" />
         <circle cx="20" cy="8" r="3.5" fill="#06B6D4" />
@@ -32,25 +56,25 @@
     </div>
 
     <ul class="nav-menu">
-      <li class="nav-item active">
+      <li class="nav-item active" id="nav-dashboard">
         <svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
-        <span>Overview</span>
+        <span id="nav-dashboard-title">Dashboard</span>
       </li>
-      <li class="nav-item">
+      <li class="nav-item" id="nav-nodes" style="display:none;" onclick="switchTab('nodes')">
         <svg viewBox="0 0 24 24"><path d="M4 6h16v12H4zm2 2v8h12V8H6z"/></svg>
         <span>Nodes</span>
       </li>
-      <li class="nav-item">
+      <li class="nav-item" id="nav-jobs" onclick="switchTab('jobs')">
         <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 10h-4v4h-2v-4H7v-2h4V7h2v4h4v2z"/></svg>
         <span>Jobs</span>
       </li>
-      <li class="nav-item">
-        <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/></svg>
-        <span>Partitions</span>
-      </li>
-      <li class="nav-item" onclick="triggerDevLaunch('vscode')" title="一键调起交互式 Web VSCode 容器开发环境">
+      <li class="nav-item" id="nav-workspaces" onclick="switchTab('workspaces')">
         <svg viewBox="0 0 24 24"><path d="M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z"/></svg>
         <span>Workspaces</span>
+      </li>
+      <li class="nav-item" id="nav-billing" onclick="switchTab('billing')">
+        <svg viewBox="0 0 24 24"><path d="M11.8 10.9c-2.27-.59-3-1.2-3-2.15 0-1.09 1.01-1.85 2.7-1.85 1.78 0 2.44.85 2.5 2.1h2.21c-.07-1.72-1.12-3.3-3.21-3.81V3h-3v2.16c-1.94.42-3.5 1.68-3.5 3.61 0 2.31 1.91 3.46 4.7 4.13 2.5.6 3 1.48 3 2.41 0 .69-.49 1.79-2.7 1.79-2.06 0-2.87-.92-2.98-2.1h-2.2c.12 2.19 1.76 3.42 3.68 3.83V21h3v-2.15c1.95-.37 3.5-1.5 3.5-3.55 0-2.84-2.43-3.81-4.7-4.4z"/></svg>
+        <span>Billing</span>
       </li>
       <li class="nav-item">
         <svg viewBox="0 0 24 24"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
@@ -67,182 +91,541 @@
   <main class="content-area">
     <!-- Top Header Bar -->
     <header class="top-bar">
-      <h1 class="page-title">SLURM CLUSTER MANAGER</h1>
+      <h1 class="page-title" id="current-view-title">SLURM CLUSTER MANAGER</h1>
       <div class="header-right">
+        <!-- RBAC 视角切换器 -->
+        <select class="user-role-select" id="user-role-select" data-throwaway="React 迁移后移除" title="仅切换 UI 视图预览；实际权限以服务端为准" onchange="switchUserRole(this.value)">
+          <option value="admin">System Admin (超级管理员)</option>
+          <option value="member">Tenant Member (普通租户成员)</option>
+          <option value="tenant_admin">Tenant Admin (租户管理员)</option>
+          <option value="ops_admin">Operations Admin (运营人员)</option>
+        </select>
+
         <div class="status-tag">
           <span>Status:</span>
           <span style="color:var(--accent-emerald);" id="slurm-status-val">CONNECTING</span>
           <div class="led-glow" id="slurm-led"></div>
         </div>
-        <div class="icon-btn" id="calendar-btn" title="System Date">📅</div>
-        <div class="icon-btn" id="theme-btn" title="Toggle Theme Mode">🌙</div>
+        <div class="icon-btn" id="calendar-btn" data-tooltip="System Date">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.11 0-1.99.9-1.99 2L3 20c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V10h14v10zm0-12H5V6h14v2z"/></svg>
+        </div>
+        <div class="icon-btn" id="theme-btn" data-tooltip="Toggle Theme Mode">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" id="theme-icon-svg"><path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z"/></svg>
+        </div>
+        <div class="icon-btn" id="logout-btn" data-tooltip="退出登录" onclick="logout()" style="cursor:pointer;">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/></svg>
+        </div>
         <div class="user-profile">
           <div class="avatar">A</div>
-          <span>Admin ▾</span>
+          <span id="user-display-name">System Admin ▾</span>
         </div>
       </div>
     </header>
 
-    <!-- Gauges Row (Top 4 Gauges Cards) -->
-    <section class="gauges-row">
-      <!-- Active Nodes (真实统计) -->
-      <div class="gauge-card">
-        <div class="gauge-label">Active Nodes:</div>
-        <div class="gauge-content">
-          <div>
-            <div class="gauge-big-num" id="active-nodes-num">-- / --</div>
-            <div class="gauge-sub-badge" id="active-nodes-sub">Loading...</div>
-          </div>
-          <div class="arc-canvas-wrap">
-            <canvas id="gaugeNodes"></canvas>
-          </div>
-        </div>
-      </div>
-
-      <!-- Active Jobs (真实统计) -->
-      <div class="gauge-card">
-        <div class="gauge-label">Active Jobs:</div>
-        <div class="gauge-content">
-          <div>
-            <div class="gauge-big-num" id="active-jobs-num">0</div>
-            <div class="gauge-sub-badge" id="active-jobs-sub">0 Active Queue</div>
-          </div>
-          <div class="arc-canvas-wrap">
-            <canvas id="gaugeJobs"></canvas>
+    <!-- 👑 ROOT VIEW 1: 超级系统管理员视图 (System Admin View) -->
+    <div class="role-view-root" id="view-system-admin">
+      <!-- 4 Gauges 行 -->
+      <section class="gauges-row">
+        <div class="gauge-card">
+          <div class="gauge-label">Active Nodes:</div>
+          <div class="gauge-content">
+            <div>
+              <div class="gauge-big-num" id="active-nodes-num">-- / --</div>
+              <div class="gauge-sub-badge" id="active-nodes-sub">Loading...</div>
+            </div>
+            <div class="arc-canvas-wrap"><canvas id="gaugeNodes"></canvas></div>
           </div>
         </div>
-      </div>
-
-      <!-- CPU Load (真实统计) -->
-      <div class="gauge-card">
-        <div class="gauge-label">CPU Load:</div>
-        <div class="gauge-content">
-          <div>
-            <div class="gauge-big-num" id="cpu-load-num">0%</div>
-            <div class="gauge-sub-badge" id="cpu-load-sub" style="color:var(--accent-cyan);">idle</div>
-          </div>
-          <div class="arc-canvas-wrap">
-            <canvas id="gaugeCPU"></canvas>
+        <div class="gauge-card">
+          <div class="gauge-label">Active Jobs:</div>
+          <div class="gauge-content">
+            <div>
+              <div class="gauge-big-num" id="active-jobs-num">0</div>
+              <div class="gauge-sub-badge" id="active-jobs-sub">0 Active Queue</div>
+            </div>
+            <div class="arc-canvas-wrap"><canvas id="gaugeJobs"></canvas></div>
           </div>
         </div>
-      </div>
-
-      <!-- Memory Load (真实统计) -->
-      <div class="gauge-card">
-        <div class="gauge-label">Memory Load:</div>
-        <div class="gauge-content">
-          <div>
-            <div class="gauge-big-num" id="mem-load-num">0%</div>
-            <div class="gauge-sub-badge" id="mem-load-sub" style="color:var(--accent-cyan);">optimal</div>
-          </div>
-          <div class="arc-canvas-wrap">
-            <canvas id="gaugeMem"></canvas>
+        <div class="gauge-card">
+          <div class="gauge-label">CPU Load:</div>
+          <div class="gauge-content">
+            <div>
+              <div class="gauge-big-num" id="cpu-load-num">0%</div>
+              <div class="gauge-sub-badge" id="cpu-load-sub" style="color:var(--accent-cyan);">idle</div>
+            </div>
+            <div class="arc-canvas-wrap"><canvas id="gaugeCPU"></canvas></div>
           </div>
         </div>
-      </div>
-    </section>
+        <div class="gauge-card">
+          <div class="gauge-label">Memory Load:</div>
+          <div class="gauge-content">
+            <div>
+              <div class="gauge-big-num" id="mem-load-num">0%</div>
+              <div class="gauge-sub-badge" id="mem-load-sub" style="color:var(--accent-cyan);">optimal</div>
+            </div>
+            <div class="arc-canvas-wrap"><canvas id="gaugeMem"></canvas></div>
+          </div>
+        </div>
+      </section>
 
-    <!-- Full 4-Column Neumorphic Overview Layout -->
-    <section class="full-grid-layout">
-      <!-- Panel 1: NODE STATUS GRID (仅真实 Node 矩阵) -->
-      <div class="neu-panel">
+      <!-- 全局硬件监控大盘 (无任何提交/连接动作干扰) -->
+      <section class="full-grid-layout">
+        <!-- Panel 1: NODE STATUS GRID (点击硬件运维) -->
+        <div class="neu-panel">
+          <div class="panel-header">
+            <span class="panel-title">NODE STATUS GRID (DRAIN/RESUME MAINTENANCE)</span>
+            <div class="panel-dots" data-tooltip="Panel Settings"><div class="panel-dots-circle"></div><div class="panel-dots-circle"></div><div class="panel-dots-circle"></div></div>
+          </div>
+          <div class="node-matrix-container" id="node-matrix-container"></div>
+        </div>
+
+        <!-- Panel 2: JOB QUEUE (纯只读列表) -->
+        <div class="neu-panel">
+          <div class="panel-header">
+            <span class="panel-title">GLOBAL JOB QUEUE</span>
+            <span style="font-size:11px; color:var(--text-dim);">Live Queue ▾</span>
+          </div>
+          <table class="job-table">
+            <thead>
+              <tr>
+                <th>Job ID</th>
+                <th>Name</th>
+                <th>Partition</th>
+                <th>Nodes</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="job-table-body">
+              <tr><td colspan="5" style="text-align:center; color:var(--text-dim); padding: 20px;">No Active Jobs in Queue</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Panel 3 & 4: PARTITION USAGE & TOP JOBS -->
+        <div style="display:flex; flex-direction:column; gap:20px;">
+          <div class="neu-panel" style="height:210px;">
+            <div class="panel-header"><span class="panel-title">PARTITION USAGE</span></div>
+            <div style="height: 140px; position: relative;"><canvas id="partitionChart"></canvas></div>
+          </div>
+          <div class="neu-panel" style="flex:1;">
+            <div class="panel-header"><span class="panel-title">TOP HEAVY JOBS</span></div>
+            <div id="top-jobs-container" style="display:flex; flex-direction:column; gap:12px;">
+              <div style="color:var(--text-dim); font-size:11px; text-align:center; padding: 20px;">No Heavy Jobs Running</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Panel 5 & 6: PERFORMANCE METRICS & ALERTS & LOGS -->
+        <div style="display:flex; flex-direction:column; gap:20px;">
+          <div class="neu-panel" style="height:210px;">
+            <div class="panel-header"><span class="panel-title">SYSTEM PERFORMANCE METRICS</span></div>
+            <div style="height: 130px; position: relative;"><canvas id="perfMetricsChart"></canvas></div>
+          </div>
+          <div class="neu-panel" style="flex:1;">
+            <div class="panel-header"><span class="panel-title">SYSTEM ALERTS & LOGS</span></div>
+            <div class="alerts-inset-container" id="alerts-container">
+              <div class="alert-item">
+                <div class="alert-header-row">
+                  <span class="alert-tag-title" style="color:var(--accent-emerald);">Status</span>
+                  <span style="color:var(--text-dim);">Now</span>
+                </div>
+                <div style="color:var(--text-primary); font-weight:700;">SlurmRESTd Connected</div>
+                <div style="color:var(--text-dim); font-size:10px;">OpenAPI v0.0.37 operational</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- 💻 ROOT VIEW 2: 普通租户成员视图 (Tenant Member Workspace) -->
+    <div class="role-view-root" id="view-tenant-member" style="display:none;">
+      <!-- 租户关心轻量监控行 (节点繁忙比 / 队列 / CPU / 内存) -->
+      <section class="tenant-mini-grid">
+        <div class="tenant-stat-card">
+          <div class="label">Cluster Busy/Idle Ratio</div>
+          <div class="val" style="color:var(--accent-emerald);" id="member-busy-val">3 Active Nodes</div>
+        </div>
+        <div class="tenant-stat-card">
+          <div class="label">Partition Queue Load</div>
+          <div class="val" style="color:var(--accent-cyan);" id="member-queue-val">0 Jobs</div>
+        </div>
+        <div class="tenant-stat-card">
+          <div class="label">CPU Usage</div>
+          <div class="val" id="member-cpu-val">0%</div>
+        </div>
+        <div class="tenant-stat-card">
+          <div class="label">Disk Storage Space</div>
+          <div class="val" style="color:var(--accent-amber);">24.5 GB / 500 GB</div>
+        </div>
+      </section>
+
+      <!-- 登录节点 Portal 入口卡片 (Bastion Host Access) -->
+      <section class="neu-panel" style="border-left:4px solid var(--accent-cyan);">
         <div class="panel-header">
-          <span class="panel-title">NODE STATUS GRID</span>
-          <div class="panel-dots" title="Panel Settings"><div class="panel-dots-circle"></div><div class="panel-dots-circle"></div><div class="panel-dots-circle"></div></div>
+          <span class="panel-title" style="color:var(--accent-cyan);">SUBMIT / LOGIN NODE ACCESS PORTAL (登录节点连接指引)</span>
+          <button class="neu-btn primary" onclick="openLoginNodeModal()" style="font-size:10px; padding:4px 8px;">Open Full Terminal Guide</button>
         </div>
-        <div class="node-matrix-container" id="node-matrix-container">
-          <!-- JS Inject Real Nodes -->
-        </div>
-      </div>
-
-      <!-- Panel 2: JOB QUEUE (真实 SlurmRESTd Jobs) -->
-      <div class="neu-panel">
-        <div class="panel-header">
-          <span class="panel-title">JOB QUEUE</span>
-          <div style="display:flex; align-items:center; gap:8px;">
-            <span style="font-size:11px; color:var(--text-dim);" id="jobs-queue-filter">Live ▾</span>
-            <div class="panel-dots" title="Panel Settings"><div class="panel-dots-circle"></div><div class="panel-dots-circle"></div><div class="panel-dots-circle"></div></div>
+        <div style="display:grid; grid-template-columns: 2fr 1fr; gap:16px; font-size:12px;">
+          <div>
+            <div style="color:var(--text-secondary); margin-bottom:6px;">Standard SSH Command (命令行直连):</div>
+            <div style="font-family:monospace; font-size:12px; color:var(--accent-cyan); background:rgba(0,0,0,0.25); padding:8px 12px; border-radius:8px; display:flex; justify-content:space-between; align-items:center;">
+              <code>ssh hpcuser@192.168.20.226 -p 22</code>
+              <button class="neu-btn" style="font-size:9px; padding:3px 8px;" onclick="copySSHCommand()">Copy</button>
+            </div>
+          </div>
+          <div style="display:flex; flex-direction:column; justify-content:center; gap:6px;">
+            <button class="neu-btn" onclick="downloadSSHPrivateKey()" style="font-size:10px; padding:6px 10px;">Download SSH Private Key (.pem)</button>
           </div>
         </div>
-        <table class="job-table">
+      </section>
+
+      <!-- 租户个人作业与交互式工作区 -->
+      <section style="display:grid; grid-template-columns: 1fr 1fr; gap:20px;">
+        <!-- 作业提交与控制面板 -->
+        <div class="neu-panel">
+          <div class="panel-header">
+            <span class="panel-title">MY SLURM JOBS</span>
+            <button class="neu-btn primary" onclick="openSubmitModal()" style="font-size:10px; padding:4px 8px;">+ Submit New Job</button>
+          </div>
+          <table class="job-table">
+            <thead>
+              <tr>
+                <th>Job ID</th>
+                <th>Name</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="member-jobs-tbody">
+              <tr><td colspan="4" style="text-align:center; color:var(--text-dim); padding:16px;">No Personal Jobs Running</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- 交互式 Web-IDE 开发环境 -->
+        <div class="neu-panel">
+          <div class="panel-header">
+            <span class="panel-title">MY CONTAINER WORKSPACES (WEB-IDE)</span>
+            <button class="neu-btn primary" onclick="openWorkspaceModal()" style="font-size:10px; padding:4px 8px;">+ Launch Environment</button>
+          </div>
+          <table class="job-table">
+            <thead>
+              <tr>
+                <th>Container ID</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="member-workspaces-tbody">
+              <tr><td colspan="4" style="text-align:center; color:var(--text-dim); padding:16px;">No Active IDE Environments</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <!-- 🏢 ROOT VIEW 3: 租户管理员视图 (Tenant Admin View) -->
+    <div class="role-view-root" id="view-tenant-admin" style="display:none;">
+      <!-- 继承租户成员全套工作卡片 + 团队成员管理面板 -->
+      <section class="neu-panel" style="border-left:4px solid var(--accent-emerald);">
+        <div class="panel-header">
+          <span class="panel-title" style="color:var(--accent-emerald);">TENANT MEMBER MANAGEMENT (团队成员账号与配额管理)</span>
+          <button class="neu-btn primary" onclick="showToast('Add Member Modal Placeholder', 'info')" style="font-size:10px; padding:4px 8px;">+ Add Tenant Member</button>
+        </div>
+        <table class="member-table">
           <thead>
             <tr>
-              <th>Job ID</th>
-              <th>Name</th>
-              <th>Partition</th>
-              <th>Nodes</th>
+              <th>Member Username</th>
+              <th>Role</th>
+              <th>CPU Quota Limit</th>
+              <th>Accumulated Hours</th>
               <th>Status</th>
             </tr>
           </thead>
-          <tbody id="job-table-body">
+          <tbody>
             <tr>
-              <td colspan="5" style="text-align:center; color:var(--text-dim); padding: 20px;">No Active Jobs in Queue</td>
+              <td><strong>hpcuser (Tenant Owner)</strong></td>
+              <td><span class="status-pill completed">Tenant Admin</span></td>
+              <td>512 Cores</td>
+              <td>128.5 hrs</td>
+              <td><span class="status-pill running">Active</span></td>
+            </tr>
+            <tr>
+              <td><strong>researcher_01</strong></td>
+              <td><span class="status-pill pending">Member</span></td>
+              <td>64 Cores</td>
+              <td>42.0 hrs</td>
+              <td><span class="status-pill running">Active</span></td>
             </tr>
           </tbody>
         </table>
-      </div>
+      </section>
+    </div>
 
-      <!-- Panel 3 & 4: PARTITION USAGE & TOP JOBS BY GPU -->
-      <div style="display:flex; flex-direction:column; gap:20px;">
-        <!-- Partition Usage Chart (真实读取) -->
-        <div class="neu-panel" style="height:210px;">
-          <div class="panel-header">
-            <span class="panel-title">PARTITION USAGE</span>
-            <div class="panel-dots" title="Panel Settings"><div class="panel-dots-circle"></div><div class="panel-dots-circle"></div><div class="panel-dots-circle"></div></div>
-          </div>
-          <div style="height: 140px; position: relative;">
-            <canvas id="partitionChart"></canvas>
-          </div>
+    <!-- 📊 ROOT VIEW 4: 运营人员视图 (Operations Admin View) -->
+    <div class="role-view-root" id="view-ops-admin" style="display:none;">
+      <!-- 纯粹业务结果与算力绩效大屏 (无任何任务提交、命令行或操作性按钮) -->
+      <section class="neu-panel">
+        <div class="panel-header">
+          <span class="panel-title">BUSINESS & UTILIZATION EXECUTIVE DASHBOARD (算力运营与绩效大屏)</span>
+          <button class="neu-btn primary" onclick="exportBilling('chart')" style="font-size:10px; padding:4px 8px;">Export Executive Report</button>
         </div>
 
-        <!-- Top Jobs (BY GPU / Real Jobs) -->
-        <div class="neu-panel" style="flex:1;">
-          <div class="panel-header">
-            <span class="panel-title">TOP JOBS</span>
-            <div class="panel-dots" title="Panel Settings"><div class="panel-dots-circle"></div><div class="panel-dots-circle"></div><div class="panel-dots-circle"></div></div>
+        <div class="ops-analytics-grid">
+          <div>
+            <div style="font-size:12px; font-weight:700; color:var(--accent-cyan); margin-bottom:10px;">Slurm Account Usage Ranking (真实项目算力消耗)</div>
+            <table class="project-rank-table">
+              <thead>
+                <tr>
+                  <th>Account / User</th>
+                  <th>CPU Cores Hours</th>
+                  <th>Memory GB·h</th>
+                  <th>Total Cost Amount</th>
+                </tr>
+              </thead>
+              <tbody id="ops-projects-table-body">
+                <tr><td colspan="4" style="text-align:center; color:var(--text-dim); padding: 16px;">Loading Slurm Accounting...</td></tr>
+              </tbody>
+            </table>
           </div>
-          <div id="top-jobs-container" style="display:flex; flex-direction:column; gap:12px;">
-            <div style="color:var(--text-dim); font-size:11px; text-align:center; padding: 20px;">No Heavy Jobs Running</div>
-          </div>
-        </div>
-      </div>
 
-      <!-- Panel 5 & 6: PERFORMANCE METRICS & ALERTS & LOGS -->
-      <div style="display:flex; flex-direction:column; gap:20px;">
-        <!-- Performance Metrics -->
-        <div class="neu-panel" style="height:210px;">
-          <div class="panel-header">
-            <span class="panel-title">PERFORMANCE METRICS</span>
-            <div style="display:flex; align-items:center; gap:8px;">
-              <span style="font-size:10px; color:var(--text-dim);">● CPU  ● Memory</span>
-              <div class="panel-dots" title="Panel Settings"><div class="panel-dots-circle"></div><div class="panel-dots-circle"></div><div class="panel-dots-circle"></div></div>
-            </div>
-          </div>
-          <div style="height: 130px; position: relative;">
-            <canvas id="perfMetricsChart"></canvas>
-          </div>
-        </div>
-
-        <!-- Alerts & Logs -->
-        <div class="neu-panel" style="flex:1;">
-          <div class="panel-header">
-            <span class="panel-title">ALERTS & LOGS</span>
-            <div class="panel-dots" title="Panel Settings"><div class="panel-dots-circle"></div><div class="panel-dots-circle"></div><div class="panel-dots-circle"></div></div>
-          </div>
-          <div class="alerts-inset-container" id="alerts-container">
-            <div class="alert-item">
-              <div class="alert-header-row">
-                <span class="alert-tag-title" style="color:var(--accent-emerald);">ℹ️ Status</span>
-                <span style="color:var(--text-dim);" id="slurm-log-time">Now</span>
+          <div style="display:flex; flex-direction:column; gap:12px;">
+            <div style="font-size:12px; font-weight:700; color:var(--accent-emerald);">Overall Cluster Health & Status</div>
+            <div style="padding:12px; background:var(--card-bg); box-shadow:var(--shadow-inset-deep); border-radius:10px; font-size:11px;">
+              <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+                <span>Total Nodes Online:</span>
+                <strong style="color:var(--accent-cyan);" id="ops-total-nodes-val">--</strong>
               </div>
-              <div style="color:var(--text-primary); font-weight:700;">SlurmRESTd Connected</div>
-              <div style="color:var(--text-dim); font-size:10px;">API OpenAPI v0.0.37 operational</div>
+              <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+                <span>Queue Active Jobs:</span>
+                <strong style="color:var(--accent-emerald);" id="ops-active-jobs-val">--</strong>
+              </div>
+              <div style="display:flex; justify-content:space-between;">
+                <span>Slurm Accounting API:</span>
+                <strong style="color:var(--text-primary);">SACCT Real Database</strong>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- Node Control Modal Popup -->
+  <div class="modal-overlay" id="node-control-modal" style="display: none;">
+    <div class="neu-modal" style="width: 440px;">
+      <div class="modal-header">
+        <span class="modal-title" id="node-modal-title">NODE MANAGEMENT</span>
+        <button class="modal-close-btn" onclick="closeNodeModal()">&times;</button>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:10px; font-size:12px;">
+        <div style="display:flex; justify-content:space-between; padding:8px 12px; background:var(--card-bg); box-shadow:var(--shadow-inset-deep); border-radius:8px;">
+          <span style="color:var(--text-secondary);">Node Name:</span>
+          <strong style="color:var(--accent-cyan);" id="node-modal-name">-</strong>
+        </div>
+        <div style="display:flex; justify-content:space-between; padding:8px 12px; background:var(--card-bg); box-shadow:var(--shadow-inset-deep); border-radius:8px;">
+          <span style="color:var(--text-secondary);">Current State:</span>
+          <strong style="color:var(--text-primary);" id="node-modal-state">-</strong>
+        </div>
+        <div style="display:flex; justify-content:space-between; padding:8px 12px; background:var(--card-bg); box-shadow:var(--shadow-inset-deep); border-radius:8px;">
+          <span style="color:var(--text-secondary);">CPU Cores / Memory:</span>
+          <strong style="color:var(--text-primary);" id="node-modal-specs">-</strong>
+        </div>
+        <div class="form-group">
+          <label>Drain Reason (Required for Drain)</label>
+          <input type="text" id="node-modal-reason" placeholder="e.g. Scheduled hardware maintenance">
+        </div>
+      </div>
+      <div class="modal-actions" style="margin-top:12px;">
+        <button type="button" class="neu-btn rose" id="node-modal-drain-btn">DRAIN Node</button>
+        <button type="button" class="neu-btn emerald" id="node-modal-resume-btn">RESUME Node</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Custom Confirm Modal Popup -->
+  <div class="modal-overlay" id="neu-confirm-modal" style="display: none;">
+    <div class="neu-modal" style="width: 400px;">
+      <div class="modal-header">
+        <span class="modal-title" id="confirm-modal-title">Confirm Action</span>
+        <button class="modal-close-btn" onclick="closeConfirmModal()">&times;</button>
+      </div>
+      <div style="font-size:12px; color:var(--text-primary); line-height:1.5;" id="confirm-modal-message">
+        Are you sure you want to proceed with this operation?
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="neu-btn" onclick="closeConfirmModal()">Cancel</button>
+        <button type="button" class="neu-btn primary" id="confirm-modal-ok-btn">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Launch Workspace Modal Popup -->
+  <div class="modal-overlay" id="launch-workspace-modal" style="display: none;">
+    <div class="neu-modal">
+      <div class="modal-header">
+        <span class="modal-title">LAUNCH CONTAINER WORKSPACE</span>
+        <button class="modal-close-btn" onclick="closeWorkspaceModal()">&times;</button>
+      </div>
+      <form id="launch-workspace-form" onsubmit="handleWorkspaceSubmit(event)" novalidate>
+        <div class="form-group">
+          <label>Environment Type</label>
+          <select id="ws-env-type-select">
+            <option value="vscode">Web-VSCode (Code Server)</option>
+            <option value="jupyter">JupyterLab (Interactive Notebook)</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>CPU Cores</label>
+            <div class="neu-number-group">
+              <button type="button" class="neu-stepper-btn" onclick="stepInput('ws-cpus-input', -1)">-</button>
+              <input type="number" id="ws-cpus-input" value="2" min="1" max="512" required>
+              <button type="button" class="neu-stepper-btn" onclick="stepInput('ws-cpus-input', 1)">+</button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Memory (MB)</label>
+            <div class="neu-number-group">
+              <button type="button" class="neu-stepper-btn" onclick="stepInput('ws-memory-input', -512)">-</button>
+              <input type="number" id="ws-memory-input" value="4096" min="512" max="1000000" step="512" required>
+              <button type="button" class="neu-stepper-btn" onclick="stepInput('ws-memory-input', 512)">+</button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Nodes</label>
+            <div class="neu-number-group">
+              <button type="button" class="neu-stepper-btn" onclick="stepInput('ws-nodes-input', -1)">-</button>
+              <input type="number" id="ws-nodes-input" value="1" min="1" max="64" required>
+              <button type="button" class="neu-stepper-btn" onclick="stepInput('ws-nodes-input', 1)">+</button>
+            </div>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="neu-btn" onclick="closeWorkspaceModal()">Cancel</button>
+          <button type="submit" class="neu-btn primary">Launch Environment</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Submit Job Modal Popup -->
+  <div class="modal-overlay" id="submit-job-modal" style="display: none;">
+    <div class="neu-modal">
+      <div class="modal-header">
+        <span class="modal-title">SUBMIT NEW SLURM JOB (sbatch)</span>
+        <button class="modal-close-btn" onclick="closeSubmitModal()">&times;</button>
+      </div>
+      <div id="job-submit-error-box" class="neu-toast error" style="display:none; font-size:11px; padding:8px 12px; margin-bottom:4px;"></div>
+      <form id="submit-job-form" onsubmit="handleJobSubmit(event)" novalidate>
+        <div class="form-group">
+          <label>Job Name</label>
+          <input type="text" id="job-name-input" placeholder="e.g. data_processing_job" required>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Partition</label>
+            <input type="text" id="job-partition-input" placeholder="debug" value="debug">
+          </div>
+          <div class="form-group">
+            <label>Nodes</label>
+            <div class="neu-number-group">
+              <button type="button" class="neu-stepper-btn" onclick="stepInput('job-nodes-input', -1)">-</button>
+              <input type="number" id="job-nodes-input" value="1" min="1">
+              <button type="button" class="neu-stepper-btn" onclick="stepInput('job-nodes-input', 1)">+</button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Tasks</label>
+            <div class="neu-number-group">
+              <button type="button" class="neu-stepper-btn" onclick="stepInput('job-tasks-input', -1)">-</button>
+              <input type="number" id="job-tasks-input" value="1" min="1">
+              <button type="button" class="neu-stepper-btn" onclick="stepInput('job-tasks-input', 1)">+</button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Time Limit (s)</label>
+            <div class="neu-number-group">
+              <button type="button" class="neu-stepper-btn" onclick="stepInput('job-timelimit-input', -600)">-</button>
+              <input type="number" id="job-timelimit-input" value="3600" min="1">
+              <button type="button" class="neu-stepper-btn" onclick="stepInput('job-timelimit-input', 600)">+</button>
+            </div>
+          </div>
+        </div>
+        <div class="form-group">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+            <label style="margin:0;">Shell Script (sbatch)</label>
+            <div style="display:flex; gap:6px;">
+              <button type="button" class="script-template-btn" onclick="loadJobScriptTemplate('bash')">Basic Shell</button>
+              <button type="button" class="script-template-btn" onclick="loadJobScriptTemplate('mpi')">OpenMPI</button>
+              <button type="button" class="script-template-btn" onclick="loadJobScriptTemplate('python')">Python AI</button>
+            </div>
+          </div>
+          <textarea id="job-script-input" rows="5" placeholder="#!/bin/bash&#10;echo 'Hello Slurm'" required>#!/bin/bash
+echo "Starting Slurm Job"
+srun hostname</textarea>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="neu-btn" onclick="closeSubmitModal()">Cancel</button>
+          <button type="submit" class="neu-btn primary">Submit Job</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Login Node Access Modal Popup -->
+  <div class="modal-overlay" id="login-node-modal" style="display: none;">
+    <div class="neu-modal" style="width: 560px;">
+      <div class="modal-header">
+        <span class="modal-title">SUBMIT / LOGIN NODE CONNECTION PORTAL</span>
+        <button class="modal-close-btn" onclick="closeLoginNodeModal()">&times;</button>
+      </div>
+      
+      <div style="display:flex; flex-direction:column; gap:12px; font-size:12px;">
+        <div style="padding:10px 14px; background:var(--card-bg); box-shadow:var(--shadow-inset-deep); border-radius:10px; border-left:3px solid var(--accent-cyan);">
+          <div style="font-weight:700; color:var(--accent-cyan); margin-bottom:4px;">1. Standard Terminal SSH Access (标准命令行直连)</div>
+          <div style="font-family:monospace; font-size:11px; color:var(--text-primary); background:rgba(0,0,0,0.2); padding:6px 10px; border-radius:6px; display:flex; justify-content:space-between; align-items:center; margin-top:4px;">
+            <code id="ssh-command-text">ssh hpcuser@192.168.20.226 -p 22</code>
+            <button class="neu-btn" style="font-size:9px; padding:2px 6px;" onclick="copySSHCommand()">Copy</button>
+          </div>
+        </div>
+
+        <div style="padding:10px 14px; background:var(--card-bg); box-shadow:var(--shadow-inset-deep); border-radius:10px; border-left:3px solid var(--accent-emerald);">
+          <div style="font-weight:700; color:var(--accent-emerald); margin-bottom:4px;">2. VSCode Remote-SSH Config (IDE 远程连接代码)</div>
+          <pre style="font-family:monospace; font-size:10px; color:var(--text-secondary); background:rgba(0,0,0,0.2); padding:6px 10px; border-radius:6px; margin-top:4px; overflow-x:auto;">Host Slurm-Login-Node
+    HostName 192.168.20.226
+    User hpcuser
+    Port 22</pre>
+        </div>
+
+        <!-- 内置拟物 Web Terminal -->
+        <div style="padding:10px 14px; background:var(--card-bg); box-shadow:var(--shadow-inset-deep); border-radius:10px; border-left:3px solid var(--accent-amber);">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <div style="font-weight:700; color:var(--accent-amber);">3. Quick Web-Terminal (内置免密网页终端)</div>
+            <button class="neu-btn primary" style="font-size:9px; padding:2px 6px;" onclick="showToast('Web Terminal Initialized', 'success')">Connect Shell</button>
+          </div>
+          <div style="background:#0F172A; border-radius:8px; padding:10px; font-family:monospace; font-size:11px; color:#38BDF8; height:110px; overflow-y:auto;">
+            <div>[hpcuser@slurm-login-node ~]$ sinfo</div>
+            <div style="color:#94A3B8;">PARTITION AVAIL  TIMELIMIT  NODES  STATE NODELIST</div>
+            <div style="color:#94A3B8;">debug*       up   infinite      3   idle node[1-3]</div>
+            <div style="margin-top:6px;">[hpcuser@slurm-login-node ~]$ sbatch submit_job.sh</div>
+            <div style="color:#34D399;">Submitted batch job 1042</div>
+            <div style="margin-top:6px; display:flex; align-items:center; gap:4px;">
+              <span style="color:#F59E0B;">[hpcuser@slurm-login-node ~]$</span>
+              <span class="blinking-cursor" style="display:inline-block; width:6px; height:12px; background:#38BDF8;"></span>
             </div>
           </div>
         </div>
       </div>
-    </section>
-  </main>
+
+      <div class="modal-actions" style="margin-top:12px;">
+        <button type="button" class="neu-btn" onclick="closeLoginNodeModal()">Close Portal</button>
+        <button type="button" class="neu-btn primary" onclick="downloadSSHPrivateKey()">Download SSH Key (.pem)</button>
+      </div>
+    </div>
+  </div>
 
   <script src="js/app.js"></script>
 </body>

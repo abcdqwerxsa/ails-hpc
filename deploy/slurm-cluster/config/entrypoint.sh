@@ -2,6 +2,7 @@
 set -e
 
 mkdir -p /etc/munge /var/log/munge /var/lib/munge /var/run/munge /shared
+chmod 1777 /shared  # 多用户共享卷：交互式会话由普通用户(如 hpcuser)提交，需可写（sticky，类 /tmp）
 chown -R munge:munge /etc/munge /var/log/munge /var/lib/munge /var/run/munge
 chmod 0755 /var/run/munge /var/lib/munge /var/log/munge /etc/munge
 

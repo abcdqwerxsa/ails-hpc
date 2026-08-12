@@ -1,0 +1,375 @@
+openapi: 3.0.3
+info:
+  title: SlurmREST Service OpenAPI Specification
+  description: OpenAPI 3.0 specification for SlurmREST v0.0.37 and Modular Monolith Job Management APIs
+  version: v0.0.37
+paths:
+  /api/v1/slurm/ping:
+    get:
+      summary: Ping Slurm Controller
+      description: Tests SlurmRESTd API reachability and slurmctld controller status.
+      responses:
+        '200':
+          description: Slurm controller ping response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PingResponse'
+        '500':
+          description: Internal Server Error
+
+  /api/v1/slurm/jobs/submit:
+    post:
+      summary: Submit a Slurm Job
+      description: Submits a batch script or job specification to Slurm REST API.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitJobRequest'
+      responses:
+        '200':
+          description: Job submitted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmitJobResponse'
+        '400':
+          description: Invalid job submission request
+        '500':
+          description: Internal Server Error
+
+  /api/v1/slurm/jobs:
+    get:
+      summary: List Slurm Jobs
+      description: Fetches active, pending, and completed jobs from Slurm queue.
+      responses:
+        '200':
+          description: List of Slurm jobs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobListResponse'
+        '500':
+          description: Internal Server Error
+
+  /api/v1/slurm/jobs/{id}/cancel:
+    post:
+      summary: Cancel a Slurm Job
+      description: Cancels/terminates the specified job ID.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Target Job ID
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Job cancelled successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobControlResponse'
+        '400':
+          description: Invalid Job ID
+        '404':
+          description: Job not found
+        '500':
+          description: Internal Server Error
+
+  /api/v1/slurm/jobs/{id}/hold:
+    post:
+      summary: Hold a Slurm Job
+      description: Places the specified job ID on hold (HELD state).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Target Job ID
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Job held successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobControlResponse'
+        '400':
+          description: Invalid Job ID
+        '404':
+          description: Job not found
+        '500':
+          description: Internal Server Error
+
+  /api/v1/slurm/jobs/{id}/requeue:
+    post:
+      summary: Requeue a Slurm Job
+      description: Requeues/restarts the specified job ID back into PENDING state.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Target Job ID
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Job requeued successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobControlResponse'
+        '400':
+          description: Invalid Job ID
+        '404':
+          description: Job not found
+        '500':
+          description: Internal Server Error
+
+  /api/v1/slurm/nodes:
+    get:
+      summary: List Compute Nodes
+      description: Returns compute nodes health, CPUs, and runtime state.
+      responses:
+        '200':
+          description: List of compute nodes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodesResponse'
+        '500':
+          description: Internal Server Error
+
+  /api/v1/slurm/nodes/{name}/state:
+    post:
+      summary: Update Node State
+      description: Sets compute node state to DRAIN, RESUME, or IDLE.
+      parameters:
+        - name: name
+          in: path
+          required: true
+          description: Target compute node name
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - state
+              properties:
+                state:
+                  type: string
+                  enum: [DRAIN, RESUME, IDLE]
+      responses:
+        '200':
+          description: Node state updated successfully
+        '400':
+          description: Invalid state parameter
+        '404':
+          description: Node not found
+
+  /api/v1/slurm/containers/launch:
+    post:
+      summary: Launch Interactive Dev Environment
+      description: Launches interactive Web VSCode or JupyterLab container workspace.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - env_type
+              properties:
+                env_type:
+                  type: string
+                  enum: [vscode, jupyter]
+                nodes:
+                  type: integer
+                  default: 1
+                cpus:
+                  type: integer
+                  default: 2
+                memory_mb:
+                  type: integer
+                  default: 4096
+      responses:
+        '200':
+          description: Environment launched successfully
+
+  /api/v1/slurm/billing/usage:
+    get:
+      summary: Get Billing Usage Statistics
+      description: Returns cluster billing usage metrics for CPU, Memory, and GPU hours.
+      parameters:
+        - name: user
+          in: query
+          schema:
+            type: string
+        - name: project
+          in: query
+          schema:
+            type: string
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [json, chart]
+      responses:
+        '200':
+          description: Billing usage statistics
+
+components:
+  schemas:
+    PingResponse:
+      type: object
+      properties:
+        meta:
+          type: object
+          properties:
+            Slurm:
+              type: object
+              properties:
+                release:
+                  type: string
+        errors:
+          type: array
+          items: {}
+        pings:
+          type: array
+          items:
+            type: object
+            properties:
+              hostname:
+                type: string
+              ping:
+                type: string
+              status:
+                type: integer
+              mode:
+                type: string
+
+    SubmitJobRequest:
+      type: object
+      required:
+        - name: script
+          script: script
+      properties:
+        name:
+          type: string
+          example: "sample_batch_job"
+        partition:
+          type: string
+          example: "debug"
+        nodes:
+          type: integer
+          example: 1
+        tasks:
+          type: integer
+          example: 1
+        cpus_per_task:
+          type: integer
+          example: 2
+        time_limit:
+          type: string
+          example: "3600"
+        script:
+          type: string
+          example: "#!/bin/bash\n echo Hello Slurm"
+        current_working_directory:
+          type: string
+          example: "/home/hpcuser"
+
+    SubmitJobResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+          example: 200
+        message:
+          type: string
+          example: "Job submitted successfully"
+        job_id:
+          type: integer
+          example: 1001
+
+    JobControlResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+          example: 200
+        message:
+          type: string
+          example: "Job cancelled successfully"
+        job_id:
+          type: integer
+          example: 1001
+        action:
+          type: string
+          example: "cancel"
+
+    JobSummary:
+      type: object
+      properties:
+        job_id:
+          type: integer
+          example: 1001
+        name:
+          type: string
+          example: "sample_job"
+        partition:
+          type: string
+          example: "debug"
+        job_state:
+          type: string
+          example: "PENDING"
+        nodes:
+          type: string
+          example: "1"
+        time_limit:
+          type: integer
+          example: 3600
+        submit_time:
+          type: integer
+          format: int64
+          example: 1600000000
+
+    JobListResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+          example: 200
+        jobs:
+          type: array
+          items:
+            $ref: '#/components/schemas/JobSummary'
+
+    NodesResponse:
+      type: object
+      properties:
+        errors:
+          type: array
+          items: {}
+        nodes:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              state:
+                type: string
+              cpus:
+                type: integer
+              real_memory:
+                type: integer
+              cores:
+                type: integer

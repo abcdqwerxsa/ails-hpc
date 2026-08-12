@@ -1,0 +1,28 @@
+# AILS HPC 开发账号（仅 bcrypt 哈希入库）。
+# 明文密码仅供本地开发便利，**生产环境务必通过 AILS_USERS_FILE 指向独立维护的文件覆盖**。
+#
+#   admin          / admin123        — 超级系统管理员（纯硬件监控 + DRAIN/RESUME）
+#   tenantadmin    / tenantadmin123  — 租户管理员（member 能力 + 团队管理）
+#   member         / member123       — 普通租户成员（作业/容器/登录节点）
+#   ops            / ops123          — 运营人员（纯绩效大屏，零写操作）
+users:
+  - username: admin
+    password_hash: "$2a$10$BdvUiVHcRr9S.6E8QLncheAmBiMCicly8PiUy1/XFPLT.Xe1VFFRC"
+    role: admin
+    orgSlug: hpc-lab
+    tenantNs: default
+  - username: tenantadmin
+    password_hash: "$2a$10$ynqhJOawBYNMuGxRrH1fxu29s6eXJ1hOuvwkqz9ehkNKRfp8r30Zm"
+    role: tenant_admin
+    orgSlug: hpc-lab
+    tenantNs: default
+  - username: member
+    password_hash: "$2a$10$zcdPehEW2zKt2ih8/otSUO9AbMVEbTEvjTH8oc/rLqoJgaOSttHwO"
+    role: member
+    orgSlug: hpc-lab
+    tenantNs: default
+  - username: ops
+    password_hash: "$2a$10$h1QRDYP3sNVHn2dN9zrkFOIeAqkKmYs1CHzsSw2vSwj4WAcdhktwi"
+    role: ops_admin
+    orgSlug: hpc-lab
+    tenantNs: default

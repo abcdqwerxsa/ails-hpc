@@ -33,6 +33,16 @@ RUN apt-get update && apt-get install -y \
     netcat \
     && rm -rf /var/lib/apt/lists/*
 
+# 交互式 Web IDE/Notebook 运行时（OOD 范式：作为 Slurm 作业在计算节点上由 sbatch 拉起）
+#   - jupyterlab/notebook：清华 pip 镜像
+#   - code-server：官方 install.sh（从 GitHub release 下载）
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip && \
+    pip3 install --no-cache-dir \
+        -i https://pypi.tuna.tsinghua.edu.cn/simple \
+        jupyterlab notebook && \
+    curl -fsSL https://code-server.dev/install.sh | sh && \
+    rm -rf /var/lib/apt/lists/*
+
 # 配置 Munge 和 Slurm 系统账号与 PID/Spool 专属目录
 RUN groupadd -g 991 munge && \
     useradd -u 991 -g munge -d /var/lib/munge -s /bin/false munge || true

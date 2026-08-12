@@ -3,86 +3,63 @@ package main
 import (
 	"flag"
 	"log"
-	"net/http"
 
-	"ails-hpc/pkg/apis"
 	"ails-hpc/pkg/auth"
-
-	"github.com/gin-gonic/gin"
-	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/clientcmd"
+	"ails-hpc/pkg/config"
+	"ails-hpc/pkg/services/billing"
+	"ails-hpc/pkg/services/cluster"
+	"ails-hpc/pkg/services/containers"
+	"ails-hpc/pkg/services/jobs"
+	"ails-hpc/pkg/services/nodes"
+	"ails-hpc/pkg/slurmrest"
 )
 
+// main 是 AILS HPC Slurm 管理平台的唯一运行入口（纯 SlurmRESTd 单体）。
+//
+// 运行所需环境变量（pkg/config）：
+//   - AILS_JWT_SECRET            （必填）登录 JWT 签名密钥，空则拒绝启动
+//   - AILS_USERS_FILE            用户库 YAML，默认 config/users.yaml
+//   - SLURMRESTD_URL             slurmrestd 地址，默认 http://192.168.20.226:6820
+//   - AILS_SLURM_USER            slurm 用户名，默认 hpcuser
+//   - AILS_TOKEN_TTL / AILS_PORT 可选
 func main() {
-	kubeconfig := flag.String("kubeconfig", "/etc/kubernetes/admin.conf", "Path to kubeconfig file")
-	port := flag.String("port", "8090", "Port for API server")
+	portFlag := flag.String("port", "", "Port for API server (overrides AILS_PORT; default 8090)")
 	flag.Parse()
 
-	var dynamicClient dynamic.Interface
-	var kubeClient kubernetes.Interface
-
-	config, err := clientcmd.BuildConfigFromFlags("", *kubeconfig)
-	if err == nil {
-		dynamicClient, _ = dynamic.NewForConfig(config)
-		kubeClient, _ = kubernetes.NewForConfig(config)
-	} else {
-		log.Printf("Warning: Could not load kubeconfig (%v). Running Slurm REST Portal standalone mode.", err)
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("config load failed: %v", err)
 	}
 
-	r := gin.Default()
+	// 注入签名密钥与 TTL（fail-closed：无密钥已在 config.Load 阶段拒绝启动）
+	auth.SetSecret(cfg.JWTSecret)
+	auth.SetTokenTTL(cfg.TokenTTL)
 
-	// Enable CORS for Web Portal
-	r.Use(func(c *gin.Context) {
-		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE")
-
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(24)
-			return
-		}
-		c.Next()
-	})
-
-	jobHandler := &apis.JobHandler{DynamicClient: dynamicClient}
-	queueHandler := &apis.QueueHandler{DynamicClient: dynamicClient}
-	logHandler := &apis.LogHandler{KubeClient: kubeClient}
-	authHandler := &apis.AuthHandler{}
-	slurmHandler := apis.NewSlurmHandler("http://192.168.20.226:6820", "hpcuser")
-
-	// Public Auth & Slurm Monitoring Endpoints
-	r.POST("/api/v1/auth/login", authHandler.Login)
-	r.POST("/api/v1/auth/sso", authHandler.Login)
-
-	// Direct Slurm Portal REST APIs
-	slurmGroup := r.Group("/api/v1/slurm")
-	{
-		slurmGroup.GET("/ping", slurmHandler.GetStatus)
-		slurmGroup.GET("/nodes", slurmHandler.GetNodes)
-		slurmGroup.GET("/jobs", slurmHandler.GetJobs)
-		slurmGroup.GET("/partitions", slurmHandler.GetPartitions)
-		slurmGroup.POST("/launch", slurmHandler.LaunchDevEnvironment)
+	userStore, err := auth.LoadUserStore(cfg.UsersFile)
+	if err != nil {
+		log.Fatalf("load users from %s: %v", cfg.UsersFile, err)
 	}
 
-	// Serve Neumorphic Web Dashboard Static Portal
-	r.Static("/portal", "./apps/web")
-	r.GET("/", func(c *gin.Context) {
-		c.Redirect(http.StatusMovedPermanently, "/portal/")
-	})
+	// 共享单个 slurmrestd 客户端（懒加载 token、401/403 自动续期）
+	slurmClient := slurmrest.NewClient(cfg.SlurmRESTDURL, cfg.SlurmUserName, "")
+	billingService := billing.NewBillingService(slurmClient)
 
-	// Protected API Routes with JWT & RBAC Middleware
-	apiGroup := r.Group("/api/v1")
-	apiGroup.Use(auth.JWTAuthMiddleware())
-	{
-		apiGroup.GET("/hpcjobs", jobHandler.ListJobs)
-		apiGroup.POST("/hpcjobs", auth.RBACRequireRole("admin", "member"), jobHandler.CreateJob)
-		apiGroup.DELETE("/hpcjobs/:name", auth.RBACRequireRole("admin", "member"), jobHandler.DeleteJob)
-		apiGroup.GET("/queues", queueHandler.GetQueueStatus)
+	handlers := Handlers{
+		Auth:       auth.NewAuthHandler(userStore),
+		Cluster:    cluster.NewClusterHandler(cluster.NewClusterService(slurmClient)),
+		Nodes:      nodes.NewNodeHandler(nodes.NewNodeService(slurmClient)),
+		Jobs:       jobs.NewJobHandler(jobs.NewJobService(slurmClient)),
+		Containers: containers.NewContainerHandler(containers.NewContainerService(slurmClient)),
+		Billing:    billing.NewBillingHandler(billingService),
 	}
 
-	r.GET("/ws/logs", logHandler.StreamPodLogs)
+	r := NewRouter(handlers)
 
-	r.Run(":" + *port)
+	port := *portFlag
+	if port == "" {
+		port = cfg.ListenPort
+	}
+	if err := r.Run(":" + port); err != nil {
+		log.Fatalf("server stopped: %v", err)
+	}
 }

@@ -49,7 +49,7 @@
   --shadow-btn-active: inset 4px 4px 8px #D1D9E6, inset -4px -4px 8px #FFFFFF;
   --sidebar-shadow: 6px 0 20px rgba(166, 180, 200, 0.25);
 
-  --shadow-inset-deep: inset 4px 4px 8px rgba(166, 180, 200, 0.5), inset 10px 10px 20px #CBD5E1, inset -2px -2px 4px #FFFFFF, inset -10px -10px 20px #FFFFFF;
+  --shadow-inset-deep: inset 2px 2px 4px rgba(166, 180, 200, 0.25), inset 5px 5px 10px rgba(203, 213, 225, 0.25), inset -2px -2px 4px #FFFFFF, inset -5px -5px 10px #FFFFFF;
 
   --accent-cyan: #0284C7;
   --accent-cyan-glow: 0 0 12px rgba(2, 132, 199, 0.5);
@@ -57,24 +57,31 @@
   --accent-emerald-glow: 0 0 12px rgba(5, 150, 105, 0.5);
 }
 
-html, body {
-  width: 100%;
-  max-width: 100vw;
-  overflow-x: hidden;
-}
-
 * {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
-  transition: background-color 0.3s ease, color 0.3s ease, box-shadow 0.3s ease;
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
 }
 
-body {
+*::-webkit-scrollbar {
+  width: 0px !important;
+  height: 0px !important;
+  background: transparent !important;
+  display: none !important;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  max-width: 100vw;
+  max-height: 100vh;
+  overflow: hidden !important;
   background-color: var(--bg-main);
   color: var(--text-primary);
   font-family: var(--font-sans);
-  min-height: 100vh;
+  transition: background-color 0.3s ease, color 0.3s ease, box-shadow 0.3s ease;
   display: flex;
 }
 
@@ -103,8 +110,10 @@ body {
 [data-theme="light"] .neu-panel, 
 [data-theme="light"] .icon-btn, 
 [data-theme="light"] .node-small-chip {
-  background-image: linear-gradient(var(--card-bg), var(--card-bg)), 
-                    linear-gradient(135deg, #FFFFFF 0%, rgba(255, 255, 255, 0.4) 35%, rgba(185, 200, 220, 0.5) 100%);
+  background-image: none !important;
+  background-clip: border-box !important;
+  border: 1px solid rgba(255, 255, 255, 0.9) !important;
+  box-shadow: var(--shadow-card);
 }
 
 [data-theme="light"] .search-box, 
@@ -112,8 +121,10 @@ body {
 [data-theme="light"] .alerts-inset-container, 
 [data-theme="light"] .progress-track, 
 [data-theme="light"] .status-badge-circle {
-  background-image: linear-gradient(var(--card-bg), var(--card-bg)), 
-                    linear-gradient(135deg, rgba(180, 195, 215, 0.45) 0%, rgba(255, 255, 255, 0.8) 100%);
+  background-image: none !important;
+  background-clip: border-box !important;
+  border: 1px solid rgba(203, 213, 225, 0.5) !important;
+  box-shadow: var(--shadow-inset-deep);
 }
 
 /* Sidebar Styling */
@@ -151,11 +162,15 @@ aside.sidebar {
 }
 
 .search-box {
+  background: var(--card-bg);
+  box-shadow: var(--shadow-inset-deep);
   padding: 10px 14px;
   border-radius: 9px;
   display: flex;
   align-items: center;
   gap: 10px;
+  border: 1px solid transparent;
+  transition: all 0.2s ease;
 }
 
 .search-box svg {
@@ -171,6 +186,29 @@ aside.sidebar {
   color: var(--text-primary);
   font-size: 12px;
   width: 100%;
+}
+
+.search-box input::placeholder {
+  color: var(--text-dim);
+}
+
+/* 亮色模式专属 Search Box 拟物内沉凹阴影 */
+[data-theme="light"] .search-box {
+  background: #E2E8F0;
+  box-shadow: inset 2px 2px 5px rgba(166, 180, 200, 0.7), inset -2px -2px 5px rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(203, 213, 225, 0.5);
+}
+
+[data-theme="light"] .search-box input {
+  color: #0F172A;
+}
+
+[data-theme="light"] .search-box input::placeholder {
+  color: #64748B;
+}
+
+[data-theme="light"] .search-box svg {
+  fill: #64748B;
 }
 
 .nav-menu {
@@ -211,11 +249,13 @@ aside.sidebar {
 /* Content Area & Header */
 main.content-area {
   flex: 1;
+  height: 100vh;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 24px 32px;
   display: flex;
   flex-direction: column;
   gap: 24px;
-  overflow-y: auto;
 }
 
 header.top-bar {
@@ -328,10 +368,10 @@ header.top-bar {
   position: relative;
 }
 
-/* 50% 比例 Dashboard Panels */
+/* 1:1:1:1 上下完美对齐 4 列 Dashboard Panels */
 .full-grid-layout {
   display: grid;
-  grid-template-columns: 2.2fr 2.8fr 2.5fr 2.5fr;
+  grid-template-columns: repeat(4, 1fr);
   gap: 20px;
   width: 100%;
 }
@@ -388,8 +428,8 @@ header.top-bar {
 /* Column 1: Node Status Grid */
 .node-matrix-container {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  gap: 6.5px;
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  gap: 8px;
   overflow: visible;
 }
 
@@ -593,3 +633,523 @@ header.top-bar {
     gap: 12px;
   }
 }
+
+/* Neumorphic Buttons & Modal Dialogs */
+.neu-btn {
+  background: var(--card-bg);
+  box-shadow: var(--shadow-btn);
+  border-radius: 8px;
+  border: 1px solid transparent;
+  color: var(--text-primary);
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.2s ease;
+}
+
+.neu-btn:hover {
+  color: var(--accent-cyan);
+}
+
+.neu-btn:active {
+  box-shadow: var(--shadow-btn-active);
+}
+
+.neu-btn.primary {
+  color: var(--accent-cyan);
+  border-color: rgba(6, 182, 212, 0.3);
+}
+
+.neu-btn.amber {
+  color: var(--accent-amber);
+}
+
+.neu-btn.rose {
+  color: var(--accent-rose);
+}
+
+.neu-btn.emerald {
+  color: var(--accent-emerald);
+}
+
+.action-btn-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.action-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--card-bg);
+  box-shadow: var(--shadow-btn);
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 10px;
+  transition: all 0.2s ease;
+}
+
+.action-btn:active {
+  box-shadow: var(--shadow-btn-active);
+}
+
+/* Custom Neumorphic Tooltip */
+[data-tooltip] {
+  position: relative;
+}
+
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: 125%;
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  background: var(--card-bg);
+  box-shadow: var(--shadow-card-hover);
+  color: var(--text-primary);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(6, 182, 212, 0.3);
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: all 0.2s ease;
+  z-index: 1000;
+}
+
+[data-tooltip]:hover::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* Modal Popup & Confirm Dialog */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(5px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.neu-modal {
+  background: var(--card-bg);
+  border-radius: 16px;
+  padding: 20px 24px;
+  width: 520px;
+  max-width: 92vw;
+  max-height: 85vh;
+  overflow-y: auto;
+  box-shadow: var(--shadow-card-hover);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  border: 1.5px solid transparent;
+  background-image: linear-gradient(var(--card-bg), var(--card-bg)), 
+                    linear-gradient(135deg, rgba(255, 255, 255, 0.18) 0%, rgba(255, 255, 255, 0.02) 35%, rgba(0, 0, 0, 0.45) 100%);
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
+  color: var(--text-primary);
+}
+
+/* Custom Neumorphic Notification Toast & Confirm Dialog */
+.neu-toast-container {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.node-small-chip {
+  background: var(--card-bg);
+  box-shadow: var(--shadow-btn);
+  border-radius: 6px;
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-primary);
+  border: 1px solid transparent;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.15s ease;
+}
+
+.node-small-chip:hover {
+  transform: translateY(-1px);
+  border-color: rgba(6, 182, 212, 0.3);
+}
+
+.node-small-chip:active,
+.node-small-chip.selected {
+  box-shadow: var(--shadow-inset-deep) !important;
+  transform: translateY(0) !important;
+  border-color: rgba(6, 182, 212, 0.5) !important;
+}
+
+.neu-toast {
+  pointer-events: auto;
+  background: var(--card-bg);
+  box-shadow: var(--shadow-card-hover);
+  border-radius: 10px;
+  padding: 12px 18px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgba(6, 182, 212, 0.4);
+  animation: toastIn 0.3s ease forwards;
+}
+
+.neu-toast.error {
+  border-color: rgba(244, 63, 94, 0.6);
+  color: var(--accent-rose);
+  background-image: linear-gradient(135deg, rgba(244, 63, 94, 0.08) 0%, transparent 100%);
+}
+
+.neu-toast.success {
+  border-color: rgba(16, 185, 129, 0.6);
+  color: var(--accent-emerald);
+  background-image: linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, transparent 100%);
+}
+
+@keyframes toastIn {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Formal Status Tags */
+.status-pill {
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  display: inline-block;
+  background: var(--card-bg);
+  box-shadow: var(--shadow-btn);
+}
+
+.status-pill.running { color: var(--accent-emerald); border: 1px solid rgba(16, 185, 129, 0.3); }
+.status-pill.pending { color: var(--accent-amber); border: 1px solid rgba(245, 158, 11, 0.3); }
+.status-pill.completed { color: var(--accent-cyan); border: 1px solid rgba(6, 182, 212, 0.3); }
+.status-pill.cancelled, .status-pill.failed { color: var(--accent-rose); border: 1px solid rgba(244, 63, 94, 0.3); }
+.status-pill.held { color: #A855F7; border: 1px solid rgba(168, 85, 247, 0.3); }
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.modal-title {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  color: var(--accent-cyan);
+}
+
+.modal-close-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.modal-close-btn:hover {
+  color: var(--accent-rose);
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.form-group label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+/* 统一全量 Input, Textarea, Select 输入框规范 */
+.form-group input,
+.form-group textarea,
+.form-group select,
+.neu-input {
+  background: var(--card-bg) !important;
+  box-shadow: var(--shadow-inset-deep) !important;
+  border-radius: 8px !important;
+  border: 1.5px solid transparent !important;
+  color: var(--text-primary) !important;
+  padding: 8px 12px !important;
+  font-size: 12px !important;
+  font-family: inherit !important;
+  outline: none !important;
+  transition: border-color 0.2s ease;
+}
+
+.form-group input::placeholder,
+.form-group textarea::placeholder {
+  color: var(--text-dim) !important;
+  opacity: 0.7;
+}
+
+.form-group input:focus,
+.form-group textarea:focus,
+.form-group select:focus,
+.neu-input:focus {
+  border-color: rgba(6, 182, 212, 0.6) !important;
+}
+
+/* Custom Neumorphic Form Controls & Stepper */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+.neu-number-group {
+  display: flex;
+  align-items: center;
+  background: var(--card-bg);
+  box-shadow: var(--shadow-inset-deep);
+  border-radius: 8px;
+  padding: 2px 4px;
+}
+
+.neu-number-group input {
+  box-shadow: none !important;
+  border: none !important;
+  background: transparent !important;
+  text-align: center;
+  width: 100%;
+  padding: 6px 4px !important;
+}
+
+.neu-stepper-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--card-bg);
+  box-shadow: var(--shadow-btn);
+  border: none;
+  color: var(--text-primary);
+  font-weight: 800;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.neu-stepper-btn:active {
+  box-shadow: var(--shadow-btn-active);
+}
+
+.form-group select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2306B6D4'%3e%3cpath d='M7 10l5 5 5-5z'/%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 16px;
+  padding-right: 30px !important;
+  cursor: pointer;
+}
+
+.form-group select option {
+  background-color: var(--card-bg);
+  color: var(--text-primary);
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+/* User Role Selector Header */
+.user-role-select {
+  background: var(--card-bg);
+  box-shadow: var(--shadow-btn);
+  border-radius: 8px;
+  border: 1px solid rgba(6, 182, 212, 0.3);
+  color: var(--accent-cyan);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 8px;
+  outline: none;
+  cursor: pointer;
+}
+
+.user-role-select option {
+  background-color: var(--card-bg);
+  color: var(--text-primary);
+}
+
+/* Operations Admin Analytics Panel (高校/运营专属视角) */
+.ops-analytics-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 20px;
+  width: 100%;
+}
+
+.project-rank-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.project-rank-table th {
+  text-align: left;
+  padding: 8px;
+  color: var(--text-dim);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* 专有视图页面通用 Filter Bar & Search */
+.page-filter-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  background: var(--card-bg);
+  box-shadow: var(--shadow-btn);
+  border-radius: 12px;
+  padding: 12px 18px;
+  margin-bottom: 16px;
+}
+
+.filter-group-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.filter-pill-btn {
+  background: var(--card-bg);
+  box-shadow: var(--shadow-btn);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.filter-pill-btn:hover,
+.filter-pill-btn.active {
+  color: var(--accent-cyan);
+  border-color: rgba(6, 182, 212, 0.4);
+  box-shadow: var(--shadow-btn-active);
+}
+
+.script-template-btn {
+  background: var(--card-bg);
+  box-shadow: var(--shadow-btn);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent-cyan);
+  border: 1px solid rgba(6, 182, 212, 0.2);
+  cursor: pointer;
+}
+
+/* 四大角色解耦专属 Root View 容器 */
+.role-view-root {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  width: 100%;
+}
+
+/* 租户轻量监控卡片网格 */
+.tenant-mini-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  width: 100%;
+}
+
+.tenant-stat-card {
+  background: var(--card-bg);
+  box-shadow: var(--shadow-card);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tenant-stat-card .label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.tenant-stat-card .val {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--accent-cyan);
+}
+
+.member-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.member-table th {
+  text-align: left;
+  padding: 8px 6px;
+  color: var(--text-dim);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.member-table td {
+  padding: 8px 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+  color: var(--text-primary);
+}
+
