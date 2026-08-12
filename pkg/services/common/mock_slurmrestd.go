@@ -84,6 +84,13 @@ func NewMockSlurmServer() *MockSlurmServer {
 					"real_memory": 128000,
 					"cores":       32,
 				},
+				{
+					"name":        "node3",
+					"state":       "IDLE",
+					"cpus":        64,
+					"real_memory": 128000,
+					"cores":       32,
+				},
 			},
 		}
 		_ = json.NewEncoder(w).Encode(resp)

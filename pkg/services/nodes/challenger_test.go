@@ -10,17 +10,24 @@ import (
 	"sync"
 	"testing"
 
+	"ails-hpc/pkg/services/common"
 	"ails-hpc/pkg/services/nodes"
+	"ails-hpc/pkg/slurmrest"
+
 	"github.com/gin-gonic/gin"
 )
 
 // TestChallenger_Nodes_ConcurrencyStress tests concurrent read (ListNodes) and write (UpdateNodeState) operations using go test -race.
 func TestChallenger_Nodes_ConcurrencyStress(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	svc := nodes.NewNodeService(nil)
+	mock := common.NewMockSlurmServer()
+	t.Cleanup(mock.Close)
+	client := slurmrest.NewClient(mock.URL, "hpcuser", "test-token")
+	svc := nodes.NewNodeService(client)
 	handler := nodes.NewNodeHandler(svc)
 
 	router := gin.New()
+	router.Use(gin.Recovery())
 	router.GET("/api/v1/slurm/nodes", handler.GetNodes)
 	router.POST("/api/v1/slurm/nodes/:name/state", handler.UpdateNodeState)
 
@@ -90,7 +97,7 @@ func TestChallenger_Nodes_ConcurrencyStress(t *testing.T) {
 
 // TestChallenger_Nodes_InvalidAndBoundaryNodeNames tests node state updates with invalid node names and paths.
 func TestChallenger_Nodes_InvalidAndBoundaryNodeNames(t *testing.T) {
-	router, _ := setupNodeTestRouter()
+	router, _ := setupNodeTestRouter(t)
 
 	testCases := []struct {
 		name           string
@@ -122,7 +129,7 @@ func TestChallenger_Nodes_InvalidAndBoundaryNodeNames(t *testing.T) {
 
 // TestChallenger_Nodes_InvalidStateValues tests node state updates with invalid/unsupported state strings.
 func TestChallenger_Nodes_InvalidStateValues(t *testing.T) {
-	router, _ := setupNodeTestRouter()
+	router, _ := setupNodeTestRouter(t)
 
 	invalidStates := []string{
 		"UNKNOWN",
@@ -151,7 +158,7 @@ func TestChallenger_Nodes_InvalidStateValues(t *testing.T) {
 
 // TestChallenger_Nodes_StateTransitionsAndReasoning tests node state transition idempotency and reason persistence.
 func TestChallenger_Nodes_StateTransitionsAndReasoning(t *testing.T) {
-	router, svc := setupNodeTestRouter()
+	router, svc := setupNodeTestRouter(t)
 	ctx := context.Background()
 
 	// 1. DRAIN with reason
