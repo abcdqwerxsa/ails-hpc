@@ -3,6 +3,8 @@ package cluster
 import (
 	"net/http"
 
+	"ails-hpc/pkg/httpx"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -22,10 +24,8 @@ func NewClusterHandler(service ClusterService) *ClusterHandler {
 func (h *ClusterHandler) GetStatus(c *gin.Context) {
 	res, err := h.service.Ping(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{
-			"status": "DOWN",
-			"error":  err.Error(),
-		})
+		// 503 是面向客户端的"集群不可达"信号（非内部泄密），保留真实消息 + status:"DOWN"
+		httpx.ServiceUnavailable(c, err.Error(), httpx.Extra{"status": "DOWN"})
 		return
 	}
 	c.JSON(http.StatusOK, res)
@@ -35,7 +35,7 @@ func (h *ClusterHandler) GetStatus(c *gin.Context) {
 func (h *ClusterHandler) GetPartitions(c *gin.Context) {
 	res, err := h.service.ListPartitions(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httpx.Internal(c, "GetPartitions", err)
 		return
 	}
 	c.JSON(http.StatusOK, res)

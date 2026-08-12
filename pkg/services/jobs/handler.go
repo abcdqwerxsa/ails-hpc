@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strconv"
 
+	"ails-hpc/pkg/httpx"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -19,34 +21,22 @@ func NewJobHandler(service JobService) *JobHandler {
 func (h *JobHandler) SubmitJob(c *gin.Context) {
 	var req SubmitJobRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":  400,
-			"error": "Invalid job submission request: " + err.Error(),
-		})
+		httpx.BadRequest(c, "Invalid job submission request: "+err.Error())
 		return
 	}
 
 	if req.Script == "" && req.Name == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":  400,
-			"error": "Job script or name is required",
-		})
+		httpx.BadRequest(c, "Job script or name is required")
 		return
 	}
 
 	resp, err := h.service.SubmitJob(c.Request.Context(), &req)
 	if err != nil {
 		if errors.Is(err, ErrInvalidResourceLimit) || errors.Is(err, ErrNegativeResources) {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"code":  400,
-				"error": err.Error(),
-			})
+			httpx.BadRequest(c, err.Error())
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":  500,
-			"error": err.Error(),
-		})
+		httpx.Internal(c, "SubmitJob", err)
 		return
 	}
 
@@ -56,10 +46,7 @@ func (h *JobHandler) SubmitJob(c *gin.Context) {
 func (h *JobHandler) ListJobs(c *gin.Context) {
 	jobsList, err := h.service.ListJobs(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":  500,
-			"error": err.Error(),
-		})
+		httpx.Internal(c, "ListJobs", err)
 		return
 	}
 
@@ -73,19 +60,13 @@ func (h *JobHandler) CancelJob(c *gin.Context) {
 	idStr := c.Param("id")
 	jobID, err := strconv.Atoi(idStr)
 	if err != nil || jobID <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":  400,
-			"error": "Invalid Job ID",
-		})
+		httpx.BadRequest(c, "Invalid Job ID")
 		return
 	}
 
 	resp, err := h.service.CancelJob(c.Request.Context(), jobID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":  500,
-			"error": err.Error(),
-		})
+		httpx.Internal(c, "CancelJob", err)
 		return
 	}
 
@@ -96,26 +77,17 @@ func (h *JobHandler) HoldJob(c *gin.Context) {
 	idStr := c.Param("id")
 	jobID, err := strconv.Atoi(idStr)
 	if err != nil || jobID <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":  400,
-			"error": "Invalid Job ID",
-		})
+		httpx.BadRequest(c, "Invalid Job ID")
 		return
 	}
 
 	resp, err := h.service.HoldJob(c.Request.Context(), jobID)
 	if err != nil {
 		if errors.Is(err, ErrCannotHoldCancelled) {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"code":  400,
-				"error": err.Error(),
-			})
+			httpx.BadRequest(c, err.Error())
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":  500,
-			"error": err.Error(),
-		})
+		httpx.Internal(c, "HoldJob", err)
 		return
 	}
 
@@ -126,19 +98,13 @@ func (h *JobHandler) RequeueJob(c *gin.Context) {
 	idStr := c.Param("id")
 	jobID, err := strconv.Atoi(idStr)
 	if err != nil || jobID <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":  400,
-			"error": "Invalid Job ID",
-		})
+		httpx.BadRequest(c, "Invalid Job ID")
 		return
 	}
 
 	resp, err := h.service.RequeueJob(c.Request.Context(), jobID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":  500,
-			"error": err.Error(),
-		})
+		httpx.Internal(c, "RequeueJob", err)
 		return
 	}
 

@@ -1,8 +1,9 @@
 package auth
 
 import (
-	"net/http"
 	"strings"
+
+	"ails-hpc/pkg/httpx"
 
 	"github.com/gin-gonic/gin"
 )
@@ -23,14 +24,15 @@ func JWTAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := strings.TrimSpace(c.GetHeader("Authorization"))
 		if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing or invalid Authorization header"})
+			httpx.Unauthorized(c, "missing or invalid Authorization header")
 			return
 		}
 
 		tokenStr := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
 		claims, err := VerifyToken(tokenStr)
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: " + err.Error()})
+			// 固定文案：不外泄 JWT 校验内部细节（签名/解析错误等）
+			httpx.Unauthorized(c, "invalid or expired token")
 			return
 		}
 
@@ -47,12 +49,12 @@ func RequireRole(allowedRoles ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		val, exists := c.Get("claims")
 		if !exists {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing authenticated context"})
+			httpx.Unauthorized(c, "missing authenticated context")
 			return
 		}
 		claims, ok := val.(*Claims)
 		if !ok {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid authenticated context"})
+			httpx.Unauthorized(c, "invalid authenticated context")
 			return
 		}
 
@@ -63,9 +65,6 @@ func RequireRole(allowedRoles ...string) gin.HandlerFunc {
 			}
 		}
 
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-			"error":    "forbidden: role '" + claims.Role + "' is not permitted",
-			"required": allowedRoles,
-		})
+		httpx.Forbidden(c, "forbidden: role '"+claims.Role+"' is not permitted", allowedRoles)
 	}
 }

@@ -3,6 +3,8 @@ package auth
 import (
 	"net/http"
 
+	"ails-hpc/pkg/httpx"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -42,20 +44,20 @@ func NewAuthHandler(store UserStore) *AuthHandler {
 func (h *AuthHandler) Login(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "username and password are required"})
+		httpx.BadRequest(c, "username and password are required")
 		return
 	}
 
 	user, err := h.store.Verify(req.Username, req.Password)
 	if err != nil {
 		// 用户不存在/密码错同一文案，避免用户名枚举
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid username or password"})
+		httpx.Unauthorized(c, "invalid username or password")
 		return
 	}
 
 	token, err := GenerateToken(user.Username, user.Role, user.OrgSlug, user.TenantNS)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to issue token"})
+		httpx.Internal(c, "Login.GenerateToken", err)
 		return
 	}
 
