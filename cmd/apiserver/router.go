@@ -35,8 +35,9 @@ func NewRouter(h Handlers) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Recovery(), requestIDMiddleware(), accessLogMiddleware(), corsMiddleware())
 
-	// 公开路由：仅登录。其余 /api/v1/** 一律需 Bearer JWT。
+	// 公开路由：登录 + liveness 探针。其余 /api/v1/** 一律需 Bearer JWT。
 	r.POST("/api/v1/auth/login", h.Auth.Login)
+	r.GET("/healthz", healthHandler) // 免鉴权：systemd ExecStartPost / 负载均衡探活用
 
 	api := r.Group("/api/v1")
 	api.Use(auth.JWTAuthMiddleware())
@@ -80,6 +81,12 @@ func NewRouter(h Handlers) *gin.Engine {
 	})
 
 	return r
+}
+
+// healthHandler GET /healthz —— liveness 探针，免鉴权。
+// 仅表示进程在跑且 gin 能服务 HTTP（不探 slurmrestd 可达性，避免后端抖动触发重启风暴）。
+func healthHandler(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
 // corsMiddleware 处理浏览器跨域预检与简单请求。

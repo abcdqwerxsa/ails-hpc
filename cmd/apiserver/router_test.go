@@ -262,6 +262,26 @@ func TestRouter_ErrorEnvelope(t *testing.T) {
 	}
 }
 
+// TestRouter_Healthz 锁定 liveness 端点：GET /healthz 免鉴权返 200 {"status":"ok"}。
+func TestRouter_Healthz(t *testing.T) {
+	r, _ := setupTestRouter(t)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/healthz", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("healthz: want 200 got %d body=%s", w.Code, w.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v body=%s", err, w.Body.String())
+	}
+	if body["status"] != "ok" {
+		t.Errorf("status = %v, want \"ok\"", body["status"])
+	}
+}
+
 // doRequestWithBody 与 doRequest 类似，但回传响应体（登录测试需要解析）。
 func doRequestWithBody(r *gin.Engine, method, path, body string) (int, string) {
 	req, _ := http.NewRequest(method, path, bytes.NewBufferString(body))
