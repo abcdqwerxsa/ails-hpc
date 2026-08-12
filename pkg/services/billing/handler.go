@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"strconv"
 
+	"ails-hpc/pkg/httpx"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -23,14 +25,14 @@ func (h *BillingHandler) RegisterRoutes(rg *gin.RouterGroup) {
 func (h *BillingHandler) GetUsage(c *gin.Context) {
 	format := c.Query("format")
 	if format != "" && format != "json" && format != "chart" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid format query parameter"})
+		httpx.BadRequest(c, "Invalid format query parameter")
 		return
 	}
 
 	startTime := c.Query("start_time")
 	endTime := c.Query("end_time")
 	if startTime != "" && endTime != "" && startTime > endTime {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "start_time cannot be greater than end_time"})
+		httpx.BadRequest(c, "start_time cannot be greater than end_time")
 		return
 	}
 
@@ -40,7 +42,7 @@ func (h *BillingHandler) GetUsage(c *gin.Context) {
 		var err error
 		limit, err = strconv.Atoi(limitStr)
 		if err != nil || limit < 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "limit must be non-negative"})
+			httpx.BadRequest(c, "limit must be non-negative")
 			return
 		}
 	}
@@ -56,7 +58,7 @@ func (h *BillingHandler) GetUsage(c *gin.Context) {
 
 	resp, err := h.service.GetUsage(c.Request.Context(), param)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httpx.Internal(c, "GetUsage", err)
 		return
 	}
 
@@ -66,7 +68,7 @@ func (h *BillingHandler) GetUsage(c *gin.Context) {
 func (h *BillingHandler) ExportReport(c *gin.Context) {
 	format := c.DefaultQuery("format", "json")
 	if format != "json" && format != "chart" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid export format. Supported: json, chart"})
+		httpx.BadRequest(c, "Invalid export format. Supported: json, chart")
 		return
 	}
 
@@ -78,7 +80,7 @@ func (h *BillingHandler) ExportReport(c *gin.Context) {
 
 	report, err := h.service.ExportReport(c.Request.Context(), param)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httpx.Internal(c, "ExportReport", err)
 		return
 	}
 

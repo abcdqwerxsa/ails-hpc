@@ -205,6 +205,63 @@ func TestRouter_RouteMatrix(t *testing.T) {
 	}
 }
 
+// TestRouter_ErrorEnvelope 锁定统一错误信封契约（防未来漂移）：
+//   - error 字段恒在且为 string
+//   - request_id 透传客户端 X-Request-ID；未带时由中间件自动生成非空值
+//   - 语义 extra（403 的 required）端到端存活
+func TestRouter_ErrorEnvelope(t *testing.T) {
+	r, _ := setupTestRouter(t)
+
+	// 透传：客户端带的 X-Request-ID 应原样出现在错误体里
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/slurm/nodes", nil)
+	req.Header.Set("X-Request-ID", "rid-from-header")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("no token: want 401 got %d", w.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal error body: %v body=%s", err, w.Body.String())
+	}
+	if _, ok := body["error"].(string); !ok {
+		t.Errorf("error body missing string \"error\": %v", body)
+	}
+	if body["request_id"] != "rid-from-header" {
+		t.Errorf("request_id = %v, want rid-from-header (X-Request-ID not echoed)", body["request_id"])
+	}
+
+	// 自动生成：未带 X-Request-ID 时，中间件应生成非空 request_id
+	req2, _ := http.NewRequest(http.MethodGet, "/api/v1/slurm/nodes", nil)
+	w2 := httptest.NewRecorder()
+	r.ServeHTTP(w2, req2)
+	var body2 map[string]any
+	if err := json.Unmarshal(w2.Body.Bytes(), &body2); err != nil {
+		t.Fatalf("unmarshal error body: %v body=%s", err, w2.Body.String())
+	}
+	if rid, _ := body2["request_id"].(string); rid == "" {
+		t.Errorf("auto-generated request_id missing/empty: %v", body2)
+	}
+
+	// 语义 extra：member 调 admin 独占路由 → 403 体应含 required:["admin"]
+	drainReq, _ := http.NewRequest(http.MethodPost, "/api/v1/slurm/nodes/node1/state", bytes.NewBufferString(`{"state":"DRAIN"}`))
+	drainReq.Header.Set("Content-Type", "application/json")
+	drainReq.Header.Set("Authorization", "Bearer "+tokenFor(t, auth.RoleMember))
+	w3 := httptest.NewRecorder()
+	r.ServeHTTP(w3, drainReq)
+	if w3.Code != http.StatusForbidden {
+		t.Fatalf("member drain: want 403 got %d", w3.Code)
+	}
+	var body3 map[string]any
+	if err := json.Unmarshal(w3.Body.Bytes(), &body3); err != nil {
+		t.Fatalf("unmarshal 403 body: %v body=%s", err, w3.Body.String())
+	}
+	required, ok := body3["required"].([]any)
+	if !ok || len(required) == 0 || required[0] != auth.RoleSystemAdmin {
+		t.Errorf("403 required = %v, want [%q] (semantic extra lost)", body3["required"], auth.RoleSystemAdmin)
+	}
+}
+
 // doRequestWithBody 与 doRequest 类似，但回传响应体（登录测试需要解析）。
 func doRequestWithBody(r *gin.Engine, method, path, body string) (int, string) {
 	req, _ := http.NewRequest(method, path, bytes.NewBufferString(body))
