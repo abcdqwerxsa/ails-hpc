@@ -32,8 +32,8 @@ type Handlers struct {
 //   - 作业提交/控制 + 容器 IDE：member + tenant_admin（admin 是纯监控角色，不提交作业）
 //   - 计费读取：member(自己)/tenant_admin(租户)/ops_admin(全部)（admin 纯硬件监控不含计费）
 func NewRouter(h Handlers) *gin.Engine {
-	r := gin.Default()
-	r.Use(corsMiddleware())
+	r := gin.New()
+	r.Use(gin.Recovery(), requestIDMiddleware(), accessLogMiddleware(), corsMiddleware())
 
 	// 公开路由：仅登录。其余 /api/v1/** 一律需 Bearer JWT。
 	r.POST("/api/v1/auth/login", h.Auth.Login)
