@@ -35,7 +35,7 @@ func TestLoad_Defaults(t *testing.T) {
 		t.Errorf("SlurmRESTDURL default = %q", cfg.SlurmRESTDURL)
 	}
 	if cfg.SlurmUserName != "hpcuser" {
-		t.Errorf("SlurmUserName default = %q", cfg.SlurmUserName)
+		t.Errorf("SlurmUserName default = %q, want %q", cfg.SlurmUserName, "hpcuser")
 	}
 	if cfg.UsersFile != "config/users.yaml" {
 		t.Errorf("UsersFile default = %q", cfg.UsersFile)

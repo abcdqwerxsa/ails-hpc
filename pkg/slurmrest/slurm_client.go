@@ -25,34 +25,34 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-// RunInSlurmctld 在 slurmctld 容器内执行给定命令：先本地 docker compose exec -T，
-// 失败则退回到 SSH 远程执行。返回 stdout。FetchToken、SacctQuery 与会话 meta 读写共享此能力。
+// RunInSlurmctld 在 slurmctld 容器内执行给定命令：使用 docker exec slurmctld。
 func RunInSlurmctld(args ...string) ([]byte, error) {
-	localArgs := append([]string{"compose", "-f", composeFile, "exec", "-T", slurmctldService}, args...)
-	if out, err := exec.Command("docker", localArgs...).Output(); err == nil {
+	execArgs := append([]string{"exec", slurmctldService}, args...)
+	out, err := exec.Command("docker", execArgs...).Output()
+	if err == nil {
 		return out, nil
 	}
-	quoted := make([]string, len(args))
-	for i, a := range args {
-		quoted[i] = shellQuote(a)
+
+	// 备选退路：docker compose
+	localArgs := append([]string{"compose", "-f", composeFile, "exec", "-T", slurmctldService}, args...)
+	out, err = exec.Command("docker", localArgs...).Output()
+	if err == nil {
+		return out, nil
 	}
-	remote := fmt.Sprintf("docker compose -f %s exec -T %s %s", composeFile, slurmctldService, strings.Join(quoted, " "))
-	out, err := exec.Command("ssh", "-o", "BatchMode=yes", slurmSSHHost, remote).Output()
-	if err != nil {
-		return nil, fmt.Errorf("run in slurmctld (%s): %w", strings.Join(args, " "), err)
-	}
-	return out, nil
+
+	return nil, fmt.Errorf("run in slurmctld (%s) failed: %w", strings.Join(args, " "), err)
 }
 
-// FetchToken 动态获取 Slurm JWT 身份令牌（默认用户 hpcuser，24h 有效）。
+// FetchToken 动态获取 Slurm JWT 身份令牌（特权用户 root，24h 有效）。
 func FetchToken() string {
-	out, err := RunInSlurmctld("scontrol", "token", "username="+defaultSlurmUser, "lifespan=86400")
+	out, err := RunInSlurmctld("scontrol", "token", "username=root", "lifespan=86400")
 	if err != nil {
 		return ""
 	}
 	for _, line := range strings.Split(string(out), "\n") {
-		if strings.HasPrefix(line, "SLURM_JWT=") {
-			return strings.TrimSpace(strings.TrimPrefix(line, "SLURM_JWT="))
+		cleanLine := strings.TrimSpace(strings.ReplaceAll(line, "\r", ""))
+		if strings.HasPrefix(cleanLine, "SLURM_JWT=") {
+			return strings.TrimPrefix(cleanLine, "SLURM_JWT=")
 		}
 	}
 	return ""
@@ -63,6 +63,23 @@ func FetchToken() string {
 func (c *Client) SacctQuery(args ...string) ([]byte, error) {
 	return RunInSlurmctld(append([]string{"sacct"}, args...)...)
 }
+
+// UpdateNodeStateCLI 通过 scontrol 在 slurmctld 容器内下发节点状态变更
+// （DRAIN / RESUME 等）。
+//
+// 为什么走 CLI 而非 REST：slurm 21.08 的 slurmrestd v0.0.37 **没有节点更新 POST 端点**
+// （/slurm/v0.0.37/node/{name} 仅支持 GET，已在 prod 上实测确认）；节点写 REST 要
+// slurm 22.05+ / v0.0.38。故节点写操作与 sacct 一样经 RunInSlurmctld（docker exec）
+// 走 scontrol，这是当前 slurm 版本下唯一能让 DRAIN/RESUME 真正生效的路径。
+func UpdateNodeStateCLI(name, state, reason string) error {
+	args := []string{"scontrol", "update", fmt.Sprintf("NodeName=%s", name), fmt.Sprintf("State=%s", state)}
+	if reason != "" {
+		args = append(args, fmt.Sprintf("Reason=%s", reason))
+	}
+	_, err := RunInSlurmctld(args...)
+	return err
+}
+
 
 // Client 封装了与原生 slurmrestd REST API 交互的客户端
 type Client struct {
@@ -110,7 +127,7 @@ func (c *Client) executeRequestWithBody(method, path string, bodyData interface{
 			return nil, nil, fmt.Errorf("failed to create request: %w", err)
 		}
 
-		req.Header.Set("X-SLURM-USER-NAME", c.UserName)
+		req.Header.Set("X-SLURM-USER-NAME", "root")
 		req.Header.Set("X-SLURM-USER-TOKEN", token)
 		req.Header.Set("Content-Type", "application/json")
 
@@ -190,13 +207,14 @@ func (c *Client) Ping() (*PingResponse, error) {
 type NodesResponse struct {
 	Errors []interface{} `json:"errors"`
 	Nodes  []struct {
-		Name        string `json:"name"`
-		State       string `json:"state"`
-		CPUs        int    `json:"cpus"`
-		AllocCPUs   int    `json:"alloc_cpus"`
-		RealMemory  int    `json:"real_memory"`
-		AllocMemory int    `json:"alloc_memory"`
-		Cores       int    `json:"cores"`
+		Name        string   `json:"name"`
+		State       string   `json:"state"`
+		StateFlags  []string `json:"state_flags"`
+		CPUs        int      `json:"cpus"`
+		AllocCPUs   int      `json:"alloc_cpus"`
+		RealMemory  int      `json:"real_memory"`
+		AllocMemory int      `json:"alloc_memory"`
+		Cores       int      `json:"cores"`
 	} `json:"nodes"`
 }
 

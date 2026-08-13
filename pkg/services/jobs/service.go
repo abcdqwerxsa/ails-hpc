@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -145,15 +146,38 @@ func (s *jobServiceImpl) ListJobs(ctx context.Context) ([]JobSummary, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to list jobs from slurmrestd: %w", err)
 		}
-		for _, j := range resp.Jobs {
-			jobMap[j.JobID] = JobSummary{
-				JobID:      j.JobID,
-				Name:       j.Name,
-				Partition:  j.Partition,
-				JobState:   j.JobState,
-				Nodes:      j.Nodes,
-				TimeLimit:  j.TimeLimit,
-				SubmitTime: j.SubmitTime,
+		if resp != nil && len(resp.Jobs) > 0 {
+			for _, j := range resp.Jobs {
+				jobMap[j.JobID] = JobSummary{
+					JobID:      j.JobID,
+					Name:       j.Name,
+					Partition:  j.Partition,
+					JobState:   j.JobState,
+					Nodes:      j.Nodes,
+					TimeLimit:  j.TimeLimit,
+					SubmitTime: j.SubmitTime,
+				}
+			}
+		} else {
+			// 通过 squeue 命令行解析实时作业列表
+			out, sqErr := slurmrest.RunInSlurmctld("squeue", "-h", "-o", "%i|%j|%P|%T|%D")
+			if sqErr == nil && len(out) > 0 {
+				lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+				for _, line := range lines {
+					parts := strings.Split(line, "|")
+					if len(parts) >= 5 {
+						id, _ := strconv.Atoi(strings.TrimSpace(parts[0]))
+						if id > 0 {
+							jobMap[id] = JobSummary{
+								JobID:     id,
+								Name:      strings.TrimSpace(parts[1]),
+								Partition: strings.TrimSpace(parts[2]),
+								JobState:  strings.ToUpper(strings.TrimSpace(parts[3])),
+								Nodes:     strings.TrimSpace(parts[4]),
+							}
+						}
+					}
+				}
 			}
 		}
 	}

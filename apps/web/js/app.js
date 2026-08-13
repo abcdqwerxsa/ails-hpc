@@ -436,11 +436,18 @@ async function fetchSlurmStatus() {
     const res = await fetch('/api/v1/slurm/ping');
     if (res.ok) {
       const data = await res.json();
-      if (data.pings && data.pings.length > 0 && data.pings[0].ping === 'UP') {
+      const isUp = (data.pings && data.pings.length > 0 && data.pings[0].ping === 'UP') || (data.meta && data.meta.Slurm);
+      if (isUp) {
         if (led) led.style.backgroundColor = 'var(--accent-emerald)';
         if (val) {
           val.textContent = 'OPERATIONAL';
           val.style.color = 'var(--accent-emerald)';
+        }
+      } else {
+        if (led) led.style.backgroundColor = 'var(--accent-amber)';
+        if (val) {
+          val.textContent = 'DEGRADED';
+          val.style.color = 'var(--accent-amber)';
         }
       }
     }

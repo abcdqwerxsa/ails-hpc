@@ -55,7 +55,7 @@ func setupTestRouter(t *testing.T) (*gin.Engine, *common.MockSlurmServer) {
 	h := Handlers{
 		Auth:       auth.NewAuthHandler(store),
 		Cluster:    cluster.NewClusterHandler(cluster.NewClusterService(slurmClient)),
-		Nodes:      nodes.NewNodeHandler(nodes.NewNodeService(slurmClient)),
+		Nodes:      nodes.NewNodeHandler(nodes.NewNodeServiceWithApplier(slurmClient, func(string, string, string) error { return nil })),
 		Jobs:       jobs.NewJobHandler(jobs.NewJobService(slurmClient)),
 		Containers: containers.NewContainerHandler(containers.NewContainerService(slurmClient)),
 		Billing:    billing.NewBillingHandler(billingService),

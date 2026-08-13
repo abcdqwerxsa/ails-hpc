@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
@@ -26,13 +25,30 @@ type NodeService interface {
 
 type nodeServiceImpl struct {
 	slurmClient *slurmrest.Client
-	mu          sync.RWMutex
-	nodes       map[string]*NodeStateInfo
+	// applyState 把节点状态变更真正下发给集群。生产默认走 scontrol(docker exec slurmctld)；
+	// 测试注入假实现以绕过 docker（见 NewNodeServiceWithApplier）。
+	applyState func(name, state, reason string) error
+	mu         sync.RWMutex
+	nodes      map[string]*NodeStateInfo
 }
 
+// NewNodeService 构造节点服务：读走 slurmrestd REST，写走 scontrol（docker exec）。
 func NewNodeService(client *slurmrest.Client) NodeService {
 	return &nodeServiceImpl{
 		slurmClient: client,
+		applyState:  slurmrest.UpdateNodeStateCLI,
+		nodes:       make(map[string]*NodeStateInfo),
+	}
+}
+
+// NewNodeServiceWithApplier 注入自定义的状态下发函数（测试用：绕过 docker exec）。
+func NewNodeServiceWithApplier(client *slurmrest.Client, apply func(name, state, reason string) error) NodeService {
+	if apply == nil {
+		apply = slurmrest.UpdateNodeStateCLI
+	}
+	return &nodeServiceImpl{
+		slurmClient: client,
+		applyState:  apply,
 		nodes:       make(map[string]*NodeStateInfo),
 	}
 }
@@ -47,44 +63,79 @@ func (s *nodeServiceImpl) refreshLocked() error {
 		return ErrSlurmUnavailable
 	}
 	resp, err := s.slurmClient.GetNodes()
-	if err != nil {
-		return err
-	}
-	if resp == nil {
-		return ErrSlurmUnavailable
-	}
-	for _, sn := range resp.Nodes {
-		if existing, ok := s.nodes[sn.Name]; ok {
-			// 保留本地 DRAIN 覆盖（scontrol 已下发，slurmrestd 可能尚未反映）
-			if existing.State != "DRAIN" {
-				existing.State = sn.State
+	if err == nil && resp != nil {
+		if len(resp.Nodes) > 0 {
+			for _, sn := range resp.Nodes {
+				st := strings.ToUpper(sn.State)
+				for _, flag := range sn.StateFlags {
+					if strings.Contains(strings.ToUpper(flag), "DRAIN") {
+						st = "DRAIN"
+						break
+					}
+					if strings.Contains(strings.ToUpper(flag), "DOWN") {
+						st = "DOWN"
+						break
+					}
+				}
+				if existing, ok := s.nodes[sn.Name]; ok {
+					// 只有在用户显式 UserDrained 且 Slurm 尚未反映 DRAIN 时才暂存 DRAIN
+					if !existing.UserDrained || st == "DRAIN" {
+						existing.State = st
+					}
+					if sn.CPUs > 0 { existing.CPUs = sn.CPUs }
+					if sn.RealMemory > 0 { existing.RealMemory = sn.RealMemory }
+					if sn.Cores > 0 { existing.Cores = sn.Cores }
+					existing.AllocCPUs = sn.AllocCPUs
+					existing.AllocMemory = sn.AllocMemory
+				} else {
+					s.nodes[sn.Name] = &NodeStateInfo{
+						Name:        sn.Name,
+						State:       st,
+						CPUs:        sn.CPUs,
+						AllocCPUs:   sn.AllocCPUs,
+						RealMemory:  sn.RealMemory,
+						AllocMemory: sn.AllocMemory,
+						Cores:       sn.Cores,
+					}
+				}
 			}
-			if sn.CPUs > 0 {
-				existing.CPUs = sn.CPUs
+			return nil
+		}
+
+		// 当 SlurmRESTd 连通但 Nodes 列表为空时，从 sinfo 命令行拉取集群真实节点
+		out, sinfoErr := slurmrest.RunInSlurmctld("sinfo", "-N", "-h", "-o", "%N|%t|%c|%m")
+		if sinfoErr == nil && len(out) > 0 {
+			lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+			for _, line := range lines {
+				parts := strings.Split(line, "|")
+				if len(parts) >= 4 {
+					name := strings.TrimSpace(parts[0])
+					state := strings.ToUpper(strings.TrimSpace(parts[1]))
+					cpus, _ := strconv.Atoi(strings.TrimSpace(parts[2]))
+					mem, _ := strconv.Atoi(strings.TrimSpace(parts[3]))
+
+					if cpus <= 0 { cpus = 8 }
+					if mem <= 0 { mem = 3000 }
+
+					if existing, ok := s.nodes[name]; ok {
+						if existing.State != "DRAIN" { existing.State = state }
+						existing.CPUs = cpus
+						existing.RealMemory = mem
+					} else {
+						s.nodes[name] = &NodeStateInfo{
+							Name:       name,
+							State:      state,
+							CPUs:       cpus,
+							RealMemory: mem,
+						}
+					}
+				}
 			}
-			if sn.RealMemory > 0 {
-				existing.RealMemory = sn.RealMemory
-			}
-			if sn.Cores > 0 {
-				existing.Cores = sn.Cores
-			}
-			// 实时利用率字段（idle 时为 0）
-			existing.AllocCPUs = sn.AllocCPUs
-			existing.AllocMemory = sn.AllocMemory
-			// Reason 不被刷新覆盖 → 本地写入的 reason 持久
-		} else {
-			s.nodes[sn.Name] = &NodeStateInfo{
-				Name:        sn.Name,
-				State:       sn.State,
-				CPUs:        sn.CPUs,
-				AllocCPUs:   sn.AllocCPUs,
-				RealMemory:  sn.RealMemory,
-				AllocMemory: sn.AllocMemory,
-				Cores:       sn.Cores,
-			}
+			return nil
 		}
 	}
-	return nil
+
+	return err
 }
 
 func (s *nodeServiceImpl) ListNodes(ctx context.Context) ([]*NodeStateInfo, error) {
@@ -139,23 +190,30 @@ func (s *nodeServiceImpl) UpdateNodeState(ctx context.Context, name string, req 
 		return nil, ErrNodeNotFound
 	}
 
-	newState := targetState
-	if targetState == "RESUME" {
-		newState = "IDLE"
+	// scontrol 可设置的态：DRAIN / RESUME。IDLE 不可直接 set，用 RESUME 使节点回到 IDLE。
+	scontrolState := targetState
+	if targetState == "IDLE" {
+		scontrolState = "RESUME"
+	}
+	// 先把变更真正下发集群（scontrol via docker exec slurmctld）；失败如实报错 → 500。
+	// 旧版用裸 exec.Command("scontrol",...) 在宿主机跑——但宿主机根本没装 scontrol，
+	// exec 必然失败且被 _ = 吞掉，DRAIN/RESUME 从未真正生效（典型"假写"）。
+	if err := s.applyState(name, scontrolState, req.Reason); err != nil {
+		return nil, fmt.Errorf("update node state via scontrol: %w", err)
 	}
 
-	// Update memory state
-	node.State = newState
-	if req.Reason != "" {
-		node.Reason = req.Reason
+	// 下发成功后更新内存缓存（UserDrained 供 refreshLocked 保留本地 DRAIN 覆盖）
+	if targetState == "DRAIN" {
+		node.State = "DRAIN"
+		node.UserDrained = true
+		if req.Reason != "" {
+			node.Reason = req.Reason
+		}
+	} else { // RESUME / IDLE → 回到 IDLE，清 drain 标记与 reason
+		node.State = "IDLE"
+		node.UserDrained = false
+		node.Reason = ""
 	}
-
-	// Attempt executing CLI scontrol fallback if scontrol command exists
-	reasonArg := req.Reason
-	if reasonArg == "" {
-		reasonArg = "State updated via API"
-	}
-	_ = exec.Command("scontrol", "update", fmt.Sprintf("NodeName=%s", name), fmt.Sprintf("State=%s", targetState), fmt.Sprintf("Reason=%s", reasonArg)).Run()
 
 	return &NodeStateUpdateResponse{
 		NodeName: name,
