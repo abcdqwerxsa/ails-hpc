@@ -66,6 +66,11 @@ function RootLayout() {
                 节点状态
               </Link>
             </li>
+            <li className="nav-item">
+              <Link to="/jobs" activeProps={{ className: 'active' }}>
+                作业管理
+              </Link>
+            </li>
           </ul>
         </div>
 

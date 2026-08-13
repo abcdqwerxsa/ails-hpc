@@ -75,18 +75,44 @@ export interface PingResponse {
   pings?: { hostname: string; ping: string; status: number; mode: string }[];
 }
 
-// 后续阶段用的类型（先占位，字段在各自阶段对齐）
+// 作业相关类型（字段对齐 pkg/services/jobs/types.go）
 export interface JobSummary {
   job_id: number;
   name: string;
+  partition: string;
   job_state: string;
-  partition?: string;
-  nodes?: string;
-  [k: string]: unknown;
+  nodes: string;
+  time_limit: number;
+  submit_time: number;
 }
 export interface JobListResponse {
   code?: number;
   jobs: JobSummary[];
+}
+export interface SubmitJobRequest {
+  name: string;
+  partition: string;
+  nodes?: number;
+  tasks?: number;
+  cpus?: number;
+  cpus_per_task?: number;
+  time_limit: string; // 后端 FlexTimeLimit 兼容 string|int
+  script: string;
+  current_working_directory?: string;
+}
+export interface SubmitJobResponse {
+  code: number;
+  message: string;
+  job_id: number;
+  name?: string;
+  status?: string;
+}
+export interface JobControlResponse {
+  code: number;
+  message: string;
+  job_id: number;
+  action: string;
+  status?: string;
 }
 
 export type NodeStateOp = "DRAIN" | "RESUME" | "IDLE";
@@ -109,7 +135,20 @@ export const slurm = {
       { method: "POST", body: JSON.stringify({ state, reason }) },
     ),
 
-  // 下列为阶段 2-4 预留（已 typed，未在阶段 1 页面使用）
+  // 作业（阶段 2）
   getJobs: () => apiFetch<JobListResponse>("/slurm/jobs"),
+  submitJob: (payload: SubmitJobRequest) =>
+    apiFetch<SubmitJobResponse>("/slurm/jobs/submit", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  cancelJob: (jobId: number) =>
+    apiFetch<JobControlResponse>(`/slurm/jobs/${jobId}/cancel`, { method: "POST" }),
+  holdJob: (jobId: number) =>
+    apiFetch<JobControlResponse>(`/slurm/jobs/${jobId}/hold`, { method: "POST" }),
+  requeueJob: (jobId: number) =>
+    apiFetch<JobControlResponse>(`/slurm/jobs/${jobId}/requeue`, { method: "POST" }),
+
+  // 分区（阶段 4）
   getPartitions: () => apiFetch<unknown>("/slurm/partitions"),
 };
