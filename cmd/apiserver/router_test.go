@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -81,6 +82,12 @@ func tokenFor(t *testing.T, role string) string {
 }
 
 func doRequest(r *gin.Engine, method, path, body, token string) int {
+	code, _ := doAuth(r, method, path, body, token)
+	return code
+}
+
+// doAuth 发带 token 的请求，回传 (code, body)。
+func doAuth(r *gin.Engine, method, path, body, token string) (int, string) {
 	var bodyReader io.Reader
 	if body != "" {
 		bodyReader = bytes.NewBufferString(body)
@@ -94,7 +101,44 @@ func doRequest(r *gin.Engine, method, path, body, token string) int {
 	}
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
-	return w.Code
+	return w.Code, w.Body.String()
+}
+
+// TestRouter_JobOwnership 归属隔离：member 只能取消自己的作业；他人 403；tenant_admin 越权。
+func TestRouter_JobOwnership(t *testing.T) {
+	r, _ := setupTestRouter(t)
+	memberTok := tokenFor(t, auth.RoleMember) // username=member
+	member2Tok, _ := auth.GenerateToken("member2", auth.RoleMember, "hpc-lab", "default")
+	tenantTok := tokenFor(t, auth.RoleTenantAdmin)
+
+	submit := func() int {
+		code, body := doAuth(r, http.MethodPost, "/api/v1/slurm/jobs/submit", `{"name":"own","script":"echo hi"}`, memberTok)
+		if code != http.StatusOK {
+			t.Fatalf("submit: want 200 got %d body=%s", code, body)
+		}
+		var resp struct{ JobID int `json:"job_id"` }
+		_ = json.Unmarshal([]byte(body), &resp)
+		return resp.JobID
+	}
+	cancel := func(jobID int, token string) int {
+		c, _ := doAuth(r, http.MethodPost, fmt.Sprintf("/api/v1/slurm/jobs/%d/cancel", jobID), "", token)
+		return c
+	}
+
+	jobID := submit()
+	// 他人（member2）取消 member 的作业 → 403
+	if c := cancel(jobID, member2Tok); c != http.StatusForbidden {
+		t.Errorf("member2 cancel member's job: want 403, got %d", c)
+	}
+	// owner（member）取消 → 200
+	if c := cancel(jobID, memberTok); c != http.StatusOK {
+		t.Errorf("owner cancel: want 200, got %d", c)
+	}
+	// tenant_admin 越权取消 → 200
+	jobID2 := submit()
+	if c := cancel(jobID2, tenantTok); c != http.StatusOK {
+		t.Errorf("tenant_admin override cancel: want 200, got %d", c)
+	}
 }
 
 // TestRouter_Login 校验登录契约与失败路径

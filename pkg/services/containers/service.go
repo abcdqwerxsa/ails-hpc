@@ -40,8 +40,10 @@ const (
 
 // ContainerService 是 Slurm 支撑的交互式开发会话服务。
 type ContainerService interface {
-	LaunchContainer(ctx context.Context, req *ContainerLaunchRequest) (*ContainerLaunchResponse, error)
+	LaunchContainer(ctx context.Context, req *ContainerLaunchRequest, owner string) (*ContainerLaunchResponse, error)
 	ListActiveContainers(ctx context.Context) ([]*ContainerInstance, error)
+	// SessionOwner 返回会话归属者（launch 时写入 meta）。归属隔离用：member 只能回收自己的会话。
+	SessionOwner(ctx context.Context, id string) (string, error)
 	RecycleContainer(ctx context.Context, id string) (*ContainerRecycleResponse, error)
 	// ProxyTarget 返回会话的反代目标 (node_ip:port)、状态、env_type，供 /ide/<session>/ 反代 handler 使用。
 	// env_type 决定反代是否剥前缀：jupyter 有 base_url 对齐（不剥），vscode 根路径启动（剥 /api/v1/ide/<sid>）。
@@ -88,7 +90,7 @@ func NewContainerServiceWithDeps(jobs slurmJobAPI, meta sessionMetaStore) Contai
 }
 
 // LaunchContainer 提交一个交互式 Slurm 作业拉起 Jupyter/code-server，返回会话入口 URL。
-func (s *containerServiceImpl) LaunchContainer(ctx context.Context, req *ContainerLaunchRequest) (*ContainerLaunchResponse, error) {
+func (s *containerServiceImpl) LaunchContainer(ctx context.Context, req *ContainerLaunchRequest, owner string) (*ContainerLaunchResponse, error) {
 	if req == nil {
 		return nil, ErrUnsupportedEnvType
 	}
@@ -117,7 +119,7 @@ func (s *containerServiceImpl) LaunchContainer(ctx context.Context, req *Contain
 
 	sessionID := newSessionID()
 	port := portFor(sessionID)
-	script := buildIDEScript(envType, sessionID, port, cpus, memoryMB, nodes)
+	script := buildIDEScript(envType, sessionID, port, cpus, memoryMB, nodes, owner)
 
 	subReq := &slurmrest.SlurmJobSubmitReq{Script: script}
 	subReq.Job.Name = envType + ideJobNamePrefix + sessionID
@@ -200,6 +202,19 @@ func (s *containerServiceImpl) ListActiveContainers(ctx context.Context) ([]*Con
 }
 
 // RecycleContainer 取消会话对应的 Slurm 作业并清理 meta（即结束 IDE 会话）。
+// SessionOwner 返回会话归属者（meta.owner）。会话不存在返回 ErrContainerNotFound。
+func (s *containerServiceImpl) SessionOwner(ctx context.Context, id string) (string, error) {
+	metaMap, err := s.meta.ReadAll()
+	if err != nil || metaMap == nil {
+		return "", ErrContainerNotFound
+	}
+	m, ok := metaMap[id]
+	if !ok {
+		return "", ErrContainerNotFound
+	}
+	return m.Owner, nil
+}
+
 func (s *containerServiceImpl) RecycleContainer(ctx context.Context, id string) (*ContainerRecycleResponse, error) {
 	if id == "" {
 		return nil, ErrContainerNotFound
@@ -281,7 +296,7 @@ func (s *containerServiceImpl) ProxyTarget(ctx context.Context, sessionID string
 // 应用 auth 关闭——访问由 apiserver 的 JWT 网关守门；base_url 对齐反代前缀。
 // 注意：不使用 set -u，且节点名取自 hostname -s（容器主机名即 Slurm 节点名），
 // 避免引用可能未设置的 Slurm 环境变量导致脚本在写 meta 前就失败。
-func buildIDEScript(envType, sessionID string, port, cpus, memoryMB, nodes int) string {
+func buildIDEScript(envType, sessionID string, port, cpus, memoryMB, nodes int, owner string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "#!/bin/bash\n")
 	fmt.Fprintf(&b, "# AILS interactive dev session env=%s session=%s port=%d cpus=%d mem=%d nodes=%d\n",
@@ -294,8 +309,8 @@ func buildIDEScript(envType, sessionID string, port, cpus, memoryMB, nodes int) 
 	fmt.Fprintf(&b, "mkdir -p /shared/sessions\n")
 	// 应用启动前先回写连接信息，apiserver 据此反代
 	fmt.Fprintf(&b, "cat > /shared/sessions/${SESSION_ID}.json <<EOF\n")
-	fmt.Fprintf(&b, "{\"session_id\":\"${SESSION_ID}\",\"job_id\":${SLURM_JOB_ID:-0},\"node\":\"${NODE_NAME}\",\"node_ip\":\"${NODE_IP}\",\"port\":${PORT},\"env_type\":\"%s\",\"cpus\":%d,\"memory_mb\":%d,\"nodes\":%d}\n",
-		envType, cpus, memoryMB, nodes)
+	fmt.Fprintf(&b, "{\"session_id\":\"${SESSION_ID}\",\"job_id\":${SLURM_JOB_ID:-0},\"node\":\"${NODE_NAME}\",\"node_ip\":\"${NODE_IP}\",\"port\":${PORT},\"env_type\":\"%s\",\"cpus\":%d,\"memory_mb\":%d,\"nodes\":%d,\"owner\":\"%s\"}\n",
+		envType, cpus, memoryMB, nodes, owner)
 	fmt.Fprintf(&b, "EOF\n")
 	// 应用输出重定向到会话日志，便于排查启动失败
 	fmt.Fprintf(&b, "exec > /shared/sessions/${SESSION_ID}.log 2>&1\n")

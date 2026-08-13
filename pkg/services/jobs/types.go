@@ -77,6 +77,7 @@ type JobSummary struct {
 	Nodes      string `json:"nodes"`
 	TimeLimit  int    `json:"time_limit"`
 	SubmitTime int64  `json:"submit_time"`
+	Owner      string `json:"owner,omitempty"` // 归属隔离：提交者（slurm account 回填）
 }
 
 // JobListResponse 作业列表响应

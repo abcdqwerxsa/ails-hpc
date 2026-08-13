@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 
+	"ails-hpc/pkg/auth"
 	"ails-hpc/pkg/httpx"
 
 	"github.com/gin-gonic/gin"
@@ -24,6 +25,35 @@ func NewContainerHandler(service ContainerService) *ContainerHandler {
 	return &ContainerHandler{service: service}
 }
 
+// callerFromCtx 从 JWT claims 取 (username, role)。
+func callerFromCtx(c *gin.Context) (string, string) {
+	if v, ok := c.Get("claims"); ok {
+		if cl, ok := v.(*auth.Claims); ok {
+			return cl.Username, cl.Role
+		}
+	}
+	return "", ""
+}
+
+// forbidIfNotSessionOwner 归属隔离：member 只能回收自己的会话（owner==user 或遗留空 owner 放行）；
+// tenant_admin 越权。已写响应（403/404）时返回 true，调用方应 return。
+func (h *ContainerHandler) forbidIfNotSessionOwner(c *gin.Context, id string) bool {
+	user, role := callerFromCtx(c)
+	if role != auth.RoleMember {
+		return false
+	}
+	owner, err := h.service.SessionOwner(c.Request.Context(), id)
+	if err != nil {
+		httpx.NotFound(c, "session not found")
+		return true
+	}
+	if owner != "" && owner != user {
+		httpx.Error(c, http.StatusForbidden, "forbidden: not the session owner")
+		return true
+	}
+	return false
+}
+
 func (h *ContainerHandler) LaunchContainer(c *gin.Context) {
 	var req ContainerLaunchRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -31,7 +61,8 @@ func (h *ContainerHandler) LaunchContainer(c *gin.Context) {
 		return
 	}
 
-	res, err := h.service.LaunchContainer(c.Request.Context(), &req)
+	user, _ := callerFromCtx(c)
+	res, err := h.service.LaunchContainer(c.Request.Context(), &req, user)
 	if err != nil {
 		if errors.Is(err, ErrUnsupportedEnvType) || errors.Is(err, ErrInvalidResources) || errors.Is(err, ErrQuotaExceeded) {
 			httpx.BadRequest(c, err.Error())
@@ -58,6 +89,10 @@ func (h *ContainerHandler) RecycleContainer(c *gin.Context) {
 	id := c.Param("id")
 	if id == "" {
 		httpx.BadRequest(c, "container ID is required")
+		return
+	}
+
+	if h.forbidIfNotSessionOwner(c, id) {
 		return
 	}
 
