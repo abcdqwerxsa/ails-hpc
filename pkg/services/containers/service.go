@@ -43,8 +43,9 @@ type ContainerService interface {
 	LaunchContainer(ctx context.Context, req *ContainerLaunchRequest) (*ContainerLaunchResponse, error)
 	ListActiveContainers(ctx context.Context) ([]*ContainerInstance, error)
 	RecycleContainer(ctx context.Context, id string) (*ContainerRecycleResponse, error)
-	// ProxyTarget 返回会话的反代目标 (node_ip:port) 与状态，供 /ide/<session>/ 反代 handler 使用。
-	ProxyTarget(ctx context.Context, sessionID string) (nodeIP string, port int, status string, err error)
+	// ProxyTarget 返回会话的反代目标 (node_ip:port)、状态、env_type，供 /ide/<session>/ 反代 handler 使用。
+	// env_type 决定反代是否剥前缀：jupyter 有 base_url 对齐（不剥），vscode 根路径启动（剥 /api/v1/ide/<sid>）。
+	ProxyTarget(ctx context.Context, sessionID string) (nodeIP string, port int, status string, envType string, err error)
 }
 
 // slurmJobAPI 隔离 slurmrestd 作业三件套，便于测试注入假实现。
@@ -70,6 +71,7 @@ type containerServiceImpl struct {
 type cachedTarget struct {
 	nodeIP    string
 	port      int
+	envType   string
 	expiresAt time.Time
 }
 
@@ -235,38 +237,42 @@ func (s *containerServiceImpl) RecycleContainer(ctx context.Context, id string) 
 
 // ProxyTarget 解析会话的反代目标。RUNNING 会话的目标在 TTL 内缓存（热路径）；
 // 非 RUNNING 状态不缓存，以便前端从 STARTING 及时切到 RUNNING。
-func (s *containerServiceImpl) ProxyTarget(ctx context.Context, sessionID string) (string, int, string, error) {
+func (s *containerServiceImpl) ProxyTarget(ctx context.Context, sessionID string) (string, int, string, string, error) {
 	s.mu.RLock()
 	ct, hit := s.targets[sessionID]
 	s.mu.RUnlock()
 	if hit && time.Now().Before(ct.expiresAt) {
-		return ct.nodeIP, ct.port, "RUNNING", nil
+		return ct.nodeIP, ct.port, "RUNNING", ct.envType, nil
 	}
 
 	status := "UNKNOWN"
-	nodeIP, port, found := "", 0, false
+	nodeIP, port, envType := "", 0, ""
+	found := false
 	if metaMap, _ := s.meta.ReadAll(); metaMap != nil {
 		if m, ok := metaMap[sessionID]; ok {
-			nodeIP, port, found = m.NodeIP, m.Port, true
+			nodeIP, port, envType, found = m.NodeIP, m.Port, m.EnvType, true
 		}
 	}
 	if jobs, jErr := s.jobs.GetJobs(); jErr == nil {
 		for _, j := range jobs.Jobs {
-			if sid, _, isIDE := parseIDEJobName(j.Name); isIDE && sid == sessionID {
+			if sid, et, isIDE := parseIDEJobName(j.Name); isIDE && sid == sessionID {
 				status = jobStateToStatus(j.JobState)
+				if envType == "" {
+					envType = et // meta 缺失时用作业名里的 env 兜底
+				}
 				break
 			}
 		}
 	}
 	if !found {
-		return "", 0, status, ErrContainerNotFound
+		return "", 0, status, envType, ErrContainerNotFound
 	}
 	if status == "RUNNING" {
 		s.mu.Lock()
-		s.targets[sessionID] = cachedTarget{nodeIP, port, time.Now().Add(proxyCacheTTL)}
+		s.targets[sessionID] = cachedTarget{nodeIP, port, envType, time.Now().Add(proxyCacheTTL)}
 		s.mu.Unlock()
 	}
-	return nodeIP, port, status, nil
+	return nodeIP, port, status, envType, nil
 }
 
 // --- 作业脚本生成 ---

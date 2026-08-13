@@ -206,12 +206,12 @@ func TestRecycleContainer_NotFound(t *testing.T) {
 
 func TestProxyTarget_RunningReady(t *testing.T) {
 	jobs := &fakeJobsAPI{jobs: jobsResp(jrow{id: 1001, name: "jupyter-ide-aaa", state: "RUNNING", nodes: "node1", submit: 1})}
-	meta := &fakeMeta{m: map[string]containers.SessionMeta{"aaa": {SessionID: "aaa", NodeIP: "10.0.0.1", Port: 8900}}}
+	meta := &fakeMeta{m: map[string]containers.SessionMeta{"aaa": {SessionID: "aaa", NodeIP: "10.0.0.1", Port: 8900, EnvType: "jupyter"}}}
 	svc := newSvc(jobs, meta)
 
-	ip, port, status, err := svc.ProxyTarget(context.Background(), "aaa")
-	if err != nil || status != "RUNNING" || ip != "10.0.0.1" || port != 8900 {
-		t.Fatalf("proxy target: ip=%s port=%d status=%s err=%v", ip, port, status, err)
+	ip, port, status, envType, err := svc.ProxyTarget(context.Background(), "aaa")
+	if err != nil || status != "RUNNING" || ip != "10.0.0.1" || port != 8900 || envType != "jupyter" {
+		t.Fatalf("proxy target: ip=%s port=%d status=%s env=%s err=%v", ip, port, status, envType, err)
 	}
 }
 
@@ -219,7 +219,7 @@ func TestProxyTarget_StartingStatus(t *testing.T) {
 	jobs := &fakeJobsAPI{jobs: jobsResp(jrow{id: 1002, name: "jupyter-ide-bbb", state: "PENDING", submit: 1})}
 	meta := &fakeMeta{m: map[string]containers.SessionMeta{"bbb": {SessionID: "bbb", NodeIP: "10.0.0.2", Port: 8901}}}
 	svc := newSvc(jobs, meta)
-	_, _, status, err := svc.ProxyTarget(context.Background(), "bbb")
+	_, _, status, _, err := svc.ProxyTarget(context.Background(), "bbb")
 	if err != nil {
 		t.Fatalf("starting session should not error: %v", err)
 	}
@@ -230,7 +230,7 @@ func TestProxyTarget_StartingStatus(t *testing.T) {
 
 func TestProxyTarget_UnknownSession(t *testing.T) {
 	svc := newSvc(&fakeJobsAPI{}, &fakeMeta{m: map[string]containers.SessionMeta{}})
-	_, _, _, err := svc.ProxyTarget(context.Background(), "ghost")
+	_, _, _, _, err := svc.ProxyTarget(context.Background(), "ghost")
 	if !errors.Is(err, containers.ErrContainerNotFound) {
 		t.Fatalf("want ErrContainerNotFound, got %v", err)
 	}
