@@ -53,27 +53,17 @@ function RootLayout() {
         <div>
           <div className="logo-brand">
             <div className="logo-badge">AILS</div>
-            <span>云原生 HPC 平台</span>
+            <span>Slurm HPC 管理平台</span>
           </div>
           <ul className="nav-list">
             <li className="nav-item">
               <Link to="/" activeProps={{ className: 'active' }} activeOptions={{ exact: true }}>
-                集群控制台
+                集群总览
               </Link>
             </li>
             <li className="nav-item">
-              <Link to="/jobs" activeProps={{ className: 'active' }}>
-                HPC 作业管理
-              </Link>
-            </li>
-            <li className="nav-item">
-              <Link to="/queues" activeProps={{ className: 'active' }}>
-                队列与资源限额
-              </Link>
-            </li>
-            <li className="nav-item">
-              <Link to="/tenant" activeProps={{ className: 'active' }}>
-                多租户组织配置
+              <Link to="/nodes" activeProps={{ className: 'active' }}>
+                节点状态
               </Link>
             </li>
           </ul>
@@ -103,8 +93,8 @@ function RootLayout() {
             </button>
           </div>
           <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-            <div>环境: 单物理节点集群 (v1.2.0)</div>
-            <div>引擎: Kueue v0.19.0 | MPI v0.8.2</div>
+            <div>环境：单物理节点 Slurm 集群</div>
+            <div>后端：Slurm 21.08 · slurmrestd v0.0.37</div>
           </div>
         </div>
       </aside>

@@ -74,8 +74,9 @@ func NewRouter(h Handlers) *gin.Engine {
 		api.Any("/ide/:session/*any", memberWrite, h.Containers.ProxyIDE)
 	}
 
-	// 静态门户
-	r.Static("/portal", "./apps/web")
+	// 静态门户：vanilla 门户（apps/web/vanilla，迁移期保留）。React 构建产物（apps/web/dist）
+	// 将在 React 迁移完成后接管 /portal/，届时此处改为 ./apps/web/dist。
+	r.Static("/portal", "./apps/web/vanilla")
 	r.GET("/", func(c *gin.Context) {
 		c.Redirect(http.StatusMovedPermanently, "/portal/")
 	})
