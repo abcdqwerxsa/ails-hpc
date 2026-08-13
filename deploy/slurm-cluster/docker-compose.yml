@@ -58,6 +58,7 @@ services:
       - ./config/slurm.conf:/etc/slurm/slurm.conf:ro
       - ./config/slurmdbd.conf:/etc/slurm/slurmdbd.conf.template:ro
       - ./config/entrypoint.sh:/entrypoint.sh:ro
+      - ./config/users.yaml:/etc/slurm/ails-users.yaml:ro
       - slurmctld-state:/var/spool/slurmctld
       - shared-storage:/shared
     depends_on:
@@ -81,6 +82,7 @@ services:
       - SYS_ADMIN
     volumes:
       - ./config/slurm.conf:/etc/slurm/slurm.conf:ro
+      - ./config/users.yaml:/etc/slurm/ails-users.yaml:ro
       - shared-storage:/shared
     depends_on:
       - slurmctld
@@ -103,6 +105,7 @@ services:
       - SYS_ADMIN
     volumes:
       - ./config/slurm.conf:/etc/slurm/slurm.conf:ro
+      - ./config/users.yaml:/etc/slurm/ails-users.yaml:ro
       - shared-storage:/shared
     depends_on:
       - slurmctld
@@ -125,6 +128,7 @@ services:
       - SYS_ADMIN
     volumes:
       - ./config/slurm.conf:/etc/slurm/slurm.conf:ro
+      - ./config/users.yaml:/etc/slurm/ails-users.yaml:ro
       - shared-storage:/shared
     depends_on:
       - slurmctld

@@ -14,12 +14,20 @@ var ErrInvalidCredentials = errors.New("invalid username or password")
 
 // User 表示一个可登录账号。PasswordHash 为 bcrypt 哈希；Role 为权威角色。
 // JSON tag 对 password_hash 标 `-`，确保哈希永不序列化进响应。
+//
+// ClusterUser/UID/GID/Account 为真·每用户 Slurm 隔离（L1+L3）所需：ClusterUser 是
+// 集群 unix 身份，Account 是 Slurm 账号（约定 == ClusterUser）。部署时按本字段在所有
+// 节点 useradd + sacctmgr 建 account/association。
 type User struct {
 	Username     string `yaml:"username"      json:"username"`
 	PasswordHash string `yaml:"password_hash" json:"-"`
 	Role         string `yaml:"role"          json:"role"`
 	OrgSlug      string `yaml:"orgSlug"       json:"orgSlug"`
 	TenantNS     string `yaml:"tenantNs"      json:"tenantNs"`
+	ClusterUser  string `yaml:"clusterUser"   json:"clusterUser"`
+	UID          int    `yaml:"uid"           json:"uid"`
+	GID          int    `yaml:"gid"           json:"gid"`
+	Account      string `yaml:"account"       json:"account"`
 }
 
 // usersFile 对应 config/users.yaml 的磁盘结构。

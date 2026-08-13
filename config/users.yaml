@@ -5,24 +5,45 @@
 #   tenantadmin    / tenantadmin123  — 租户管理员（member 能力 + 团队管理）
 #   member         / member123       — 普通租户成员（作业/容器/登录节点）
 #   ops            / ops123          — 运营人员（纯绩效大屏，零写操作）
+#
+# clusterUser/uid/gid/account：真·每用户 Slurm 隔离（L1+L3）。clusterUser 为集群 unix
+# 身份，account 为 Slurm 账号（== clusterUser）。gid 2000=ailshpc 共享组。uid 避让
+# 991(munge)/64030(slurm)/1001(hpcuser)。部署时 entrypoint 按本表在所有节点 useradd +
+# sacctmgr 建 account/association（见 deploy/slurm-cluster/config/entrypoint.sh）。
 users:
   - username: admin
     password_hash: "$2a$10$BdvUiVHcRr9S.6E8QLncheAmBiMCicly8PiUy1/XFPLT.Xe1VFFRC"
     role: admin
     orgSlug: hpc-lab
     tenantNs: default
+    clusterUser: ailsadmin
+    uid: 2001
+    gid: 2000
+    account: ailsadmin
   - username: tenantadmin
     password_hash: "$2a$10$ynqhJOawBYNMuGxRrH1fxu29s6eXJ1hOuvwkqz9ehkNKRfp8r30Zm"
     role: tenant_admin
     orgSlug: hpc-lab
     tenantNs: default
+    clusterUser: ailstadmin
+    uid: 2002
+    gid: 2000
+    account: ailstadmin
   - username: member
     password_hash: "$2a$10$zcdPehEW2zKt2ih8/otSUO9AbMVEbTEvjTH8oc/rLqoJgaOSttHwO"
     role: member
     orgSlug: hpc-lab
     tenantNs: default
+    clusterUser: ailsmember
+    uid: 2003
+    gid: 2000
+    account: ailsmember
   - username: ops
     password_hash: "$2a$10$h1QRDYP3sNVHn2dN9zrkFOIeAqkKmYs1CHzsSw2vSwj4WAcdhktwi"
     role: ops_admin
     orgSlug: hpc-lab
     tenantNs: default
+    clusterUser: ailsops
+    uid: 2004
+    gid: 2000
+    account: ailsops

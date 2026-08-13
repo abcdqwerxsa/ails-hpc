@@ -40,7 +40,7 @@ const (
 
 // ContainerService 是 Slurm 支撑的交互式开发会话服务。
 type ContainerService interface {
-	LaunchContainer(ctx context.Context, req *ContainerLaunchRequest, owner string) (*ContainerLaunchResponse, error)
+	LaunchContainer(ctx context.Context, req *ContainerLaunchRequest, clusterUser, account string) (*ContainerLaunchResponse, error)
 	ListActiveContainers(ctx context.Context) ([]*ContainerInstance, error)
 	// SessionOwner 返回会话归属者（launch 时写入 meta）。归属隔离用：member 只能回收自己的会话。
 	SessionOwner(ctx context.Context, id string) (string, error)
@@ -52,7 +52,7 @@ type ContainerService interface {
 
 // slurmJobAPI 隔离 slurmrestd 作业三件套，便于测试注入假实现。
 type slurmJobAPI interface {
-	SubmitJob(req *slurmrest.SlurmJobSubmitReq) (*slurmrest.SlurmJobSubmitResp, error)
+	SubmitJobAs(req *slurmrest.SlurmJobSubmitReq, actAs string) (*slurmrest.SlurmJobSubmitResp, error)
 	GetJobs() (*slurmrest.JobsResponse, error)
 	CancelJob(jobID int) error
 }
@@ -90,7 +90,8 @@ func NewContainerServiceWithDeps(jobs slurmJobAPI, meta sessionMetaStore) Contai
 }
 
 // LaunchContainer 提交一个交互式 Slurm 作业拉起 Jupyter/code-server，返回会话入口 URL。
-func (s *containerServiceImpl) LaunchContainer(ctx context.Context, req *ContainerLaunchRequest, owner string) (*ContainerLaunchResponse, error) {
+// 作业以 clusterUser 真实身份运行（per-user JWT 提交，L1 隔离），account 写入 Slurm。
+func (s *containerServiceImpl) LaunchContainer(ctx context.Context, req *ContainerLaunchRequest, clusterUser, account string) (*ContainerLaunchResponse, error) {
 	if req == nil {
 		return nil, ErrUnsupportedEnvType
 	}
@@ -119,7 +120,7 @@ func (s *containerServiceImpl) LaunchContainer(ctx context.Context, req *Contain
 
 	sessionID := newSessionID()
 	port := portFor(sessionID)
-	script := buildIDEScript(envType, sessionID, port, cpus, memoryMB, nodes, owner)
+	script := buildIDEScript(envType, sessionID, port, cpus, memoryMB, nodes, clusterUser)
 
 	subReq := &slurmrest.SlurmJobSubmitReq{Script: script}
 	subReq.Job.Name = envType + ideJobNamePrefix + sessionID
@@ -134,8 +135,10 @@ func (s *containerServiceImpl) LaunchContainer(ctx context.Context, req *Contain
 		"PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 		"HOME": "/shared",
 	}
+	subReq.Job.Account = account // AccountingStorageEnforce=associations：IDE 作业也需带有效 account
 
-	resp, err := s.jobs.SubmitJob(subReq)
+	// 以 clusterUser 真实身份提交（per-user JWT）→ 作业以该 unix 身份运行（L1 隔离核心）
+	resp, err := s.jobs.SubmitJobAs(subReq, clusterUser)
 	if err != nil {
 		return nil, fmt.Errorf("submit ide job: %w", err)
 	}
@@ -296,7 +299,7 @@ func (s *containerServiceImpl) ProxyTarget(ctx context.Context, sessionID string
 // 应用 auth 关闭——访问由 apiserver 的 JWT 网关守门；base_url 对齐反代前缀。
 // 注意：不使用 set -u，且节点名取自 hostname -s（容器主机名即 Slurm 节点名），
 // 避免引用可能未设置的 Slurm 环境变量导致脚本在写 meta 前就失败。
-func buildIDEScript(envType, sessionID string, port, cpus, memoryMB, nodes int, owner string) string {
+func buildIDEScript(envType, sessionID string, port, cpus, memoryMB, nodes int, clusterUser string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "#!/bin/bash\n")
 	fmt.Fprintf(&b, "# AILS interactive dev session env=%s session=%s port=%d cpus=%d mem=%d nodes=%d\n",
@@ -310,15 +313,15 @@ func buildIDEScript(envType, sessionID string, port, cpus, memoryMB, nodes int, 
 	// 应用启动前先回写连接信息，apiserver 据此反代
 	fmt.Fprintf(&b, "cat > /shared/sessions/${SESSION_ID}.json <<EOF\n")
 	fmt.Fprintf(&b, "{\"session_id\":\"${SESSION_ID}\",\"job_id\":${SLURM_JOB_ID:-0},\"node\":\"${NODE_NAME}\",\"node_ip\":\"${NODE_IP}\",\"port\":${PORT},\"env_type\":\"%s\",\"cpus\":%d,\"memory_mb\":%d,\"nodes\":%d,\"owner\":\"%s\"}\n",
-		envType, cpus, memoryMB, nodes, owner)
+		envType, cpus, memoryMB, nodes, clusterUser)
 	fmt.Fprintf(&b, "EOF\n")
 	// 应用输出重定向到会话日志，便于排查启动失败
 	fmt.Fprintf(&b, "exec > /shared/sessions/${SESSION_ID}.log 2>&1\n")
 	switch envType {
 	case "jupyter":
 		// base_url 对齐反代前缀；token 置空（由 apiserver JWT 网关守门）。
-		// allow_root=True：slurmrestd 用 root token 提交，作业以 root 跑，jupyter 默认拒绝 root。
-		fmt.Fprintf(&b, "exec jupyter lab --no-browser --ip=0.0.0.0 --port=${PORT} --ServerApp.base_url=${BASE_URL}/ --ServerApp.allow_root=True --ServerApp.token= --ServerApp.allow_remote_access=True --ServerApp.tornado_settings='{\"headers\":{\"Content-Security-Policy\":\"\"}}'\n")
+		// 作业以 clusterUser 非 root 身份运行（per-user JWT 提交），无需 allow_root。
+		fmt.Fprintf(&b, "exec jupyter lab --no-browser --ip=0.0.0.0 --port=${PORT} --ServerApp.base_url=${BASE_URL}/ --ServerApp.token= --ServerApp.allow_remote_access=True --ServerApp.tornado_settings='{\"headers\":{\"Content-Security-Policy\":\"\"}}'\n")
 	case "vscode":
 		// code-server 对子路径代理支持有限（已知限制）：先以根路径启动，反代尽力而为
 		fmt.Fprintf(&b, "exec code-server --bind-addr 0.0.0.0:${PORT} --auth none --disable-telemetry\n")

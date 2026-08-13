@@ -14,6 +14,7 @@ import (
 
 type fakeJobsAPI struct {
 	lastSubmit *slurmrest.SlurmJobSubmitReq
+	lastActAs  string
 	submitResp *slurmrest.SlurmJobSubmitResp
 	submitErr  error
 	jobs       *slurmrest.JobsResponse
@@ -21,8 +22,9 @@ type fakeJobsAPI struct {
 	cancelErr  error
 }
 
-func (f *fakeJobsAPI) SubmitJob(req *slurmrest.SlurmJobSubmitReq) (*slurmrest.SlurmJobSubmitResp, error) {
+func (f *fakeJobsAPI) SubmitJobAs(req *slurmrest.SlurmJobSubmitReq, actAs string) (*slurmrest.SlurmJobSubmitResp, error) {
 	f.lastSubmit = req
+	f.lastActAs = actAs
 	if f.submitErr != nil {
 		return nil, f.submitErr
 	}
@@ -100,7 +102,7 @@ func TestLaunchContainer_SubmitsJobWithScript(t *testing.T) {
 	jobs := &fakeJobsAPI{submitResp: &slurmrest.SlurmJobSubmitResp{JobID: 42}}
 	svc := newSvc(jobs, &fakeMeta{m: map[string]containers.SessionMeta{}})
 
-	resp, err := svc.LaunchContainer(context.Background(), &containers.ContainerLaunchRequest{EnvType: "jupyter", CPUs: 4, MemoryMB: 8192, Nodes: 1}, "owner-test")
+	resp, err := svc.LaunchContainer(context.Background(), &containers.ContainerLaunchRequest{EnvType: "jupyter", CPUs: 4, MemoryMB: 8192, Nodes: 1}, "ailsmember", "ailsmember")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,6 +121,13 @@ func TestLaunchContainer_SubmitsJobWithScript(t *testing.T) {
 	if jobs.lastSubmit.Job.CpusPerTask != 4 || jobs.lastSubmit.Job.Partition != "debug" {
 		t.Errorf("job spec mismatch: %+v", jobs.lastSubmit.Job)
 	}
+	// 真·每用户身份：IDE 作业以 clusterUser 提交并带有效 account（L1+L3）
+	if jobs.lastActAs != "ailsmember" {
+		t.Errorf("actAs=%q want ailsmember", jobs.lastActAs)
+	}
+	if jobs.lastSubmit.Job.Account != "ailsmember" {
+		t.Errorf("account=%q want ailsmember", jobs.lastSubmit.Job.Account)
+	}
 	s := jobs.lastSubmit.Script
 	for _, want := range []string{"--ServerApp.base_url=", "/shared/sessions/", "node_ip", "jupyter lab"} {
 		if !strings.Contains(s, want) {
@@ -129,7 +138,7 @@ func TestLaunchContainer_SubmitsJobWithScript(t *testing.T) {
 
 func TestLaunchContainer_RejectsBadEnvType(t *testing.T) {
 	svc := newSvc(&fakeJobsAPI{}, &fakeMeta{m: map[string]containers.SessionMeta{}})
-	_, err := svc.LaunchContainer(context.Background(), &containers.ContainerLaunchRequest{EnvType: "matlab"}, "owner-test")
+	_, err := svc.LaunchContainer(context.Background(), &containers.ContainerLaunchRequest{EnvType: "matlab"}, "ailsmember", "ailsmember")
 	if !errors.Is(err, containers.ErrUnsupportedEnvType) {
 		t.Fatalf("want ErrUnsupportedEnvType, got %v", err)
 	}
@@ -138,7 +147,7 @@ func TestLaunchContainer_RejectsBadEnvType(t *testing.T) {
 func TestLaunchContainer_SubmitError(t *testing.T) {
 	jobs := &fakeJobsAPI{submitErr: errors.New("slurmrestd down")}
 	svc := newSvc(jobs, &fakeMeta{m: map[string]containers.SessionMeta{}})
-	if _, err := svc.LaunchContainer(context.Background(), &containers.ContainerLaunchRequest{EnvType: "jupyter"}, "owner-test"); err == nil {
+	if _, err := svc.LaunchContainer(context.Background(), &containers.ContainerLaunchRequest{EnvType: "jupyter"}, "ailsmember", "ailsmember"); err == nil {
 		t.Fatal("want error when SubmitJob fails")
 	}
 }

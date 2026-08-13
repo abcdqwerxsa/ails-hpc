@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -43,9 +44,11 @@ func RunInSlurmctld(args ...string) ([]byte, error) {
 	return nil, fmt.Errorf("run in slurmctld (%s) failed: %w", strings.Join(args, " "), err)
 }
 
-// FetchToken 动态获取 Slurm JWT 身份令牌（特权用户 root，24h 有效）。
-func FetchToken() string {
-	out, err := RunInSlurmctld("scontrol", "token", "username=root", "lifespan=86400")
+// mintToken 在 slurmctld 容器内为指定用户铸造 slurmrestd JWT（scontrol token username=<u>），
+// 返回 SLURM_JWT= 后的 token 值，失败返回空串。docker exec slurmctld 以 root 运行，可为任意
+// 用户铸造 token（slurmrestd 的 JWT 身份仅是签名声明，集群共享 jwt_hs256.key）。
+func mintToken(username string) string {
+	out, err := RunInSlurmctld("scontrol", "token", fmt.Sprintf("username=%s", username), "lifespan=86400")
 	if err != nil {
 		return ""
 	}
@@ -56,6 +59,38 @@ func FetchToken() string {
 		}
 	}
 	return ""
+}
+
+// FetchToken 动态获取特权（root）Slurm JWT 身份令牌（24h），供读/控制类调用与 NewClient 使用。
+// 保留为包级函数以兼容既有调用方。
+func FetchToken() string {
+	return mintToken("root")
+}
+
+// userToken 返回指定 clusterUser 的 slurmrestd JWT：clusterUser 为空时用 root 特权令牌
+// （c.UserToken，惰性获取）；否则用 per-user 缓存（首次或 refresh=true 时铸造）。
+// 这是 L1 真·每用户隔离的核心——submit 路径用它让作业以真实 unix 身份运行。
+func (c *Client) userToken(clusterUser string, refresh bool) string {
+	if clusterUser == "" {
+		if refresh || c.UserToken == "" {
+			if t := FetchToken(); t != "" {
+				c.UserToken = t
+			}
+		}
+		return c.UserToken
+	}
+	c.tokenMu.Lock()
+	defer c.tokenMu.Unlock()
+	if !refresh {
+		if t, ok := c.tokens[clusterUser]; ok && t != "" {
+			return t
+		}
+	}
+	t := mintToken(clusterUser)
+	if t != "" {
+		c.tokens[clusterUser] = t
+	}
+	return t
 }
 
 // SacctQuery 在 slurmctld 容器内执行 sacct 并返回原始 stdout，供调用方按
@@ -81,12 +116,16 @@ func UpdateNodeStateCLI(name, state, reason string) error {
 }
 
 
-// Client 封装了与原生 slurmrestd REST API 交互的客户端
+// Client 封装了与原生 slurmrestd REST API 交互的客户端。
+// UserToken 为 root 特权令牌（读/控制类调用）；tokens 为 per-user 令牌缓存（submit 类调用，
+// 使作业以各用户真实 unix 身份运行——L1 隔离）。
 type Client struct {
 	BaseURL    string
 	UserName   string
 	UserToken  string
 	HTTPClient *http.Client
+	tokens     map[string]string
+	tokenMu    sync.Mutex
 }
 
 // NewClient 创建并初始化一个新的 Slurm REST API Client
@@ -101,6 +140,7 @@ func NewClient(baseURL, userName, userToken string) *Client {
 		HTTPClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
+		tokens: make(map[string]string),
 	}
 }
 
@@ -154,6 +194,71 @@ func (c *Client) executeRequestWithBody(method, path string, bodyData interface{
 		if newToken != "" && newToken != c.UserToken {
 			c.UserToken = newToken
 			resp, body, err = makeReq(c.UserToken)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return body, fmt.Errorf("slurmrestd returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	return body, nil
+}
+
+// executeRequestAs 以指定 clusterUser（actAs）身份发起请求——X-SLURM-USER-NAME=actAs、
+// X-SLURM-USER-TOKEN=该用户的 per-user JWT。用于 submit 类调用（作业以 actAs 真实身份运行）。
+// 遇 401/403 时刷新该用户令牌并重试一次；actAs 为空则退化为 root 特权令牌。
+func (c *Client) executeRequestAs(method, path string, bodyData interface{}, actAs string) ([]byte, error) {
+	reqURL := fmt.Sprintf("%s%s", c.BaseURL, path)
+
+	makeReq := func(token string) (*http.Response, []byte, error) {
+		var bodyReader io.Reader
+		if bodyData != nil {
+			jsonBytes, err := json.Marshal(bodyData)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to marshal request body: %w", err)
+			}
+			bodyReader = bytes.NewBuffer(jsonBytes)
+		}
+
+		req, err := http.NewRequest(method, reqURL, bodyReader)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to create request: %w", err)
+		}
+
+		userName := actAs
+		if userName == "" {
+			userName = "root"
+		}
+		req.Header.Set("X-SLURM-USER-NAME", userName)
+		req.Header.Set("X-SLURM-USER-TOKEN", token)
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := c.HTTPClient.Do(req)
+		if err != nil {
+			return nil, nil, fmt.Errorf("http request failed: %w", err)
+		}
+		defer resp.Body.Close()
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return resp, nil, fmt.Errorf("failed to read response body: %w", err)
+		}
+		return resp, body, nil
+	}
+
+	token := c.userToken(actAs, false)
+	resp, body, err := makeReq(token)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		newToken := c.userToken(actAs, true) // 刷新该用户令牌
+		if newToken != "" && newToken != token {
+			resp, body, err = makeReq(newToken)
 			if err != nil {
 				return nil, err
 			}
@@ -326,9 +431,10 @@ type SlurmJobControlReq struct {
 	JobState string `json:"job_state,omitempty"`
 }
 
-// SubmitJob 提交作业至 SlurmREST v0.0.37/job/submit API
-func (c *Client) SubmitJob(req *SlurmJobSubmitReq) (*SlurmJobSubmitResp, error) {
-	body, err := c.executeRequestWithBody("POST", "/slurm/v0.0.37/job/submit", req)
+// SubmitJobAs 以指定 clusterUser（actAs）身份提交作业——作业将以 actAs 的真实 unix 身份运行
+// （L1 隔离核心）。actAs 为空时退化为 root（兼容旧调用方与测试）。
+func (c *Client) SubmitJobAs(req *SlurmJobSubmitReq, actAs string) (*SlurmJobSubmitResp, error) {
+	body, err := c.executeRequestAs("POST", "/slurm/v0.0.37/job/submit", req, actAs)
 	if err != nil {
 		return nil, err
 	}
@@ -339,6 +445,11 @@ func (c *Client) SubmitJob(req *SlurmJobSubmitReq) (*SlurmJobSubmitResp, error) 
 	}
 
 	return &res, nil
+}
+
+// SubmitJob 提交作业至 SlurmREST v0.0.37/job/submit API（root 身份，兼容旧调用方）。
+func (c *Client) SubmitJob(req *SlurmJobSubmitReq) (*SlurmJobSubmitResp, error) {
+	return c.SubmitJobAs(req, "")
 }
 
 // CancelJob 通过 DELETE /slurm/v0.0.37/job/{job_id} 取消指定作业
