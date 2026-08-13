@@ -3,6 +3,11 @@ package main
 import (
 	"flag"
 	"log"
+	"net"
+	"net/http"
+	"os"
+	"strings"
+	"time"
 
 	"ails-hpc/pkg/auth"
 	"ails-hpc/pkg/config"
@@ -59,7 +64,49 @@ func main() {
 	if port == "" {
 		port = cfg.ListenPort
 	}
+
+	// systemd Type=notify：等服务能响应 /healthz 后发 READY=1，之后每 10s 发 WATCHDOG=1。
+	// unit 里 WatchdogSec=30：若 apiserver 挂死、停止心跳，systemd 自动重启（覆盖"进程在但僵死"）。
+	// 非 systemd 运行（NOTIFY_SOCKET 未设）时 sdNotify 为 no-op，不影响本地开发。
+	go func() {
+		healthz := "http://127.0.0.1:" + port + "/healthz"
+		for i := 0; i < 100; i++ { // ~10s 内等服务就绪
+			if resp, err := http.Get(healthz); err == nil {
+				resp.Body.Close()
+				if resp.StatusCode == http.StatusOK {
+					break
+				}
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		sdNotify("READY=1")
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			sdNotify("WATCHDOG=1")
+		}
+	}()
+
 	if err := r.Run(":" + port); err != nil {
 		log.Fatalf("server stopped: %v", err)
 	}
+}
+
+// sdNotify 通过 NOTIFY_SOCKET 向 systemd 发送 sd_notify 协议消息（READY=1 / WATCHDOG=1）。
+// 非 systemd 环境（NOTIFY_SOCKET 未设）静默 no-op。
+func sdNotify(state string) {
+	socket := os.Getenv("NOTIFY_SOCKET")
+	if socket == "" {
+		return
+	}
+	// user 会话用抽象 socket（@ 前缀 → abstract namespace，NUL 起始）
+	if strings.HasPrefix(socket, "@") {
+		socket = "\x00" + socket[1:]
+	}
+	conn, err := net.Dial("unixgram", socket)
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+	_, _ = conn.Write([]byte(state))
 }

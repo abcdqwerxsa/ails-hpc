@@ -282,6 +282,43 @@ func TestRouter_Healthz(t *testing.T) {
 	}
 }
 
+// TestRouter_Readyz：readiness 探针。mock slurmrestd 可达 → 200 {"status":"ready"}。
+func TestRouter_Readyz(t *testing.T) {
+	r, _ := setupTestRouter(t)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/readyz", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("readyz: want 200 got %d body=%s", w.Code, w.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v body=%s", err, w.Body.String())
+	}
+	if body["status"] != "ready" {
+		t.Errorf("status = %v, want \"ready\"", body["status"])
+	}
+}
+
+// TestRouter_ReadyzDegraded：slurmrestd 不可达时 readiness 应返 503（degraded）。
+func TestRouter_ReadyzDegraded(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	deadClient := slurmrest.NewClient("http://127.0.0.1:9", "hpcuser", "test-token")
+	h := cluster.NewClusterHandler(cluster.NewClusterService(deadClient))
+	r := gin.New()
+	r.GET("/readyz", h.Readyz)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/readyz", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("readyz degraded: want 503, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
 // doRequestWithBody 与 doRequest 类似，但回传响应体（登录测试需要解析）。
 func doRequestWithBody(r *gin.Engine, method, path, body string) (int, string) {
 	req, _ := http.NewRequest(method, path, bytes.NewBufferString(body))
