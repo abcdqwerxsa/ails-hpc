@@ -17,7 +17,7 @@ echo "2. Syncing apiserver binary, config/, apps/web static assets & systemd uni
 ssh -o BatchMode=yes ${REMOTE_HOST} "mkdir -p ${REMOTE_DIR}/bin ${REMOTE_DIR}/apps/web ${REMOTE_DIR}/config"
 rsync -avz -e "ssh -o BatchMode=yes" bin/apiserver ${REMOTE_HOST}:${REMOTE_DIR}/bin/apiserver
 rsync -avz -e "ssh -o BatchMode=yes" config/   ${REMOTE_HOST}:${REMOTE_DIR}/config/
-rsync -avz -e "ssh -o BatchMode=yes" apps/web/  ${REMOTE_HOST}:${REMOTE_DIR}/apps/web/
+rsync -avz --exclude node_modules -e "ssh -o BatchMode=yes" apps/web/  ${REMOTE_HOST}:${REMOTE_DIR}/apps/web/
 rsync -avz -e "ssh -o BatchMode=yes" deploy/slurm-cluster/ails-apiserver.service \
     ${REMOTE_HOST}:/etc/systemd/system/ails-apiserver.service
 
@@ -25,8 +25,8 @@ echo "3. Installing systemd service on remote Slurm server (192.168.20.226:${POR
 echo "   Requires ${REMOTE_DIR}/.env containing AILS_JWT_SECRET (server is fail-closed without it)."
 echo "   First-time setup:"
 echo "     ssh ${REMOTE_HOST} \"install -m600 /dev/null ${REMOTE_DIR}/.env && printf 'AILS_JWT_SECRET=%s\\\\n' \\\"\$(openssl rand -hex 32)\\\" >> ${REMOTE_DIR}/.env\""
-ssh -o BatchMode=yes ${REMOTE_HOST} "
-  set -e
+ssh -o BatchMode=yes -o ServerAliveInterval=15 ${REMOTE_HOST} "
+  # 不用 set -e：任一步失败都继续到末尾验证块给出明确诊断（之前 set -e 在中途断过，留 unit inactive）
   # 1) 一次性确保专用系统用户 ails（最小权限运行 apiserver）
   id ails >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin ails
 
@@ -35,15 +35,15 @@ ssh -o BatchMode=yes ${REMOTE_HOST} "
   chown -R ails:ails ${REMOTE_DIR}
   if [ -f ${REMOTE_DIR}/.env ]; then chown ails:ails ${REMOTE_DIR}/.env && chmod 600 ${REMOTE_DIR}/.env; fi
 
-  # 3) systemd 接管：先停 systemd 实例（若有）+ 清理任何遗留 apiserver 进程，
-  #    再 reload/restart。首次从旧 nohup 部署迁移时，旧进程仍占 :8090，不清掉则
-  #    systemd 新进程绑端口失败、ExecStartPost 探活打到旧进程（无 /healthz）→ 超时失败。
-  systemctl stop ails-apiserver 2>/dev/null || true
-  pkill -f 'bin/apiserver' 2>/dev/null || true
+  # 2.5) 清掉前端构建期产物。node_modules 不该上生产；之前误传会让下面 chown -R
+  #      极慢（数万文件）→ ssh 超时 → 重启那步没跑完，unit 留在 inactive（两次宕机的真因）。
+  rm -rf ${REMOTE_DIR}/apps/web/node_modules 2>/dev/null || true
+
+  # 3) systemd 原子重启。systemd 已托管 unit，无需手动 stop/pkill——那会在重启间隙留空窗。
   chmod 644 /etc/systemd/system/ails-apiserver.service
   systemctl daemon-reload
-  systemctl enable ails-apiserver >/dev/null
-  systemctl restart ails-apiserver || true   # 失败也继续，交给下面的验证块打印排障日志
+  systemctl enable ails-apiserver >/dev/null 2>&1 || true
+  systemctl restart ails-apiserver
 
   # 4) 验证：is-active + /healthz 探活；失败则打印 journalctl 排障
   if systemctl is-active --quiet ails-apiserver && curl -fsS http://127.0.0.1:${PORT}/healthz >/dev/null; then
