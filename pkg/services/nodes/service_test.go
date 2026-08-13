@@ -14,6 +14,55 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// fakeNodeApplier 测试用节点状态下发：恒成功，绕过 docker exec（测试环境无 slurmctld 容器）。
+// 生产路径用 slurmrest.UpdateNodeStateCLI（scontrol via docker exec slurmctld）。
+func fakeNodeApplier(name, state, reason string) error { return nil }
+
+// TestNodes_UpdateState_CallsApplier 验证写操作经 applyState 下发，且状态映射正确：
+// DRAIN→DRAIN、RESUME→RESUME、IDLE→RESUME（scontrol 无 IDLE settable，用 RESUME 回 IDLE）。
+// 这是"假写→真写"修复的核心保证：drain/resume 确实通过下发函数触达集群。
+func TestNodes_UpdateState_CallsApplier(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	mock := common.NewMockSlurmServer()
+	t.Cleanup(mock.Close)
+	client := slurmrest.NewClient(mock.URL, "hpcuser", "test-token")
+
+	var got struct {
+		name, state, reason string
+	}
+	rec := func(n, s, r string) error { got.name, got.state, got.reason = n, s, r; return nil }
+	svc := nodes.NewNodeServiceWithApplier(client, rec)
+	handler := nodes.NewNodeHandler(svc)
+	router := gin.New()
+	router.Use(gin.Recovery())
+	router.POST("/api/v1/slurm/nodes/:name/state", handler.UpdateNodeState)
+
+	post := func(state, reason string) {
+		got.name, got.state, got.reason = "", "", ""
+		body, _ := json.Marshal(nodes.NodeStateUpdateRequest{State: state, Reason: reason})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(http.MethodPost, "/api/v1/slurm/nodes/node1/state", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s: want 200 got %d body=%s", state, w.Code, w.Body.String())
+		}
+	}
+
+	post("DRAIN", "maint")
+	if got.state != "DRAIN" || got.reason != "maint" {
+		t.Errorf("DRAIN: applier got state=%q reason=%q, want DRAIN/maint", got.state, got.reason)
+	}
+	post("RESUME", "")
+	if got.state != "RESUME" {
+		t.Errorf("RESUME: applier got state=%q, want RESUME", got.state)
+	}
+	post("IDLE", "")
+	if got.state != "RESUME" {
+		t.Errorf("IDLE: applier got state=%q, want RESUME (scontrol has no IDLE set op)", got.state)
+	}
+}
+
 // setupNodeTestRouter 用真实 mock slurmrestd 支撑 service（不再用 nil client + 假 seed）。
 // mock 返回 node1/node2/node3，与 docker-compose 集群拓扑一致。
 func setupNodeTestRouter(t *testing.T) (*gin.Engine, nodes.NodeService) {
@@ -23,7 +72,7 @@ func setupNodeTestRouter(t *testing.T) (*gin.Engine, nodes.NodeService) {
 	t.Cleanup(mock.Close)
 
 	client := slurmrest.NewClient(mock.URL, "hpcuser", "test-token")
-	service := nodes.NewNodeService(client)
+	service := nodes.NewNodeServiceWithApplier(client, fakeNodeApplier)
 	handler := nodes.NewNodeHandler(service)
 
 	router := gin.New()

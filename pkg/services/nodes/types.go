@@ -13,6 +13,7 @@ type NodeStateInfo struct {
 	Cores       int       `json:"cores"`
 	Reason      string    `json:"reason,omitempty"`
 	UpdatedAt   time.Time `json:"updated_at,omitempty"`
+	UserDrained bool      `json:"-"`
 }
 
 // NodesListResponse defines the API response payload for listing nodes

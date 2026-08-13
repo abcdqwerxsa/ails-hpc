@@ -23,7 +23,7 @@ func TestChallenger_Nodes_ConcurrencyStress(t *testing.T) {
 	mock := common.NewMockSlurmServer()
 	t.Cleanup(mock.Close)
 	client := slurmrest.NewClient(mock.URL, "hpcuser", "test-token")
-	svc := nodes.NewNodeService(client)
+	svc := nodes.NewNodeServiceWithApplier(client, fakeNodeApplier)
 	handler := nodes.NewNodeHandler(svc)
 
 	router := gin.New()
