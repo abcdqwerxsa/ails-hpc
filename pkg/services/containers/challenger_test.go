@@ -13,7 +13,7 @@ import (
 func TestChallenger_LaunchContainer_QuotaExceeded(t *testing.T) {
 	jobs := &fakeJobsAPI{submitResp: &slurmrest.SlurmJobSubmitResp{}}
 	svc := newSvc(jobs, &fakeMeta{m: map[string]containers.SessionMeta{}})
-	_, err := svc.LaunchContainer(context.Background(), &containers.ContainerLaunchRequest{EnvType: "jupyter", CPUs: 9999})
+	_, err := svc.LaunchContainer(context.Background(), &containers.ContainerLaunchRequest{EnvType: "jupyter", CPUs: 9999}, "owner-test")
 	if !errors.Is(err, containers.ErrQuotaExceeded) {
 		t.Fatalf("want ErrQuotaExceeded, got %v", err)
 	}
@@ -65,7 +65,7 @@ func TestChallenger_RecycleContainer_CancelError(t *testing.T) {
 func TestChallenger_LaunchContainer_DefaultsResources(t *testing.T) {
 	jobs := &fakeJobsAPI{submitResp: &slurmrest.SlurmJobSubmitResp{JobID: 7}}
 	svc := newSvc(jobs, &fakeMeta{m: map[string]containers.SessionMeta{}})
-	resp, err := svc.LaunchContainer(context.Background(), &containers.ContainerLaunchRequest{EnvType: "vscode"})
+	resp, err := svc.LaunchContainer(context.Background(), &containers.ContainerLaunchRequest{EnvType: "vscode"}, "owner-test")
 	if err != nil {
 		t.Fatal(err)
 	}

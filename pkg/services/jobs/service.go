@@ -15,8 +15,11 @@ import (
 var globalJobIDCounter int64 = 1000
 
 type JobService interface {
-	SubmitJob(ctx context.Context, req *SubmitJobRequest) (*SubmitJobResponse, error)
+	SubmitJob(ctx context.Context, req *SubmitJobRequest, owner string) (*SubmitJobResponse, error)
 	ListJobs(ctx context.Context) ([]JobSummary, error)
+	// JobOwner 返回作业的归属者（submit 时写入的 slurm account）。
+	// 用于归属隔离：member 只能控制自己的作业。空 owner 视为遗留作业（放行）。
+	JobOwner(ctx context.Context, jobID int) (string, error)
 	CancelJob(ctx context.Context, jobID int) (*JobControlResponse, error)
 	HoldJob(ctx context.Context, jobID int) (*JobControlResponse, error)
 	RequeueJob(ctx context.Context, jobID int) (*JobControlResponse, error)
@@ -35,7 +38,7 @@ func NewJobService(client *slurmrest.Client) JobService {
 	}
 }
 
-func (s *jobServiceImpl) SubmitJob(ctx context.Context, req *SubmitJobRequest) (*SubmitJobResponse, error) {
+func (s *jobServiceImpl) SubmitJob(ctx context.Context, req *SubmitJobRequest, owner string) (*SubmitJobResponse, error) {
 	if req == nil {
 		return nil, ErrNegativeResources
 	}
@@ -94,6 +97,7 @@ func (s *jobServiceImpl) SubmitJob(ctx context.Context, req *SubmitJobRequest) (
 		slurmReq.Job.Environment = map[string]string{
 			"PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 		}
+		slurmReq.Job.Account = owner // 归属隔离：account 载体（AccountingStorageEnforce=none，不校验存在性）
 
 		resp, err := s.client.SubmitJob(slurmReq)
 		if err != nil {
@@ -116,6 +120,7 @@ func (s *jobServiceImpl) SubmitJob(ctx context.Context, req *SubmitJobRequest) (
 		Nodes:      fmt.Sprintf("%d", nodesCount),
 		TimeLimit:  timeLimit,
 		SubmitTime: time.Now().Unix(),
+		Owner:      owner,
 	}
 
 	s.mu.Lock()
@@ -156,6 +161,7 @@ func (s *jobServiceImpl) ListJobs(ctx context.Context) ([]JobSummary, error) {
 					Nodes:      j.Nodes,
 					TimeLimit:  j.TimeLimit,
 					SubmitTime: j.SubmitTime,
+					Owner:      j.Account, // 归属隔离：从 slurm account 回填
 				}
 			}
 		} else {
@@ -193,6 +199,21 @@ func (s *jobServiceImpl) ListJobs(ctx context.Context) ([]JobSummary, error) {
 	}
 
 	return summaries, nil
+}
+
+// JobOwner 返回作业归属者（submit 时写入的 slurm account）。复用 ListJobs 的合并视图
+// （local + slurm）。作业不存在返回 ErrJobNotFound。
+func (s *jobServiceImpl) JobOwner(ctx context.Context, jobID int) (string, error) {
+	jobs, err := s.ListJobs(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, j := range jobs {
+		if j.JobID == jobID {
+			return j.Owner, nil
+		}
+	}
+	return "", ErrJobNotFound
 }
 
 func (s *jobServiceImpl) CancelJob(ctx context.Context, jobID int) (*JobControlResponse, error) {

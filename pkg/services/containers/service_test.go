@@ -75,6 +75,7 @@ func jobsResp(rows ...jrow) *slurmrest.JobsResponse {
 			Nodes      string `json:"nodes"`
 			TimeLimit  int    `json:"time_limit"`
 			SubmitTime int64  `json:"submit_time"`
+			Account    string `json:"account"`
 		}{JobID: x.id, Name: x.name, JobState: x.state, Nodes: x.nodes, SubmitTime: x.submit})
 	}
 	return r
@@ -99,7 +100,7 @@ func TestLaunchContainer_SubmitsJobWithScript(t *testing.T) {
 	jobs := &fakeJobsAPI{submitResp: &slurmrest.SlurmJobSubmitResp{JobID: 42}}
 	svc := newSvc(jobs, &fakeMeta{m: map[string]containers.SessionMeta{}})
 
-	resp, err := svc.LaunchContainer(context.Background(), &containers.ContainerLaunchRequest{EnvType: "jupyter", CPUs: 4, MemoryMB: 8192, Nodes: 1})
+	resp, err := svc.LaunchContainer(context.Background(), &containers.ContainerLaunchRequest{EnvType: "jupyter", CPUs: 4, MemoryMB: 8192, Nodes: 1}, "owner-test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +129,7 @@ func TestLaunchContainer_SubmitsJobWithScript(t *testing.T) {
 
 func TestLaunchContainer_RejectsBadEnvType(t *testing.T) {
 	svc := newSvc(&fakeJobsAPI{}, &fakeMeta{m: map[string]containers.SessionMeta{}})
-	_, err := svc.LaunchContainer(context.Background(), &containers.ContainerLaunchRequest{EnvType: "matlab"})
+	_, err := svc.LaunchContainer(context.Background(), &containers.ContainerLaunchRequest{EnvType: "matlab"}, "owner-test")
 	if !errors.Is(err, containers.ErrUnsupportedEnvType) {
 		t.Fatalf("want ErrUnsupportedEnvType, got %v", err)
 	}
@@ -137,7 +138,7 @@ func TestLaunchContainer_RejectsBadEnvType(t *testing.T) {
 func TestLaunchContainer_SubmitError(t *testing.T) {
 	jobs := &fakeJobsAPI{submitErr: errors.New("slurmrestd down")}
 	svc := newSvc(jobs, &fakeMeta{m: map[string]containers.SessionMeta{}})
-	if _, err := svc.LaunchContainer(context.Background(), &containers.ContainerLaunchRequest{EnvType: "jupyter"}); err == nil {
+	if _, err := svc.LaunchContainer(context.Background(), &containers.ContainerLaunchRequest{EnvType: "jupyter"}, "owner-test"); err == nil {
 		t.Fatal("want error when SubmitJob fails")
 	}
 }
