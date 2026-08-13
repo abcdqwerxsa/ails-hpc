@@ -35,9 +35,10 @@ func NewRouter(h Handlers) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Recovery(), requestIDMiddleware(), accessLogMiddleware(), corsMiddleware())
 
-	// 公开路由：登录 + liveness 探针。其余 /api/v1/** 一律需 Bearer JWT。
+	// 公开路由：登录 + liveness/readiness 探针。其余 /api/v1/** 一律需 Bearer JWT。
 	r.POST("/api/v1/auth/login", h.Auth.Login)
-	r.GET("/healthz", healthHandler) // 免鉴权：systemd ExecStartPost / 负载均衡探活用
+	r.GET("/healthz", healthHandler)   // 免鉴权 liveness：进程在跑即可
+	r.GET("/readyz", h.Cluster.Readyz) // 免鉴权 readiness：探 slurmrestd 可达性
 
 	api := r.Group("/api/v1")
 	api.Use(auth.JWTAuthMiddleware())

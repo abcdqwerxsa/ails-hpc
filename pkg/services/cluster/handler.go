@@ -40,3 +40,14 @@ func (h *ClusterHandler) GetPartitions(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, res)
 }
+
+// Readyz GET /readyz —— readiness 探针，免鉴权（与 /healthz 同在 engine 根级）。
+// liveness /healthz 只看"进程在跑"；readiness 探 slurmrestd 可达性，反映"能否提供完整功能"：
+// 可达 → 200 {"status":"ready"}；不可达 → 503 {"status":"degraded",...}。供 future LB/k8s 探活。
+func (h *ClusterHandler) Readyz(c *gin.Context) {
+	if _, err := h.service.Ping(c.Request.Context()); err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"status": "degraded", "error": "slurmrestd unreachable"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "ready"})
+}
