@@ -23,12 +23,20 @@ const (
 func JWTAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := strings.TrimSpace(c.GetHeader("Authorization"))
-		if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
+		tokenStr := ""
+		if strings.HasPrefix(authHeader, "Bearer ") {
+			tokenStr = strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+		}
+		// /ide/ 反代路径：浏览器导航/iframe 无法带 Authorization 头，允许 ?token= 查询参数兜底。
+		// 仅限 /api/v1/ide/（Web-IDE 会话），避免把 query-token 放宽到所有 API。
+		if tokenStr == "" && strings.HasPrefix(c.Request.URL.Path, "/api/v1/ide/") {
+			tokenStr = strings.TrimSpace(c.Query("token"))
+		}
+		if tokenStr == "" {
 			httpx.Unauthorized(c, "missing or invalid Authorization header")
 			return
 		}
 
-		tokenStr := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
 		claims, err := VerifyToken(tokenStr)
 		if err != nil {
 			// 固定文案：不外泄 JWT 校验内部细节（签名/解析错误等）

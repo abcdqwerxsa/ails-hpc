@@ -301,8 +301,9 @@ func buildIDEScript(envType, sessionID string, port, cpus, memoryMB, nodes int) 
 	fmt.Fprintf(&b, "exec > /shared/sessions/${SESSION_ID}.log 2>&1\n")
 	switch envType {
 	case "jupyter":
-		// base_url 对齐反代前缀；token 置空（由 apiserver JWT 网关守门）
-		fmt.Fprintf(&b, "exec jupyter lab --no-browser --ip=0.0.0.0 --port=${PORT} --ServerApp.base_url=${BASE_URL}/ --ServerApp.token= --ServerApp.allow_remote_access=True --ServerApp.tornado_settings='{\"headers\":{\"Content-Security-Policy\":\"\"}}'\n")
+		// base_url 对齐反代前缀；token 置空（由 apiserver JWT 网关守门）。
+		// allow_root=True：slurmrestd 用 root token 提交，作业以 root 跑，jupyter 默认拒绝 root。
+		fmt.Fprintf(&b, "exec jupyter lab --no-browser --ip=0.0.0.0 --port=${PORT} --ServerApp.base_url=${BASE_URL}/ --ServerApp.allow_root=True --ServerApp.token= --ServerApp.allow_remote_access=True --ServerApp.tornado_settings='{\"headers\":{\"Content-Security-Policy\":\"\"}}'\n")
 	case "vscode":
 		// code-server 对子路径代理支持有限（已知限制）：先以根路径启动，反代尽力而为
 		fmt.Fprintf(&b, "exec code-server --bind-addr 0.0.0.0:${PORT} --auth none --disable-telemetry\n")

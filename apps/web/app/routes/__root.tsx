@@ -71,6 +71,11 @@ function RootLayout() {
                 作业管理
               </Link>
             </li>
+            <li className="nav-item">
+              <Link to="/webide" activeProps={{ className: 'active' }}>
+                Web-IDE
+              </Link>
+            </li>
           </ul>
         </div>
 

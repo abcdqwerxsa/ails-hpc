@@ -115,6 +115,49 @@ export interface JobControlResponse {
   status?: string;
 }
 
+// Web-IDE 会话相关类型（字段对齐 pkg/services/containers/types.go）
+export interface ContainerInstance {
+  container_id: string;
+  env_type: string; // jupyter | vscode
+  status: string; // STARTING | RUNNING | STOPPED
+  web_url: string; // /api/v1/ide/<session>/
+  job_id: number;
+  node?: string;
+  nodes: number;
+  cpus: number;
+  memory_mb: number;
+  created_at: string;
+}
+export interface ContainerListResponse {
+  containers: ContainerInstance[];
+}
+export interface ContainerLaunchRequest {
+  env_type: string; // jupyter | vscode
+  nodes?: number;
+  cpus?: number;
+  memory_mb?: number;
+}
+export interface ContainerLaunchResponse {
+  container_id: string;
+  env_type: string;
+  status: string;
+  web_url: string;
+  allocated?: ContainerInstance;
+}
+export interface ContainerRecycleResponse {
+  container_id: string;
+  status: string;
+  message: string;
+}
+
+// ideFullURL 把后端返回的相对 web_url(/api/v1/ide/<sid>/) 拼成完整 URL 并附 ?token=<JWT>。
+// 浏览器导航/iframe 无法带 Authorization 头，/ide/ 反代接受 ?token= 兜底（见 auth 中间件）。
+export function ideFullURL(webUrl: string): string {
+  const origin = API_BASE.replace(/\/api\/v1\/?$/, "");
+  const sep = webUrl.includes("?") ? "&" : "?";
+  return `${origin}${webUrl}${sep}token=${encodeURIComponent(getToken())}`;
+}
+
 export type NodeStateOp = "DRAIN" | "RESUME" | "IDLE";
 
 // --- Slurm API ---
@@ -148,6 +191,18 @@ export const slurm = {
     apiFetch<JobControlResponse>(`/slurm/jobs/${jobId}/hold`, { method: "POST" }),
   requeueJob: (jobId: number) =>
     apiFetch<JobControlResponse>(`/slurm/jobs/${jobId}/requeue`, { method: "POST" }),
+
+  // Web-IDE 会话（阶段 3）
+  listContainers: () => apiFetch<ContainerListResponse>("/slurm/containers/list"),
+  launchContainer: (payload: ContainerLaunchRequest) =>
+    apiFetch<ContainerLaunchResponse>("/slurm/containers/launch", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  recycleContainer: (id: string) =>
+    apiFetch<ContainerRecycleResponse>(`/slurm/containers/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
 
   // 分区（阶段 4）
   getPartitions: () => apiFetch<unknown>("/slurm/partitions"),

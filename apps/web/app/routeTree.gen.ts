@@ -8,10 +8,17 @@
 // 注：本仓未安装 @tanstack/router-plugin/cli，故手工维护——新增/删除 route 文件后在此同步。
 
 import { Route as rootRoute } from './routes/__root'
+import { Route as WebIDEImport } from './routes/webide'
 import { Route as JobsImport } from './routes/jobs'
 import { Route as NodesImport } from './routes/nodes'
 import { Route as LoginImport } from './routes/login'
 import { Route as IndexImport } from './routes/index'
+
+const WebIDERoute = WebIDEImport.update({
+  id: '/webide',
+  path: '/webide',
+  getParentRoute: () => rootRoute,
+} as any)
 
 const JobsRoute = JobsImport.update({
   id: '/jobs',
@@ -67,6 +74,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof JobsImport
       parentRoute: typeof rootRoute
     }
+    '/webide': {
+      id: '/webide'
+      path: '/webide'
+      fullPath: '/webide'
+      preLoaderRoute: typeof WebIDEImport
+      parentRoute: typeof rootRoute
+    }
   }
 }
 
@@ -75,4 +89,5 @@ export const routeTree = rootRoute.addChildren([
   LoginRoute,
   NodesRoute,
   JobsRoute,
+  WebIDERoute,
 ])
