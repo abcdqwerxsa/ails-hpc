@@ -76,6 +76,16 @@ function RootLayout() {
                 Web-IDE
               </Link>
             </li>
+            <li className="nav-item">
+              <Link to="/billing" activeProps={{ className: 'active' }}>
+                计费
+              </Link>
+            </li>
+            <li className="nav-item">
+              <Link to="/partitions" activeProps={{ className: 'active' }}>
+                分区
+              </Link>
+            </li>
           </ul>
         </div>
 

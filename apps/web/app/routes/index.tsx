@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { useEffect, useState } from 'react';
-import { slurm, type NodeStateInfo } from '../services/slurm';
+import { useEffect, useState, type ReactNode } from 'react';
+import { slurm, type JobSummary, type NodeStateInfo } from '../services/slurm';
 
 export const Route = createFileRoute('/')({ component: OverviewPage });
 
@@ -8,15 +8,14 @@ function OverviewPage() {
   const [status, setStatus] = useState<'UP' | 'DEGRADED' | '…'>('…');
   const [release, setRelease] = useState('');
   const [nodes, setNodes] = useState<NodeStateInfo[]>([]);
+  const [jobs, setJobs] = useState<JobSummary[]>([]);
   const [error, setError] = useState('');
 
   useEffect(() => {
     const tick = async () => {
-      // 集群状态：ping 成功且 pings[0].ping==="UP" → UP；否则（含 503）DEGRADED
       try {
         const p = await slurm.getClusterStatus();
-        const up = (p.pings?.[0]?.ping || '').toUpperCase() === 'UP';
-        setStatus(up ? 'UP' : 'DEGRADED');
+        setStatus((p.pings?.[0]?.ping || '').toUpperCase() === 'UP' ? 'UP' : 'DEGRADED');
         setRelease(p.meta?.Slurm?.release || '');
         setError('');
       } catch {
@@ -27,7 +26,13 @@ function OverviewPage() {
         const r = await slurm.getNodes();
         setNodes(r.nodes || []);
       } catch {
-        /* 节点读取失败已由 status 反映 */
+        /* 已由 status 反映 */
+      }
+      try {
+        const j = await slurm.getJobs();
+        setJobs(j.jobs || []);
+      } catch {
+        /* ignore */
       }
     };
     tick();
@@ -37,41 +42,63 @@ function OverviewPage() {
 
   const idle = nodes.filter((n) => (n.state || '').toUpperCase() === 'IDLE').length;
   const drained = nodes.filter((n) => (n.state || '').toUpperCase().includes('DRAIN')).length;
+  const cpuAlloc = nodes.reduce((s, n) => s + (n.alloc_cpus || 0), 0);
+  const cpuTot = nodes.reduce((s, n) => s + (n.cpus || 0), 0);
+  const memAlloc = nodes.reduce((s, n) => s + (n.alloc_memory || 0), 0);
+  const memTot = nodes.reduce((s, n) => s + (n.real_memory || 0), 0);
+  const running = jobs.filter((j) => (j.job_state || '').toUpperCase() === 'RUNNING').length;
+  const pending = jobs.filter((j) => (j.job_state || '').toUpperCase() === 'PENDING').length;
+  const cpuPct = cpuTot > 0 ? Math.round((cpuAlloc / cpuTot) * 100) : 0;
+  const memPct = memTot > 0 ? Math.round((memAlloc / memTot) * 100) : 0;
 
   return (
     <div>
       <h2 style={{ marginTop: 0, marginBottom: '1.5rem' }}>集群总览</h2>
 
-      {error && (
-        <div style={{ padding: '0.65rem 0.9rem', background: 'rgba(239,68,68,.1)', color: '#f43f5e', borderRadius: 8, marginBottom: '1rem', fontSize: '0.9rem' }}>
-          {error}
-        </div>
-      )}
+      {error && <Notice color="#f59e0b" bg="rgba(245,158,11,.12)">{error}</Notice>}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '1rem' }}>
-        <StatCard label="集群状态" value={status} color={status === 'UP' ? '#10b981' : status === 'DEGRADED' ? '#f59e0b' : '#888'} />
-        <StatCard label="节点总数" value={String(nodes.length)} />
-        <StatCard label="IDLE" value={String(idle)} color="#10b981" />
-        <StatCard label="DRAIN" value={String(drained)} color="#f59e0b" />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(180px,1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
+        <Stat label="集群状态" value={status} color={status === 'UP' ? '#10b981' : status === 'DEGRADED' ? '#f59e0b' : '#888'} />
+        <Stat label="节点总数" value={String(nodes.length)} />
+        <Stat label="IDLE / DRAIN" value={`${idle} / ${drained}`} />
+        <Stat label="作业总数" value={String(jobs.length)} />
+        <Stat label="RUNNING / PENDING" value={`${running} / ${pending}`} color="#3b82f6" />
       </div>
 
-      {release && (
-        <div style={{ marginTop: '1.5rem', color: 'var(--text-muted, #94a3b8)', fontSize: '0.85rem' }}>
-          Slurm 版本：{release}
-        </div>
-      )}
-      <div style={{ marginTop: '0.5rem', color: 'var(--text-muted, #94a3b8)', fontSize: '0.8rem' }}>
-        提示：节点详情与 DRAIN/RESUME 操作见侧栏「节点状态」。
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
+        <Gauge label="CPU 占用" alloc={cpuAlloc} tot={cpuTot} pct={cpuPct} unit="核" color="#3b82f6" />
+        <Gauge label="内存占用" alloc={memAlloc} tot={memTot} pct={memPct} unit="MB" color="#10b981" />
       </div>
+
+      {release && <div style={{ color: 'var(--text-muted,#94a3b8)', fontSize: '0.85rem' }}>Slurm 版本：{release}</div>}
     </div>
   );
 }
 
-function StatCard({ label, value, color }: { label: string; value: string; color?: string }) {
+function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
-    <div style={{ background: 'var(--bg-card, #1b1e28)', border: '1px solid var(--border-color, #2a2f3a)', borderRadius: 12, padding: '1.25rem' }}>
-      <div style={{ color: 'var(--text-muted, #94a3b8)', fontSize: '0.8rem', marginBottom: '0.5rem' }}>{label}</div>
-      <div style={{ fontSize: '1.6rem', fontWeight: 700, color: color || 'var(--text-main, #f1f5f9)' }}>{value}</div>
+    <div style={{ background: 'var(--bg-card,#1b1e28)', border: '1px solid var(--border-color,#2a2f3a)', borderRadius: 12, padding: '1.25rem' }}>
+      <div style={{ color: 'var(--text-muted,#94a3b8)', fontSize: '0.8rem', marginBottom: '0.5rem' }}>{label}</div>
+      <div style={{ fontSize: '1.5rem', fontWeight: 700, color: color || 'var(--text-main,#f1f5f9)' }}>{value}</div>
     </div>
   );
+}
+
+function Gauge({ label, alloc, tot, pct, unit, color }: { label: string; alloc: number; tot: number; pct: number; unit: string; color: string }) {
+  return (
+    <div style={{ background: 'var(--bg-card,#1b1e28)', border: '1px solid var(--border-color,#2a2f3a)', borderRadius: 12, padding: '1.25rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+        <span style={{ color: 'var(--text-muted,#94a3b8)', fontSize: '0.85rem' }}>{label}</span>
+        <span style={{ fontWeight: 700, color }}>{pct}%</span>
+      </div>
+      <div style={{ background: 'var(--bg-card-hover,#222632)', borderRadius: 6, height: 10, overflow: 'hidden', marginBottom: '0.4rem' }}>
+        <div style={{ width: `${pct}%`, height: '100%', background: color, transition: 'width .3s' }} />
+      </div>
+      <div style={{ fontSize: '0.78rem', color: 'var(--text-muted,#888)' }}>{alloc} / {tot} {unit} 分配</div>
+    </div>
+  );
+}
+
+function Notice({ color, bg, children }: { color: string; bg: string; children: ReactNode }) {
+  return <div style={{ padding: '0.6rem 0.9rem', color, background: bg, borderRadius: 8, marginBottom: '1rem', fontSize: '0.88rem' }}>{children}</div>;
 }

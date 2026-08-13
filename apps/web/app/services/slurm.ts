@@ -150,6 +150,39 @@ export interface ContainerRecycleResponse {
   message: string;
 }
 
+// 分区（阶段 4）
+export interface Partition {
+  name: string;
+  nodes: string;
+  total_cpus: number;
+  total_nodes: number;
+}
+export interface PartitionsResponse {
+  errors?: unknown[];
+  partitions: Partition[];
+}
+
+// 计费（阶段 4）
+export interface BillingUsage {
+  user: string;
+  project: string;
+  total_cpu_hours: number;
+  total_memory_gb_hours: number;
+  total_gpu_hours: number;
+  job_count: number;
+  container_count: number;
+}
+export interface BillingExportJSON {
+  format: string;
+  user: string;
+  timestamp: string;
+  total_cost: number;
+  currency: string;
+  job_count: number;
+  ctr_count: number;
+  exported_by: string;
+}
+
 // ideFullURL 把后端返回的相对 web_url(/api/v1/ide/<sid>/) 拼成完整 URL 并附 ?token=<JWT>。
 // 浏览器导航/iframe 无法带 Authorization 头，/ide/ 反代接受 ?token= 兜底（见 auth 中间件）。
 export function ideFullURL(webUrl: string): string {
@@ -205,5 +238,20 @@ export const slurm = {
     }),
 
   // 分区（阶段 4）
-  getPartitions: () => apiFetch<unknown>("/slurm/partitions"),
+  getPartitions: () => apiFetch<PartitionsResponse>("/slurm/partitions"),
+
+  // 计费（阶段 4）
+  getBillingUsage: (user?: string, project?: string) => {
+    const q = new URLSearchParams();
+    if (user) q.set("user", user);
+    if (project) q.set("project", project);
+    const s = q.toString();
+    return apiFetch<BillingUsage>(`/slurm/billing/usage${s ? "?" + s : ""}`);
+  },
+  exportBillingJSON: (user?: string, project?: string) => {
+    const q = new URLSearchParams({ format: "json" });
+    if (user) q.set("user", user);
+    if (project) q.set("project", project);
+    return apiFetch<BillingExportJSON>(`/slurm/billing/export?${q.toString()}`);
+  },
 };
