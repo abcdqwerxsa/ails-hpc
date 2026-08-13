@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
+import { slurm } from '../services/slurm';
 
 export const Route = createFileRoute('/login')({
   component: LoginPage,
@@ -19,29 +20,18 @@ function LoginPage() {
     setErrorMsg('');
 
     try {
-      const res = await fetch('http://192.168.20.226:8090/api/v1/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password, orgSlug }),
-      });
-
-      const data = await res.json();
-      if (res.ok) {
-        // Save JWT Token & User Session
-        localStorage.setItem('ails_token', data.token);
-        localStorage.setItem(
-          'ails_user',
-          JSON.stringify({
-            name: data.user.username,
-            role: data.user.role,
-            org: data.user.orgSlug,
-            tenantNs: data.user.tenantNs,
-          })
-        );
-        navigate({ to: '/' });
-      } else {
-        setErrorMsg(data.error || '登录失败，请检查凭据');
-      }
+      const data = await slurm.login(username, password, orgSlug);
+      localStorage.setItem('ails_token', data.token);
+      localStorage.setItem(
+        'ails_user',
+        JSON.stringify({
+          name: data.user.username,
+          role: data.user.role,
+          org: data.user.orgSlug,
+          tenantNs: data.user.tenantNs,
+        })
+      );
+      navigate({ to: '/' });
     } catch (err: any) {
       setErrorMsg('系统连接失败: ' + err.message);
     } finally {

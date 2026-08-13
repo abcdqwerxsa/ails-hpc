@@ -4,7 +4,8 @@
 //
 // 注：API_BASE 当前指向生产 apiserver（与 login 一致）。阶段 5（gin 服务 React 构建产物、
 // 同源）后改为相对 "/api/v1" 即可。
-const API_BASE = "http://192.168.20.226:8090/api/v1";
+// dev（vite:3000）直连生产 apiserver（CORS 允许）；prod（gin 服务 React，同源）用相对路径。
+const API_BASE = import.meta.env.DEV ? "http://192.168.20.226:8090/api/v1" : "/api/v1";
 
 export function getToken(): string {
   return localStorage.getItem("ails_token") || "";
