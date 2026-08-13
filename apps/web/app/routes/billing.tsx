@@ -68,7 +68,7 @@ function BillingPage() {
         </button>
         <button
           onClick={exportJSON}
-          style={{ padding: '0.5rem 1.25rem', borderRadius: 8, border: '1px solid var(--border-color,#2a2f3a)', background: 'var(--bg-card-hover,#222632)', color: 'var(--text-main,#f1f5f9)', cursor: 'pointer' }}
+          style={{ padding: '0.5rem 1.25rem', borderRadius: 8, border: 'none', background: 'var(--card-bg)', boxShadow: 'var(--shadow-btn)', color: 'var(--text-main,#f1f5f9)', cursor: 'pointer', transition: 'box-shadow .2s ease' }}
         >
           导出 JSON
         </button>
@@ -97,7 +97,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 }
 function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
-    <div style={{ background: 'var(--bg-card,#1b1e28)', border: '1px solid var(--border-color,#2a2f3a)', borderRadius: 12, padding: '1.25rem' }}>
+    <div style={{ background: 'var(--bg-card,#1b1e28)', border: '1px solid var(--border-color,#2a2f3a)', borderRadius: 12, padding: '1.25rem', boxShadow: 'var(--shadow-card)', transition: 'box-shadow .3s ease' }}>
       <div style={{ color: 'var(--text-muted,#94a3b8)', fontSize: '0.8rem', marginBottom: '0.5rem' }}>{label}</div>
       <div style={{ fontSize: '1.5rem', fontWeight: 700, color: color || 'var(--text-main,#f1f5f9)' }}>{value}</div>
     </div>

@@ -71,7 +71,7 @@ function NodesPage() {
           {nodes.map((n) => {
             const drained = (n.state || '').toUpperCase().includes('DRAIN');
             return (
-              <div key={n.name} style={{ background: 'var(--bg-card, #1b1e28)', border: '1px solid var(--border-color, #2a2f3a)', borderRadius: 12, padding: '1.25rem' }}>
+              <div key={n.name} style={{ background: 'var(--bg-card, #1b1e28)', border: '1px solid var(--border-color, #2a2f3a)', borderRadius: 12, padding: '1.25rem', boxShadow: 'var(--shadow-card)', transition: 'box-shadow .3s ease' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
                   <strong style={{ fontSize: '1.05rem' }}>{n.name}</strong>
                   <span style={{ padding: '0.2rem 0.6rem', borderRadius: 6, fontSize: '0.72rem', fontWeight: 700, color: '#fff', background: stateColor(n.state) }}>{n.state}</span>
@@ -86,7 +86,7 @@ function NodesPage() {
                   <button className="btn-primary" style={{ flex: 1, opacity: drained ? 0.5 : 1 }} disabled={!!acting || drained} onClick={() => act(n.name, 'DRAIN')}>
                     {acting === n.name + 'DRAIN' ? '…' : 'DRAIN'}
                   </button>
-                  <button className="btn-primary" style={{ flex: 1, background: 'var(--bg-card-hover, #222632)', color: 'var(--text-main, #f1f5f9)', border: '1px solid var(--border-color, #2a2f3a)', opacity: !drained ? 0.5 : 1 }} disabled={!!acting || !drained} onClick={() => act(n.name, 'RESUME')}>
+                  <button className="neu-btn" style={{ flex: 1, opacity: !drained ? 0.5 : 1 }} disabled={!!acting || !drained} onClick={() => act(n.name, 'RESUME')}>
                     {acting === n.name + 'RESUME' ? '…' : 'RESUME'}
                   </button>
                 </div>

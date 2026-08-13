@@ -77,7 +77,7 @@ function OverviewPage() {
 
 function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
-    <div style={{ background: 'var(--bg-card,#1b1e28)', border: '1px solid var(--border-color,#2a2f3a)', borderRadius: 12, padding: '1.25rem' }}>
+    <div style={{ background: 'var(--bg-card,#1b1e28)', border: '1px solid var(--border-color,#2a2f3a)', borderRadius: 12, padding: '1.25rem', boxShadow: 'var(--shadow-card)', transition: 'box-shadow .3s ease' }}>
       <div style={{ color: 'var(--text-muted,#94a3b8)', fontSize: '0.8rem', marginBottom: '0.5rem' }}>{label}</div>
       <div style={{ fontSize: '1.5rem', fontWeight: 700, color: color || 'var(--text-main,#f1f5f9)' }}>{value}</div>
     </div>
@@ -86,13 +86,13 @@ function Stat({ label, value, color }: { label: string; value: string; color?: s
 
 function Gauge({ label, alloc, tot, pct, unit, color }: { label: string; alloc: number; tot: number; pct: number; unit: string; color: string }) {
   return (
-    <div style={{ background: 'var(--bg-card,#1b1e28)', border: '1px solid var(--border-color,#2a2f3a)', borderRadius: 12, padding: '1.25rem' }}>
+    <div style={{ background: 'var(--bg-card,#1b1e28)', border: '1px solid var(--border-color,#2a2f3a)', borderRadius: 12, padding: '1.25rem', boxShadow: 'var(--shadow-card)', transition: 'box-shadow .3s ease' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
         <span style={{ color: 'var(--text-muted,#94a3b8)', fontSize: '0.85rem' }}>{label}</span>
         <span style={{ fontWeight: 700, color }}>{pct}%</span>
       </div>
-      <div style={{ background: 'var(--bg-card-hover,#222632)', borderRadius: 6, height: 10, overflow: 'hidden', marginBottom: '0.4rem' }}>
-        <div style={{ width: `${pct}%`, height: '100%', background: color, transition: 'width .3s' }} />
+      <div style={{ background: 'var(--bg-card-hover,#222632)', borderRadius: 6, height: 10, overflow: 'hidden', marginBottom: '0.4rem', boxShadow: 'var(--shadow-inset-deep)' }}>
+        <div style={{ width: `${pct}%`, height: '100%', background: color, boxShadow: `0 0 8px ${color}`, transition: 'width .3s' }} />
       </div>
       <div style={{ fontSize: '0.78rem', color: 'var(--text-muted,#888)' }}>{alloc} / {tot} {unit} 分配</div>
     </div>

@@ -21,7 +21,7 @@ function RootLayout() {
       navigate({ to: '/login' });
     }
 
-    // 2. Restore Theme Preference (Default: Light / Cloudflare Commercial Style)
+    // 2. Restore Theme Preference (Default: Light / Soft Neumorphic)
     const savedTheme = (localStorage.getItem('ails_theme') as 'light' | 'dark') || 'light';
     setTheme(savedTheme);
     document.documentElement.setAttribute('data-theme', savedTheme);

@@ -104,7 +104,7 @@ function JobsPage() {
 
       <form
         onSubmit={submit}
-        style={{ background: 'var(--bg-card,#1b1e28)', border: '1px solid var(--border-color,#2a2f3a)', borderRadius: 12, padding: '1.25rem', marginBottom: '1.5rem', display: 'grid', gap: '0.75rem' }}
+        style={{ background: 'var(--bg-card,#1b1e28)', border: '1px solid var(--border-color,#2a2f3a)', borderRadius: 12, padding: '1.25rem', marginBottom: '1.5rem', display: 'grid', gap: '0.75rem', boxShadow: 'var(--shadow-card)', transition: 'box-shadow .3s ease' }}
       >
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))', gap: '0.75rem' }}>
           <Field label="作业名"><input className="form-control" value={form.name} onChange={field('name')} placeholder="my-job" /></Field>
@@ -200,13 +200,15 @@ function MiniBtn({ disabled, onClick, children }: { disabled?: boolean; onClick:
       onClick={onClick}
       disabled={disabled}
       style={{
-        padding: '0.2rem 0.55rem',
+        padding: '0.25rem 0.6rem',
         fontSize: '0.75rem',
         borderRadius: 6,
-        border: '1px solid var(--border-color,#2a2f3a)',
-        background: 'var(--bg-card-hover,#222632)',
+        border: 'none',
+        background: 'var(--card-bg)',
+        boxShadow: 'var(--shadow-btn)',
         color: 'var(--text-main,#f1f5f9)',
         cursor: disabled ? 'wait' : 'pointer',
+        transition: 'box-shadow .2s ease',
       }}
     >
       {children}

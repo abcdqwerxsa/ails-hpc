@@ -79,6 +79,8 @@ function WebIDEPage() {
           gap: '0.75rem',
           alignItems: 'end',
           flexWrap: 'wrap',
+          boxShadow: 'var(--shadow-card)',
+          transition: 'box-shadow .3s ease',
         }}
       >
         <label style={{ display: 'grid', gap: '0.25rem', fontSize: '0.8rem', color: 'var(--text-muted,#94a3b8)' }}>
@@ -119,6 +121,8 @@ function WebIDEPage() {
                   alignItems: 'center',
                   gap: '1rem',
                   flexWrap: 'wrap',
+                  boxShadow: 'var(--shadow-card)',
+                  transition: 'box-shadow .3s ease',
                 }}
               >
                 <div style={{ display: 'grid', gap: '0.2rem', fontSize: '0.88rem' }}>
@@ -145,12 +149,14 @@ function WebIDEPage() {
                     onClick={() => recycle(s.container_id)}
                     disabled={!!acting}
                     style={{
-                      padding: '0.35rem 0.9rem',
+                      padding: '0.4rem 0.9rem',
                       borderRadius: 8,
-                      border: '1px solid var(--border-color,#2a2f3a)',
-                      background: 'var(--bg-card-hover,#222632)',
-                      color: '#f43f5e',
+                      border: 'none',
+                      background: 'var(--card-bg)',
+                      boxShadow: 'var(--shadow-btn)',
+                      color: 'var(--accent-rose)',
                       cursor: 'pointer',
+                      transition: 'box-shadow .2s ease',
                     }}
                   >
                     回收
