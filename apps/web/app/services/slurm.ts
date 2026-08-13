@@ -1,0 +1,258 @@
+// Slurm apiserver（Go，:8090）的 typed API 客户端。
+// JWT 由 login 写入 localStorage('ails_token')，每个请求自动附 Authorization 头。
+// 错误体走统一信封 {error, request_id?, ...extras}；非 2xx 抛 ApiError(message=error)。
+//
+// 注：API_BASE 当前指向生产 apiserver（与 login 一致）。阶段 5（gin 服务 React 构建产物、
+// 同源）后改为相对 "/api/v1" 即可。
+// dev（vite:3000）直连生产 apiserver（CORS 允许）；prod（gin 服务 React，同源）用相对路径。
+const API_BASE = import.meta.env.DEV ? "http://192.168.20.226:8090/api/v1" : "/api/v1";
+
+export function getToken(): string {
+  return localStorage.getItem("ails_token") || "";
+}
+
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public requestId?: string,
+    public status?: number,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...((options.headers as Record<string, string>) || {}),
+  };
+  const token = getToken();
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const errMsg = (body && typeof body === "object" && "error" in body ? String((body as any).error) : "") || `HTTP ${res.status}`;
+    throw new ApiError(errMsg, (body as any)?.request_id, res.status);
+  }
+  return body as T;
+}
+
+// --- 类型（字段对齐 Go 后端 types） ---
+export interface UserInfo {
+  username: string;
+  role: string;
+  orgSlug: string;
+  tenantNs: string;
+}
+export interface LoginResponse {
+  token: string;
+  user: UserInfo;
+}
+
+export interface NodeStateInfo {
+  name: string;
+  state: string; // IDLE | ALLOCATED | MIXED | DRAIN | DOWN | ...
+  cpus: number;
+  alloc_cpus: number;
+  real_memory: number;
+  alloc_memory: number;
+  cores: number;
+  reason?: string;
+}
+export interface NodesListResponse {
+  nodes: NodeStateInfo[];
+}
+export interface NodeStateUpdateResponse {
+  node_name: string;
+  state: string;
+  message: string;
+}
+
+export interface PingResponse {
+  meta?: { Slurm?: { release?: string } };
+  errors?: unknown[];
+  pings?: { hostname: string; ping: string; status: number; mode: string }[];
+}
+
+// 作业相关类型（字段对齐 pkg/services/jobs/types.go）
+export interface JobSummary {
+  job_id: number;
+  name: string;
+  partition: string;
+  job_state: string;
+  nodes: string;
+  time_limit: number;
+  submit_time: number;
+}
+export interface JobListResponse {
+  code?: number;
+  jobs: JobSummary[];
+}
+export interface SubmitJobRequest {
+  name: string;
+  partition: string;
+  nodes?: number;
+  tasks?: number;
+  cpus?: number;
+  cpus_per_task?: number;
+  time_limit: string; // 后端 FlexTimeLimit 兼容 string|int
+  script: string;
+  current_working_directory?: string;
+}
+export interface SubmitJobResponse {
+  code: number;
+  message: string;
+  job_id: number;
+  name?: string;
+  status?: string;
+}
+export interface JobControlResponse {
+  code: number;
+  message: string;
+  job_id: number;
+  action: string;
+  status?: string;
+}
+
+// Web-IDE 会话相关类型（字段对齐 pkg/services/containers/types.go）
+export interface ContainerInstance {
+  container_id: string;
+  env_type: string; // jupyter | vscode
+  status: string; // STARTING | RUNNING | STOPPED
+  web_url: string; // /api/v1/ide/<session>/
+  job_id: number;
+  node?: string;
+  nodes: number;
+  cpus: number;
+  memory_mb: number;
+  created_at: string;
+}
+export interface ContainerListResponse {
+  containers: ContainerInstance[];
+}
+export interface ContainerLaunchRequest {
+  env_type: string; // jupyter | vscode
+  nodes?: number;
+  cpus?: number;
+  memory_mb?: number;
+}
+export interface ContainerLaunchResponse {
+  container_id: string;
+  env_type: string;
+  status: string;
+  web_url: string;
+  allocated?: ContainerInstance;
+}
+export interface ContainerRecycleResponse {
+  container_id: string;
+  status: string;
+  message: string;
+}
+
+// 分区（阶段 4）
+export interface Partition {
+  name: string;
+  nodes: string;
+  total_cpus: number;
+  total_nodes: number;
+}
+export interface PartitionsResponse {
+  errors?: unknown[];
+  partitions: Partition[];
+}
+
+// 计费（阶段 4）
+export interface BillingUsage {
+  user: string;
+  project: string;
+  total_cpu_hours: number;
+  total_memory_gb_hours: number;
+  total_gpu_hours: number;
+  job_count: number;
+  container_count: number;
+}
+export interface BillingExportJSON {
+  format: string;
+  user: string;
+  timestamp: string;
+  total_cost: number;
+  currency: string;
+  job_count: number;
+  ctr_count: number;
+  exported_by: string;
+}
+
+// ideFullURL 把后端返回的相对 web_url(/api/v1/ide/<sid>/) 拼成完整 URL 并附 ?token=<JWT>。
+// 浏览器导航/iframe 无法带 Authorization 头，/ide/ 反代接受 ?token= 兜底（见 auth 中间件）。
+export function ideFullURL(webUrl: string): string {
+  const origin = API_BASE.replace(/\/api\/v1\/?$/, "");
+  const sep = webUrl.includes("?") ? "&" : "?";
+  return `${origin}${webUrl}${sep}token=${encodeURIComponent(getToken())}`;
+}
+
+export type NodeStateOp = "DRAIN" | "RESUME" | "IDLE";
+
+// --- Slurm API ---
+export const slurm = {
+  login: (username: string, password: string, orgSlug: string) =>
+    apiFetch<LoginResponse>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username, password, orgSlug }),
+    }),
+
+  // 集群状态：200 + pings[0].ping==="UP" 即 UP；503 抛错 → 调用方按 DEGRADED 处理
+  getClusterStatus: () => apiFetch<PingResponse>("/slurm/ping"),
+
+  getNodes: () => apiFetch<NodesListResponse>("/slurm/nodes"),
+  updateNodeState: (name: string, state: NodeStateOp, reason?: string) =>
+    apiFetch<NodeStateUpdateResponse>(
+      `/slurm/nodes/${encodeURIComponent(name)}/state`,
+      { method: "POST", body: JSON.stringify({ state, reason }) },
+    ),
+
+  // 作业（阶段 2）
+  getJobs: () => apiFetch<JobListResponse>("/slurm/jobs"),
+  submitJob: (payload: SubmitJobRequest) =>
+    apiFetch<SubmitJobResponse>("/slurm/jobs/submit", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  cancelJob: (jobId: number) =>
+    apiFetch<JobControlResponse>(`/slurm/jobs/${jobId}/cancel`, { method: "POST" }),
+  holdJob: (jobId: number) =>
+    apiFetch<JobControlResponse>(`/slurm/jobs/${jobId}/hold`, { method: "POST" }),
+  requeueJob: (jobId: number) =>
+    apiFetch<JobControlResponse>(`/slurm/jobs/${jobId}/requeue`, { method: "POST" }),
+
+  // Web-IDE 会话（阶段 3）
+  listContainers: () => apiFetch<ContainerListResponse>("/slurm/containers/list"),
+  launchContainer: (payload: ContainerLaunchRequest) =>
+    apiFetch<ContainerLaunchResponse>("/slurm/containers/launch", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  recycleContainer: (id: string) =>
+    apiFetch<ContainerRecycleResponse>(`/slurm/containers/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+
+  // 分区（阶段 4）
+  getPartitions: () => apiFetch<PartitionsResponse>("/slurm/partitions"),
+
+  // 计费（阶段 4）
+  getBillingUsage: (user?: string, project?: string) => {
+    const q = new URLSearchParams();
+    if (user) q.set("user", user);
+    if (project) q.set("project", project);
+    const s = q.toString();
+    return apiFetch<BillingUsage>(`/slurm/billing/usage${s ? "?" + s : ""}`);
+  },
+  exportBillingJSON: (user?: string, project?: string) => {
+    const q = new URLSearchParams({ format: "json" });
+    if (user) q.set("user", user);
+    if (project) q.set("project", project);
+    return apiFetch<BillingExportJSON>(`/slurm/billing/export?${q.toString()}`);
+  },
+};

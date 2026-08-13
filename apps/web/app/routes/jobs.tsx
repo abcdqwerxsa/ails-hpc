@@ -1,327 +1,215 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
+import { slurm, type JobSummary } from '../services/slurm';
 
-export const Route = createFileRoute('/jobs')({
-  component: JobsPage,
-});
+export const Route = createFileRoute('/jobs')({ component: JobsPage });
 
-interface HpcJobItem {
-  metadata: {
-    name: string;
-    namespace: string;
-    creationTimestamp: string;
-  };
-  spec: {
-    jobType?: string;
-    image: string;
-    slots: number;
-    command: string[];
-    queue: string;
-    storageSize?: string;
-    priorityClassName?: string;
-  };
-  status?: {
-    phase: string;
-    coreHours?: number;
-    executionDuration?: string;
-  };
+function jobStateColor(s: string): string {
+  const st = (s || '').toUpperCase();
+  if (st === 'RUNNING') return '#10b981';
+  if (st === 'PENDING' || st === 'HELD' || st === 'CONFIGURING') return '#f59e0b';
+  if (st === 'COMPLETED') return '#64748b';
+  if (st === 'CANCELLED' || st === 'FAILED' || st === 'TIMEOUT' || st === 'OUT_OF_MEMORY') return '#f43f5e';
+  return '#3b82f6';
 }
 
+const emptyForm = {
+  name: '',
+  partition: 'standard',
+  nodes: '1',
+  tasks: '1',
+  time_limit: '60',
+  script: '#!/bin/bash\nsleep 30\n',
+};
+
 function JobsPage() {
-  const [jobs, setJobs] = useState<HpcJobItem[]>([]);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [logModalPod, setLogModalPod] = useState<string | null>(null);
-  const [logs, setLogs] = useState<string[]>([]);
+  const [jobs, setJobs] = useState<JobSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
+  const [form, setForm] = useState(emptyForm);
+  const [submitting, setSubmitting] = useState(false);
+  const [acting, setActing] = useState('');
 
-  // Form State
-  const [name, setName] = useState('');
-  const [jobType, setJobType] = useState('mpi');
-  const [image, setImage] = useState('quay.io/nilpo1/mpich-ubuntu:v0.8.2');
-  const [slots, setSlots] = useState(4);
-  const [storageSize, setStorageSize] = useState('5Gi');
-  const [command, setCommand] = useState('mpirun -np 4 /opt/mpich-3.3.2/examples/cpi');
-
-  const fetchJobs = async () => {
+  const refresh = useCallback(async () => {
     try {
-      const token = localStorage.getItem('ails_token') || '';
-      const res = await fetch('http://192.168.20.226:8090/api/v1/hpcjobs', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setJobs(data.jobs || []);
-      }
-    } catch (e) {
-      console.error(e);
+      const r = await slurm.getJobs();
+      setJobs(r.jobs || []);
+      setError('');
+    } catch (e: any) {
+      setError(e?.message || '加载作业失败');
+    } finally {
+      setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    fetchJobs();
-    const timer = setInterval(fetchJobs, 3000);
-    return () => clearInterval(timer);
   }, []);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      const token = localStorage.getItem('ails_token') || '';
-      const res = await fetch('http://192.168.20.226:8090/api/v1/hpcjobs', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          name,
-          jobType,
-          image,
-          slots: Number(slots),
-          storageSize,
-          command: command.split(' '),
-        }),
-      });
+  useEffect(() => {
+    refresh();
+    const t = setInterval(refresh, 5000);
+    return () => clearInterval(t);
+  }, [refresh]);
 
-      if (res.ok) {
-        setIsModalOpen(false);
-        setName('');
-        fetchJobs();
-      } else {
-        const data = await res.json();
-        alert('提交拒绝: ' + (data.error || '权限不足'));
-      }
-    } catch (err) {
-      alert('提交作业异常: ' + err);
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!form.name.trim() || !form.script.trim()) {
+      setError('作业名 与 脚本 必填');
+      return;
+    }
+    setSubmitting(true);
+    setError('');
+    setInfo('');
+    try {
+      const r = await slurm.submitJob({
+        name: form.name.trim(),
+        partition: form.partition.trim() || 'standard',
+        nodes: Number(form.nodes) || 1,
+        tasks: Number(form.tasks) || 1,
+        time_limit: String(form.time_limit || '60'),
+        script: form.script,
+      });
+      setInfo(`已提交：作业 #${r.job_id}`);
+      setForm(emptyForm);
+      await refresh();
+    } catch (err: any) {
+      setError(`提交失败：${err?.message || err}`);
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  const openLogViewer = (jobName: string, type?: string) => {
-    const launcherPod = type === 'batch' ? `${jobName}` : `${jobName}-launcher`;
-    const token = localStorage.getItem('ails_token') || '';
-    setLogModalPod(launcherPod);
-    setLogs(['[系统日志] 正在建立与 Pod ' + launcherPod + ' 的 WebSocket 实时日志长连接...']);
-
-    const ws = new WebSocket(`ws://192.168.20.226:8090/ws/logs?podName=${launcherPod}&namespace=default&token=${token}`);
-    ws.onmessage = (event) => {
-      setLogs((prev) => [...prev, event.data]);
-    };
-    ws.onerror = () => {
-      setLogs((prev) => [...prev, '[连接错误] 无法建立 WebSocket 连接或 Pod 正在初始化。']);
-    };
+  const act = async (id: number, kind: 'cancel' | 'hold' | 'requeue') => {
+    setActing(id + kind);
+    setError('');
+    setInfo('');
+    try {
+      const fn = kind === 'cancel' ? slurm.cancelJob : kind === 'hold' ? slurm.holdJob : slurm.requeueJob;
+      const r = await fn(id);
+      setInfo(`作业 #${id} ${kind}：${r.message}`);
+      await refresh();
+    } catch (e: any) {
+      setError(`作业 #${id} ${kind} 失败：${e?.message || e}`);
+    } finally {
+      setActing('');
+    }
   };
+
+  const field = (k: keyof typeof emptyForm) => (e: ChangeEvent<HTMLInputElement>) => setForm({ ...form, [k]: e.target.value });
 
   return (
     <div>
-      <div className="header-bar">
-        <div className="header-title">
-          <h1>HPC 计算作业管理 (JWT/RBAC 已保护)</h1>
-          <p>多租户安全上下文准入控制、 MPI/Batch 计算模型、 Local-Path PVC 挂载与核时计量</p>
+      <h2 style={{ marginTop: 0, marginBottom: '1rem' }}>作业管理</h2>
+
+      {error && <Notice color="#f43f5e" bg="rgba(239,68,68,.1)">{error}</Notice>}
+      {info && <Notice color="#10b981" bg="rgba(16,185,129,.1)">{info}</Notice>}
+
+      <form
+        onSubmit={submit}
+        style={{ background: 'var(--bg-card,#1b1e28)', border: '1px solid var(--border-color,#2a2f3a)', borderRadius: 12, padding: '1.25rem', marginBottom: '1.5rem', display: 'grid', gap: '0.75rem' }}
+      >
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))', gap: '0.75rem' }}>
+          <Field label="作业名"><input className="form-control" value={form.name} onChange={field('name')} placeholder="my-job" /></Field>
+          <Field label="分区"><input className="form-control" value={form.partition} onChange={field('partition')} /></Field>
+          <Field label="节点数"><input className="form-control" type="number" min="1" value={form.nodes} onChange={field('nodes')} /></Field>
+          <Field label="任务数"><input className="form-control" type="number" min="1" value={form.tasks} onChange={field('tasks')} /></Field>
+          <Field label="时限(分钟)"><input className="form-control" value={form.time_limit} onChange={field('time_limit')} /></Field>
         </div>
-        <div style={{ display: 'flex', gap: '0.75rem' }}>
-          <button className="btn-primary" style={{ background: 'var(--bg-card-hover)', color: 'var(--text-main)', border: '1px solid var(--border-color)' }} onClick={fetchJobs}>
-            刷新数据
-          </button>
-          <button className="btn-primary" onClick={() => setIsModalOpen(true)}>
-            + 提交 HPC 作业
-          </button>
-        </div>
+        <Field label="脚本">
+          <textarea
+            className="form-control"
+            rows={4}
+            value={form.script}
+            onChange={(e) => setForm({ ...form, script: e.target.value })}
+            style={{ fontFamily: 'monospace', width: '100%', boxSizing: 'border-box' }}
+          />
+        </Field>
+        <button className="btn-primary" type="submit" disabled={submitting} style={{ justifySelf: 'start', padding: '0.5rem 1.5rem' }}>
+          {submitting ? '提交中…' : '提交作业'}
+        </button>
+      </form>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+        <h3 style={{ margin: 0, fontSize: '1.05rem' }}>作业队列</h3>
+        <button className="btn-primary" onClick={refresh} style={{ padding: '0.3rem 0.9rem' }}>刷新</button>
       </div>
 
-      <div className="table-card">
-        <table className="custom-table">
-          <thead>
-            <tr>
-              <th>作业标识</th>
-              <th>计算模型 (Type)</th>
-              <th>容器镜像 (Image)</th>
-              <th>并行进程数</th>
-              <th>持久化存储 (PVC)</th>
-              <th>耗时 / 算力核时</th>
-              <th>运行状态</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {jobs.length === 0 ? (
-              <tr>
-                <td colSpan={8} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
-                  暂无提交的 HPC 作业，点击上方按钮发起并行计算。
-                </td>
+      {loading ? (
+        <div style={{ color: 'var(--text-muted,#888)' }}>加载中…</div>
+      ) : jobs.length === 0 ? (
+        <div style={{ color: 'var(--text-muted,#888)' }}>当前无作业。</div>
+      ) : (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
+            <thead>
+              <tr style={{ textAlign: 'left', color: 'var(--text-muted,#94a3b8)', borderBottom: '1px solid var(--border-color,#2a2f3a)' }}>
+                <th style={th}>ID</th>
+                <th style={th}>名称</th>
+                <th style={th}>分区</th>
+                <th style={th}>状态</th>
+                <th style={th}>节点</th>
+                <th style={th}>时限</th>
+                <th style={th}>操作</th>
               </tr>
-            ) : (
-              jobs.map((job) => {
-                const specStorage = job.spec?.storageSize;
-                const coreHours = job.status?.coreHours;
-                const duration = job.status?.executionDuration;
-                const type = job.spec?.jobType || 'mpi';
-
-                return (
-                  <tr key={job.metadata.name}>
-                    <td style={{ fontWeight: 600 }}>{job.metadata.name}</td>
-                    <td>
-                      <span className="badge" style={{ background: type === 'batch' ? 'rgba(147, 51, 234, 0.1)' : 'rgba(59, 130, 246, 0.1)', color: type === 'batch' ? '#9333ea' : '#3b82f6', border: '1px solid var(--border-color)' }}>
-                        {type.toUpperCase()}
-                      </span>
-                    </td>
-                    <td className="font-mono" style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{job.spec?.image || '-'}</td>
-                    <td className="font-mono">{job.spec?.slots || 1} Slots</td>
-                    <td className="font-mono" style={{ fontSize: '0.85rem' }}>
-                      {specStorage ? `${job.metadata.name}-pvc (${specStorage})` : '无存储'}
-                    </td>
-                    <td className="font-mono" style={{ fontSize: '0.85rem', color: coreHours ? 'var(--accent-emerald)' : 'var(--text-muted)' }}>
-                      {coreHours ? `${coreHours.toFixed(4)} 核时 (${duration})` : '计算中...'}
-                    </td>
-                    <td>
-                      <span
-                        className={`badge ${
-                          job.status?.phase === 'Running'
-                            ? 'badge-running'
-                            : job.status?.phase === 'Succeeded'
-                            ? 'badge-succeeded'
-                            : job.status?.phase === 'Failed'
-                            ? 'badge-failed'
-                            : 'badge-pending'
-                        }`}
-                      >
-                        {job.status?.phase || 'Pending'}
-                      </span>
-                    </td>
-                    <td>
-                      <button
-                        style={{
-                          background: 'transparent',
-                          border: '1px solid var(--border-color)',
-                          color: 'var(--accent-primary)',
-                          padding: '0.35rem 0.75rem',
-                          borderRadius: '6px',
-                          cursor: 'pointer',
-                          fontSize: '0.85rem',
-                          fontWeight: 600
-                        }}
-                        onClick={() => openLogViewer(job.metadata.name, type)}
-                      >
-                        查看日志
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* 新建 Modal */}
-      {isModalOpen && (
-        <div className="modal-backdrop" onClick={() => setIsModalOpen(false)}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-            <h2 style={{ marginBottom: '1.5rem', fontWeight: 600 }}>提交分布式 HPC 并行作业</h2>
-            <form onSubmit={handleSubmit}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                <div className="form-group">
-                  <label>作业唯一名称 (Job Name)</label>
-                  <input
-                    className="form-control"
-                    placeholder="例如: batch-task-demo"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    required
-                  />
-                </div>
-                <div className="form-group">
-                  <label>计算模型 (Job Type)</label>
-                  <select
-                    className="form-control"
-                    value={jobType}
-                    onChange={(e) => setJobType(e.target.value)}
-                  >
-                    <option value="mpi">MPI 分布式并行作业</option>
-                    <option value="batch">Standard Batch 批处理作业</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label>容器镜像 (Container Image)</label>
-                <input
-                  className="form-control font-mono"
-                  value={image}
-                  onChange={(e) => setImage(e.target.value)}
-                  required
-                />
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                <div className="form-group">
-                  <label>并行进程/CPU配额 (Slots)</label>
-                  <input
-                    type="number"
-                    className="form-control font-mono"
-                    value={slots}
-                    onChange={(e) => setSlots(Number(e.target.value))}
-                    required
-                  />
-                </div>
-                <div className="form-group">
-                  <label>挂载持久化存储 (PVC 大小)</label>
-                  <input
-                    className="form-control font-mono"
-                    placeholder="如 5Gi, 10Gi 或留空"
-                    value={storageSize}
-                    onChange={(e) => setStorageSize(e.target.value)}
-                  />
-                </div>
-              </div>
-              <div className="form-group">
-                <label>启动执行指令 (Execution Command)</label>
-                <input
-                  className="form-control font-mono"
-                  value={command}
-                  onChange={(e) => setCommand(e.target.value)}
-                  required
-                />
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.5rem' }}>
-                <button
-                  type="button"
-                  style={{
-                    background: 'transparent',
-                    border: '1px solid var(--border-color)',
-                    color: 'var(--text-main)',
-                    padding: '0.6rem 1.25rem',
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                  }}
-                  onClick={() => setIsModalOpen(false)}
-                >
-                  取消
-                </button>
-                <button type="submit" className="btn-primary">
-                  提交并启动计算
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* 日志 Modal */}
-      {logModalPod && (
-        <div className="modal-backdrop" onClick={() => setLogModalPod(null)}>
-          <div className="modal-card" style={{ maxWidth: '720px' }} onClick={(e) => e.stopPropagation()}>
-            <h2 style={{ marginBottom: '1rem', fontWeight: 600, fontSize: '1.1rem' }}>Pod 实况输出日志: {logModalPod}</h2>
-            <div className="terminal-box">
-              {logs.map((l, idx) => (
-                <div key={idx}>{l}</div>
+            </thead>
+            <tbody>
+              {jobs.map((j) => (
+                <tr key={j.job_id} style={{ borderBottom: '1px solid var(--border-color,#2a2f3a)' }}>
+                  <td style={td}>{j.job_id}</td>
+                  <td style={td}>{j.name}</td>
+                  <td style={td}>{j.partition}</td>
+                  <td style={td}>
+                    <span style={{ padding: '0.15rem 0.5rem', borderRadius: 6, fontSize: '0.72rem', fontWeight: 700, color: '#fff', background: jobStateColor(j.job_state) }}>
+                      {j.job_state}
+                    </span>
+                  </td>
+                  <td style={td}>{j.nodes || '-'}</td>
+                  <td style={td}>{j.time_limit || '-'}</td>
+                  <td style={{ ...td, display: 'flex', gap: '0.4rem' }}>
+                    <MiniBtn disabled={!!acting} onClick={() => act(j.job_id, 'cancel')}>取消</MiniBtn>
+                    <MiniBtn disabled={!!acting} onClick={() => act(j.job_id, 'hold')}>挂起</MiniBtn>
+                    <MiniBtn disabled={!!acting} onClick={() => act(j.job_id, 'requeue')}>重排</MiniBtn>
+                  </td>
+                </tr>
               ))}
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1.25rem' }}>
-              <button className="btn-primary" onClick={() => setLogModalPod(null)}>
-                关闭视窗
-              </button>
-            </div>
-          </div>
+            </tbody>
+          </table>
         </div>
       )}
     </div>
+  );
+}
+
+const th = { padding: '0.5rem' } as const;
+const td = { padding: '0.5rem' } as const;
+
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label style={{ display: 'grid', gap: '0.25rem', fontSize: '0.8rem', color: 'var(--text-muted,#94a3b8)' }}>
+      {label}
+      {children}
+    </label>
+  );
+}
+
+function Notice({ color, bg, children }: { color: string; bg: string; children: ReactNode }) {
+  return <div style={{ padding: '0.6rem 0.9rem', color, background: bg, borderRadius: 8, marginBottom: '1rem', fontSize: '0.88rem' }}>{children}</div>;
+}
+
+function MiniBtn({ disabled, onClick, children }: { disabled?: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        padding: '0.2rem 0.55rem',
+        fontSize: '0.75rem',
+        borderRadius: 6,
+        border: '1px solid var(--border-color,#2a2f3a)',
+        background: 'var(--bg-card-hover,#222632)',
+        color: 'var(--text-main,#f1f5f9)',
+        cursor: disabled ? 'wait' : 'pointer',
+      }}
+    >
+      {children}
+    </button>
   );
 }
