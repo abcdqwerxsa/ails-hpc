@@ -29,7 +29,7 @@ type SessionMeta struct {
 	CPUs      int    `json:"cpus"`
 	MemoryMB  int    `json:"memory_mb"`
 	Nodes     int    `json:"nodes"`
-	Owner     string `json:"owner"` // 归属隔离：提交者用户名（launch 时写入）
+	Owner     string `json:"owner"` // 归属隔离：提交者 clusterUser（unix 身份，launch 时写入）
 }
 
 // ContainerLaunchRequest defines the request body for launching an interactive session

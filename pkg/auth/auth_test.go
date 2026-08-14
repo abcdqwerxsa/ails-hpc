@@ -30,8 +30,8 @@ func hashPw(t *testing.T, pw string) string {
 
 func newTestStore(t *testing.T) auth.UserStore {
 	return auth.NewUserStoreFromList([]auth.User{
-		{Username: "admin", PasswordHash: hashPw(t, "admin123"), Role: "admin", OrgSlug: "hpc-lab", TenantNS: "default"},
-		{Username: "member", PasswordHash: hashPw(t, "member123"), Role: "member", OrgSlug: "hpc-lab", TenantNS: "default"},
+		{Username: "admin", PasswordHash: hashPw(t, "admin123"), Role: "admin", OrgSlug: "hpc-lab", TenantNS: "default", ClusterUser: "ailsadmin", Account: "ailsadmin"},
+		{Username: "member", PasswordHash: hashPw(t, "member123"), Role: "member", OrgSlug: "hpc-lab", TenantNS: "default", ClusterUser: "ailsmember", Account: "ailsmember"},
 	})
 }
 
@@ -54,7 +54,7 @@ func TestUserStore_Verify(t *testing.T) {
 }
 
 func TestJWT_RoundTrip_AndExpiry(t *testing.T) {
-	tok, err := auth.GenerateToken("admin", "admin", "hpc-lab", "default")
+	tok, err := auth.GenerateToken("admin", "admin", "hpc-lab", "default", "ailsadmin", "ailsadmin")
 	if err != nil {
 		t.Fatalf("GenerateToken: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestJWT_RoundTrip_AndExpiry(t *testing.T) {
 	}
 
 	// 过期令牌必须被拒
-	expired, _ := auth.GenerateTokenWithTTL("admin", "admin", "hpc-lab", "default", -1*time.Hour)
+	expired, _ := auth.GenerateTokenWithTTL("admin", "admin", "hpc-lab", "default", "ailsadmin", "ailsadmin", -1*time.Hour)
 	if _, err := auth.VerifyToken(expired); err == nil {
 		t.Fatalf("expected error for expired token, got nil")
 	}

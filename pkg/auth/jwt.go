@@ -38,23 +38,27 @@ func SetTokenTTL(d time.Duration) {
 }
 
 // Claims 描述 access token 的载荷。Role 为权威角色（admin/ops_admin/tenant_admin/member）。
+// ClusterUser/Account 携带 Slurm 集群身份（L1+L3 隔离）：apiserver 提交作业时按 ClusterUser
+// 铸造 slurmrestd JWT、按 Account 写入 Slurm account，使作业以该真实 unix 身份运行。
 type Claims struct {
-	Username string `json:"username"`
-	Role     string `json:"role"` // admin / ops_admin / tenant_admin / member
-	OrgSlug  string `json:"orgSlug"`
-	TenantNS string `json:"tenantNs"`
-	Iss      string `json:"iss"`
-	Aud      string `json:"aud"`
-	Exp      int64  `json:"exp"`
+	Username    string `json:"username"`
+	Role        string `json:"role"` // admin / ops_admin / tenant_admin / member
+	OrgSlug     string `json:"orgSlug"`
+	TenantNS    string `json:"tenantNs"`
+	ClusterUser string `json:"clusterUser"`
+	Account     string `json:"account"`
+	Iss         string `json:"iss"`
+	Aud         string `json:"aud"`
+	Exp         int64  `json:"exp"`
 }
 
 // GenerateToken 用当前 tokenTTL 签发一个新的 access token。
-func GenerateToken(username, role, orgSlug, tenantNs string) (string, error) {
-	return GenerateTokenWithTTL(username, role, orgSlug, tenantNs, tokenTTL)
+func GenerateToken(username, role, orgSlug, tenantNs, clusterUser, account string) (string, error) {
+	return GenerateTokenWithTTL(username, role, orgSlug, tenantNs, clusterUser, account, tokenTTL)
 }
 
 // GenerateTokenWithTTL 用显式 TTL 签发 access token（测试用于构造过期/将过期令牌）。
-func GenerateTokenWithTTL(username, role, orgSlug, tenantNs string, ttl time.Duration) (string, error) {
+func GenerateTokenWithTTL(username, role, orgSlug, tenantNs, clusterUser, account string, ttl time.Duration) (string, error) {
 	if len(jwtSecret) == 0 {
 		return "", errors.New("jwt secret not configured")
 	}
@@ -64,13 +68,15 @@ func GenerateTokenWithTTL(username, role, orgSlug, tenantNs string, ttl time.Dur
 	headerB64 := base64.RawURLEncoding.EncodeToString(headerJSON)
 
 	claims := Claims{
-		Username: username,
-		Role:     role,
-		OrgSlug:  orgSlug,
-		TenantNS: tenantNs,
-		Iss:      jwtIssuer,
-		Aud:      jwtAudience,
-		Exp:      time.Now().Add(ttl).Unix(),
+		Username:    username,
+		Role:        role,
+		OrgSlug:     orgSlug,
+		TenantNS:    tenantNs,
+		ClusterUser: clusterUser,
+		Account:     account,
+		Iss:         jwtIssuer,
+		Aud:         jwtAudience,
+		Exp:         time.Now().Add(ttl).Unix(),
 	}
 	claimsJSON, _ := json.Marshal(claims)
 	claimsB64 := base64.RawURLEncoding.EncodeToString(claimsJSON)

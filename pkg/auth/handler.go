@@ -18,10 +18,12 @@ type LoginRequest struct {
 
 // UserInfo 登录响应中的用户可见信息（不含密码哈希）。
 type UserInfo struct {
-	Username string `json:"username"`
-	Role     string `json:"role"`
-	OrgSlug  string `json:"orgSlug"`
-	TenantNS string `json:"tenantNs"`
+	Username    string `json:"username"`
+	Role        string `json:"role"`
+	OrgSlug     string `json:"orgSlug"`
+	TenantNS    string `json:"tenantNs"`
+	ClusterUser string `json:"clusterUser"`
+	Account     string `json:"account"`
 }
 
 // LoginResponse 严格匹配 React login.tsx 解析的结构：{token, user:{username,role,orgSlug,tenantNs}}。
@@ -55,7 +57,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	token, err := GenerateToken(user.Username, user.Role, user.OrgSlug, user.TenantNS)
+	token, err := GenerateToken(user.Username, user.Role, user.OrgSlug, user.TenantNS, user.ClusterUser, user.Account)
 	if err != nil {
 		httpx.Internal(c, "Login.GenerateToken", err)
 		return
@@ -64,10 +66,12 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	c.JSON(http.StatusOK, LoginResponse{
 		Token: token,
 		User: UserInfo{
-			Username: user.Username,
-			Role:     user.Role,
-			OrgSlug:  user.OrgSlug,
-			TenantNS: user.TenantNS,
+			Username:    user.Username,
+			Role:        user.Role,
+			OrgSlug:     user.OrgSlug,
+			TenantNS:    user.TenantNS,
+			ClusterUser: user.ClusterUser,
+			Account:     user.Account,
 		},
 	})
 }

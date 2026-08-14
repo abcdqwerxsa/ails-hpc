@@ -46,6 +46,33 @@ wait_for_port() {
 
 chown -R slurm:slurm /var/spool/slurmctld /var/spool/slurmd /var/log/slurm /var/run/slurm
 
+# --- 真·每用户 Slurm 隔离：从挂载的 users.yaml 供给真实 unix 用户（每容器，幂等）---
+# 作业以各 clusterUser 真实身份运行（L1）；slurmctld 另建 account/association（L3，见下方分支）。
+# 用 python3 行解析（镜像已装 python3，无需 PyYAML）。文件缺失（如 slurmdbd 未挂载）则跳过。
+provision_users() {
+    [ -f /etc/slurm/ails-users.yaml ] || return 0
+    groupadd -g 2000 ailshpc 2>/dev/null || true
+    python3 -c '
+cur, recs = {}, []
+for line in open("/etc/slurm/ails-users.yaml"):
+    s = line.strip()
+    if s.startswith("- username:"):
+        if cur.get("clusterUser"): recs.append(cur)
+        cur = {}
+    elif ":" in s and not s.startswith("#") and not s.startswith("users:"):
+        k, v = s.split(":", 1); cur[k.strip()] = v.strip()
+if cur.get("clusterUser"): recs.append(cur)
+for r in recs:
+    print(r.get("clusterUser",""), r.get("uid",""), r.get("gid",""))
+' 2>/dev/null | while read -r cu uid gid; do
+        [ -z "$cu" ] && continue
+        if ! getent passwd "$cu" >/dev/null 2>&1; then
+            useradd -m -u "$uid" -g "$gid" "$cu" 2>/dev/null || true
+        fi
+    done
+}
+provision_users
+
 case "$ROLE" in
     slurmdbd)
         wait_for_port "slurm-db" "3306" "MariaDB"
@@ -68,6 +95,27 @@ case "$ROLE" in
         # 尝试注册 Cluster 到 SlurmDBD 记账服务中
         echo "Registering cluster ails-hpc-cluster in SlurmDBD..."
         gosu slurm sacctmgr -i add cluster ails-hpc-cluster || true
+
+        # 注册 per-user Slurm account + user 关联（L3 真实记账；AccountingStorageEnforce=associations
+        # 要求每个提交作业的 user 都有已存在的 account 关联，否则 slurmrestd 拒绝提交——fail-safe）。
+        echo "Provisioning per-user Slurm accounts/associations from users.yaml..."
+        python3 -c '
+cur, recs = {}, []
+for line in open("/etc/slurm/ails-users.yaml"):
+    s = line.strip()
+    if s.startswith("- username:"):
+        if cur.get("clusterUser"): recs.append(cur)
+        cur = {}
+    elif ":" in s and not s.startswith("#") and not s.startswith("users:"):
+        k, v = s.split(":", 1); cur[k.strip()] = v.strip()
+if cur.get("clusterUser"): recs.append(cur)
+for r in recs:
+    print(r.get("clusterUser",""), r.get("account",""))
+' 2>/dev/null | while read -r cu acct; do
+            [ -z "$cu" ] && continue
+            gosu slurm sacctmgr -i add account "$acct" || true
+            gosu slurm sacctmgr -i add user "$cu" account="$acct" || true
+        done
 
         echo "Starting slurmctld..."
         gosu slurm /usr/sbin/slurmctld -v

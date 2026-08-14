@@ -47,10 +47,10 @@ func setupTestRouter(t *testing.T) (*gin.Engine, *common.MockSlurmServer) {
 	billingService := billing.NewBillingServiceWithFetcher(zeroSacctFetcher{})
 
 	store := auth.NewUserStoreFromList([]auth.User{
-		{Username: "admin", PasswordHash: hashPw("admin123"), Role: auth.RoleSystemAdmin, OrgSlug: "hpc-lab", TenantNS: "default"},
-		{Username: "tenantadmin", PasswordHash: hashPw("tenantadmin123"), Role: auth.RoleTenantAdmin, OrgSlug: "hpc-lab", TenantNS: "default"},
-		{Username: "member", PasswordHash: hashPw("member123"), Role: auth.RoleMember, OrgSlug: "hpc-lab", TenantNS: "default"},
-		{Username: "ops", PasswordHash: hashPw("ops123"), Role: auth.RoleOpsAdmin, OrgSlug: "hpc-lab", TenantNS: "default"},
+		{Username: "admin", PasswordHash: hashPw("admin123"), Role: auth.RoleSystemAdmin, OrgSlug: "hpc-lab", TenantNS: "default", ClusterUser: "ailsadmin", Account: "ailsadmin"},
+		{Username: "tenantadmin", PasswordHash: hashPw("tenantadmin123"), Role: auth.RoleTenantAdmin, OrgSlug: "hpc-lab", TenantNS: "default", ClusterUser: "ailstadmin", Account: "ailstadmin"},
+		{Username: "member", PasswordHash: hashPw("member123"), Role: auth.RoleMember, OrgSlug: "hpc-lab", TenantNS: "default", ClusterUser: "ailsmember", Account: "ailsmember"},
+		{Username: "ops", PasswordHash: hashPw("ops123"), Role: auth.RoleOpsAdmin, OrgSlug: "hpc-lab", TenantNS: "default", ClusterUser: "ailsops", Account: "ailsops"},
 	})
 
 	h := Handlers{
@@ -74,7 +74,7 @@ func tokenFor(t *testing.T, role string) string {
 	if role == "" {
 		return ""
 	}
-	tok, err := auth.GenerateToken(role, role, "hpc-lab", "default")
+	tok, err := auth.GenerateToken(role, role, "hpc-lab", "default", role, role)
 	if err != nil {
 		t.Fatalf("mint token for %s: %v", role, err)
 	}
@@ -108,7 +108,7 @@ func doAuth(r *gin.Engine, method, path, body, token string) (int, string) {
 func TestRouter_JobOwnership(t *testing.T) {
 	r, _ := setupTestRouter(t)
 	memberTok := tokenFor(t, auth.RoleMember) // username=member
-	member2Tok, _ := auth.GenerateToken("member2", auth.RoleMember, "hpc-lab", "default")
+	member2Tok, _ := auth.GenerateToken("member2", auth.RoleMember, "hpc-lab", "default", "member2", "member2")
 	tenantTok := tokenFor(t, auth.RoleTenantAdmin)
 
 	submit := func() int {
@@ -138,6 +138,39 @@ func TestRouter_JobOwnership(t *testing.T) {
 	jobID2 := submit()
 	if c := cancel(jobID2, tenantTok); c != http.StatusOK {
 		t.Errorf("tenant_admin override cancel: want 200, got %d", c)
+	}
+}
+
+// TestRouter_PerUserSubmitIdentity 真·每用户身份：member 提交的作业回读 owner 必须是其
+// clusterUser（"member"），不再是无差别的 root。这是 L1 隔离的端到端证据。
+func TestRouter_PerUserSubmitIdentity(t *testing.T) {
+	r, _ := setupTestRouter(t)
+	memberTok := tokenFor(t, auth.RoleMember) // clusterUser="member"
+
+	code, body := doAuth(r, http.MethodPost, "/api/v1/slurm/jobs/submit", `{"name":"idtest","script":"echo hi"}`, memberTok)
+	if code != http.StatusOK {
+		t.Fatalf("submit: want 200 got %d body=%s", code, body)
+	}
+
+	code, body = doAuth(r, http.MethodGet, "/api/v1/slurm/jobs", "", memberTok)
+	if code != http.StatusOK {
+		t.Fatalf("list: want 200 got %d body=%s", code, body)
+	}
+	var list jobs.JobListResponse
+	if err := json.Unmarshal([]byte(body), &list); err != nil {
+		t.Fatalf("unmarshal jobs: %v body=%s", err, body)
+	}
+	var found bool
+	for _, j := range list.Jobs {
+		if j.Name == "idtest" {
+			found = true
+			if j.Owner != "member" {
+				t.Errorf("job owner=%q want \"member\" (per-user clusterUser; was root before L1 isolation)", j.Owner)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("submitted job idtest not found in list: %+v", list.Jobs)
 	}
 }
 
@@ -184,7 +217,7 @@ func TestRouter_JWTEnforcement(t *testing.T) {
 	if c := doRequest(r, http.MethodGet, "/api/v1/slurm/nodes", "", "garbage.token"); c != http.StatusUnauthorized {
 		t.Fatalf("bad token: want 401 got %d", c)
 	}
-	expired, _ := auth.GenerateTokenWithTTL("admin", auth.RoleSystemAdmin, "hpc-lab", "default", -1*time.Hour)
+	expired, _ := auth.GenerateTokenWithTTL("admin", auth.RoleSystemAdmin, "hpc-lab", "default", "admin", "admin", -1*time.Hour)
 	if c := doRequest(r, http.MethodGet, "/api/v1/slurm/nodes", "", expired); c != http.StatusUnauthorized {
 		t.Fatalf("expired token: want 401 got %d", c)
 	}

@@ -15,9 +15,9 @@ import (
 var globalJobIDCounter int64 = 1000
 
 type JobService interface {
-	SubmitJob(ctx context.Context, req *SubmitJobRequest, owner string) (*SubmitJobResponse, error)
+	SubmitJob(ctx context.Context, req *SubmitJobRequest, clusterUser, account string) (*SubmitJobResponse, error)
 	ListJobs(ctx context.Context) ([]JobSummary, error)
-	// JobOwner 返回作业的归属者（submit 时写入的 slurm account）。
+	// JobOwner 返回作业的归属者（submit 时写入的 slurm account，即 clusterUser）。
 	// 用于归属隔离：member 只能控制自己的作业。空 owner 视为遗留作业（放行）。
 	JobOwner(ctx context.Context, jobID int) (string, error)
 	CancelJob(ctx context.Context, jobID int) (*JobControlResponse, error)
@@ -25,20 +25,43 @@ type JobService interface {
 	RequeueJob(ctx context.Context, jobID int) (*JobControlResponse, error)
 }
 
+// slurmJobAPI 隔离 slurmrestd 作业相关调用，便于测试注入假实现（镜像 containers 包的同名 seam）。
+// *slurmrest.Client 天然满足该接口。
+type slurmJobAPI interface {
+	SubmitJobAs(req *slurmrest.SlurmJobSubmitReq, actAs string) (*slurmrest.SlurmJobSubmitResp, error)
+	GetJobs() (*slurmrest.JobsResponse, error)
+	CancelJob(jobID int) error
+	HoldJob(jobID int) error
+	RequeueJob(jobID int) error
+}
+
 type jobServiceImpl struct {
-	client    *slurmrest.Client
+	jobs      slurmJobAPI
 	mu        sync.RWMutex
 	localJobs map[int]*JobSummary
 }
 
+// NewJobService 以真实 slurmrestd 客户端构造作业服务。
 func NewJobService(client *slurmrest.Client) JobService {
+	var api slurmJobAPI
+	if client != nil {
+		api = client
+	}
 	return &jobServiceImpl{
-		client:    client,
+		jobs:      api,
 		localJobs: make(map[int]*JobSummary),
 	}
 }
 
-func (s *jobServiceImpl) SubmitJob(ctx context.Context, req *SubmitJobRequest, owner string) (*SubmitJobResponse, error) {
+// NewJobServiceWithDeps 注入自定义作业 API（测试用：绕过真实 slurmrestd）。
+func NewJobServiceWithDeps(jobs slurmJobAPI) JobService {
+	return &jobServiceImpl{
+		jobs:      jobs,
+		localJobs: make(map[int]*JobSummary),
+	}
+}
+
+func (s *jobServiceImpl) SubmitJob(ctx context.Context, req *SubmitJobRequest, clusterUser, account string) (*SubmitJobResponse, error) {
 	if req == nil {
 		return nil, ErrNegativeResources
 	}
@@ -81,7 +104,7 @@ func (s *jobServiceImpl) SubmitJob(ctx context.Context, req *SubmitJobRequest, o
 	}
 
 	var jobID int
-	if s.client != nil {
+	if s.jobs != nil {
 		slurmReq := &slurmrest.SlurmJobSubmitReq{
 			Script: req.Script,
 		}
@@ -97,9 +120,10 @@ func (s *jobServiceImpl) SubmitJob(ctx context.Context, req *SubmitJobRequest, o
 		slurmReq.Job.Environment = map[string]string{
 			"PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 		}
-		slurmReq.Job.Account = owner // 归属隔离：account 载体（AccountingStorageEnforce=none，不校验存在性）
+		slurmReq.Job.Account = account // 真实 Slurm account（== clusterUser），AccountingStorageEnforce=associations 校验其关联存在
 
-		resp, err := s.client.SubmitJob(slurmReq)
+		// 以 clusterUser 真实身份提交（per-user JWT）→ 作业以该 unix 身份运行（L1 隔离核心）
+		resp, err := s.jobs.SubmitJobAs(slurmReq, clusterUser)
 		if err != nil {
 			return nil, fmt.Errorf("failed to submit job to slurmrestd: %w", err)
 		}
@@ -120,7 +144,7 @@ func (s *jobServiceImpl) SubmitJob(ctx context.Context, req *SubmitJobRequest, o
 		Nodes:      fmt.Sprintf("%d", nodesCount),
 		TimeLimit:  timeLimit,
 		SubmitTime: time.Now().Unix(),
-		Owner:      owner,
+		Owner:      clusterUser,
 	}
 
 	s.mu.Lock()
@@ -146,8 +170,8 @@ func (s *jobServiceImpl) ListJobs(ctx context.Context) ([]JobSummary, error) {
 	jobMap := make(map[int]JobSummary)
 
 	// Fetch from SlurmRESTd if client available
-	if s.client != nil {
-		resp, err := s.client.GetJobs()
+	if s.jobs != nil {
+		resp, err := s.jobs.GetJobs()
 		if err != nil {
 			return nil, fmt.Errorf("failed to list jobs from slurmrestd: %w", err)
 		}
@@ -224,8 +248,8 @@ func (s *jobServiceImpl) CancelJob(ctx context.Context, jobID int) (*JobControlR
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.client != nil {
-		if err := s.client.CancelJob(jobID); err != nil {
+	if s.jobs != nil {
+		if err := s.jobs.CancelJob(jobID); err != nil {
 			return nil, fmt.Errorf("failed to cancel job %d: %w", jobID, err)
 		}
 	}
@@ -262,8 +286,8 @@ func (s *jobServiceImpl) HoldJob(ctx context.Context, jobID int) (*JobControlRes
 		return nil, ErrCannotHoldCancelled
 	}
 
-	if s.client != nil {
-		if err := s.client.HoldJob(jobID); err != nil {
+	if s.jobs != nil {
+		if err := s.jobs.HoldJob(jobID); err != nil {
 			return nil, fmt.Errorf("failed to hold job %d: %w", jobID, err)
 		}
 	}
@@ -294,8 +318,8 @@ func (s *jobServiceImpl) RequeueJob(ctx context.Context, jobID int) (*JobControl
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.client != nil {
-		if err := s.client.RequeueJob(jobID); err != nil {
+	if s.jobs != nil {
+		if err := s.jobs.RequeueJob(jobID); err != nil {
 			return nil, fmt.Errorf("failed to requeue job %d: %w", jobID, err)
 		}
 	}
