@@ -20,9 +20,11 @@ type JobService interface {
 	// JobOwner 返回作业的归属者（submit 时写入的 slurm account，即 clusterUser）。
 	// 用于归属隔离：member 只能控制自己的作业。空 owner 视为遗留作业（放行）。
 	JobOwner(ctx context.Context, jobID int) (string, error)
-	CancelJob(ctx context.Context, jobID int) (*JobControlResponse, error)
-	HoldJob(ctx context.Context, jobID int) (*JobControlResponse, error)
-	RequeueJob(ctx context.Context, jobID int) (*JobControlResponse, error)
+	// 控制类操作带 actAs（L4）：actAs=作业属主 clusterUser 时以该用户令牌下发，Slurm 层
+	// 强制校验属主；actAs 为空则 root（tenant_admin 越权 / 管理操作）。
+	CancelJob(ctx context.Context, jobID int, actAs string) (*JobControlResponse, error)
+	HoldJob(ctx context.Context, jobID int, actAs string) (*JobControlResponse, error)
+	RequeueJob(ctx context.Context, jobID int, actAs string) (*JobControlResponse, error)
 }
 
 // slurmJobAPI 隔离 slurmrestd 作业相关调用，便于测试注入假实现（镜像 containers 包的同名 seam）。
@@ -30,9 +32,9 @@ type JobService interface {
 type slurmJobAPI interface {
 	SubmitJobAs(req *slurmrest.SlurmJobSubmitReq, actAs string) (*slurmrest.SlurmJobSubmitResp, error)
 	GetJobs() (*slurmrest.JobsResponse, error)
-	CancelJob(jobID int) error
-	HoldJob(jobID int) error
-	RequeueJob(jobID int) error
+	CancelJobAs(jobID int, actAs string) error
+	HoldJobAs(jobID int, actAs string) error
+	RequeueJobAs(jobID int, actAs string) error
 }
 
 type jobServiceImpl struct {
@@ -240,7 +242,7 @@ func (s *jobServiceImpl) JobOwner(ctx context.Context, jobID int) (string, error
 	return "", ErrJobNotFound
 }
 
-func (s *jobServiceImpl) CancelJob(ctx context.Context, jobID int) (*JobControlResponse, error) {
+func (s *jobServiceImpl) CancelJob(ctx context.Context, jobID int, actAs string) (*JobControlResponse, error) {
 	if jobID <= 0 {
 		return nil, ErrJobNotFound
 	}
@@ -249,7 +251,7 @@ func (s *jobServiceImpl) CancelJob(ctx context.Context, jobID int) (*JobControlR
 	defer s.mu.Unlock()
 
 	if s.jobs != nil {
-		if err := s.jobs.CancelJob(jobID); err != nil {
+		if err := s.jobs.CancelJobAs(jobID, actAs); err != nil {
 			return nil, fmt.Errorf("failed to cancel job %d: %w", jobID, err)
 		}
 	}
@@ -273,7 +275,7 @@ func (s *jobServiceImpl) CancelJob(ctx context.Context, jobID int) (*JobControlR
 	}, nil
 }
 
-func (s *jobServiceImpl) HoldJob(ctx context.Context, jobID int) (*JobControlResponse, error) {
+func (s *jobServiceImpl) HoldJob(ctx context.Context, jobID int, actAs string) (*JobControlResponse, error) {
 	if jobID <= 0 {
 		return nil, ErrJobNotFound
 	}
@@ -287,7 +289,7 @@ func (s *jobServiceImpl) HoldJob(ctx context.Context, jobID int) (*JobControlRes
 	}
 
 	if s.jobs != nil {
-		if err := s.jobs.HoldJob(jobID); err != nil {
+		if err := s.jobs.HoldJobAs(jobID, actAs); err != nil {
 			return nil, fmt.Errorf("failed to hold job %d: %w", jobID, err)
 		}
 	}
@@ -310,7 +312,7 @@ func (s *jobServiceImpl) HoldJob(ctx context.Context, jobID int) (*JobControlRes
 	}, nil
 }
 
-func (s *jobServiceImpl) RequeueJob(ctx context.Context, jobID int) (*JobControlResponse, error) {
+func (s *jobServiceImpl) RequeueJob(ctx context.Context, jobID int, actAs string) (*JobControlResponse, error) {
 	if jobID <= 0 {
 		return nil, ErrJobNotFound
 	}
@@ -319,7 +321,7 @@ func (s *jobServiceImpl) RequeueJob(ctx context.Context, jobID int) (*JobControl
 	defer s.mu.Unlock()
 
 	if s.jobs != nil {
-		if err := s.jobs.RequeueJob(jobID); err != nil {
+		if err := s.jobs.RequeueJobAs(jobID, actAs); err != nil {
 			return nil, fmt.Errorf("failed to requeue job %d: %w", jobID, err)
 		}
 	}

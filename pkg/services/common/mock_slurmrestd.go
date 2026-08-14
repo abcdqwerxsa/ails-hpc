@@ -33,6 +33,8 @@ type MockSlurmServer struct {
 	mu        sync.RWMutex
 	jobs      map[int]*MockJob
 	nextJobID int
+
+	lastControlUser string // 最近一次控制操作(cancel/hold/requeue)的 X-SLURM-USER-NAME
 }
 
 // NewMockSlurmServer initializes and starts a new MockSlurmServer instance
@@ -166,6 +168,13 @@ func NewMockSlurmServer() *MockSlurmServer {
 // Close shuts down the underlying httptest server
 func (m *MockSlurmServer) Close() {
 	m.Server.Close()
+}
+
+// LastControlUser 返回最近一次控制操作的执行身份（X-SLURM-USER-NAME），L4 集成测试断言用。
+func (m *MockSlurmServer) LastControlUser() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.lastControlUser
 }
 
 // GetJobs returns a slice of all stored jobs
@@ -310,11 +319,28 @@ func (m *MockSlurmServer) handleSubmitJob(w http.ResponseWriter, r *http.Request
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+// l4Allowed 模拟 Slurm 的控制鉴权（L4）：令牌身份必须是作业属主或 root；
+// 属主为空（遗留/手工注入作业）放行。不匹配返回 false（调用方回 403）。
+func l4Allowed(jobUser, acting string) bool {
+	return acting == "root" || jobUser == "" || jobUser == acting
+}
+
 func (m *MockSlurmServer) handleCancelJob(w http.ResponseWriter, r *http.Request, jobID int) {
 	w.Header().Set("Content-Type", "application/json")
 
 	m.mu.Lock()
 	job, exists := m.jobs[jobID]
+	if exists {
+		m.lastControlUser = r.Header.Get("X-SLURM-USER-NAME")
+	}
+	if exists && !l4Allowed(job.User, r.Header.Get("X-SLURM-USER-NAME")) {
+		m.mu.Unlock()
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"errors": []string{fmt.Sprintf("only root or job owner may cancel job %d", jobID)},
+		})
+		return
+	}
 	if !exists {
 		m.mu.Unlock()
 		w.WriteHeader(http.StatusNotFound)
@@ -338,6 +364,17 @@ func (m *MockSlurmServer) handleControlJob(w http.ResponseWriter, r *http.Reques
 
 	m.mu.Lock()
 	job, exists := m.jobs[jobID]
+	if exists {
+		m.lastControlUser = r.Header.Get("X-SLURM-USER-NAME")
+	}
+	if exists && !l4Allowed(job.User, r.Header.Get("X-SLURM-USER-NAME")) {
+		m.mu.Unlock()
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"errors": []string{fmt.Sprintf("only root or job owner may modify job %d", jobID)},
+		})
+		return
+	}
 	if !exists {
 		m.mu.Unlock()
 		w.WriteHeader(http.StatusNotFound)

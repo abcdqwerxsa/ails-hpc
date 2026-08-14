@@ -44,7 +44,7 @@ type ContainerService interface {
 	ListActiveContainers(ctx context.Context) ([]*ContainerInstance, error)
 	// SessionOwner 返回会话归属者（launch 时写入 meta）。归属隔离用：member 只能回收自己的会话。
 	SessionOwner(ctx context.Context, id string) (string, error)
-	RecycleContainer(ctx context.Context, id string) (*ContainerRecycleResponse, error)
+	RecycleContainer(ctx context.Context, id, actAs string) (*ContainerRecycleResponse, error)
 	// ProxyTarget 返回会话的反代目标 (node_ip:port)、状态、env_type，供 /ide/<session>/ 反代 handler 使用。
 	// env_type 决定反代是否剥前缀：jupyter 有 base_url 对齐（不剥），vscode 根路径启动（剥 /api/v1/ide/<sid>）。
 	ProxyTarget(ctx context.Context, sessionID string) (nodeIP string, port int, status string, envType string, err error)
@@ -54,7 +54,7 @@ type ContainerService interface {
 type slurmJobAPI interface {
 	SubmitJobAs(req *slurmrest.SlurmJobSubmitReq, actAs string) (*slurmrest.SlurmJobSubmitResp, error)
 	GetJobs() (*slurmrest.JobsResponse, error)
-	CancelJob(jobID int) error
+	CancelJobAs(jobID int, actAs string) error // actAs=会话属主（L4：Slurm 校验属主）；空=root
 }
 
 // sessionMetaStore 读写 /shared/sessions 下的会话连接信息。
@@ -218,7 +218,7 @@ func (s *containerServiceImpl) SessionOwner(ctx context.Context, id string) (str
 	return m.Owner, nil
 }
 
-func (s *containerServiceImpl) RecycleContainer(ctx context.Context, id string) (*ContainerRecycleResponse, error) {
+func (s *containerServiceImpl) RecycleContainer(ctx context.Context, id, actAs string) (*ContainerRecycleResponse, error) {
 	if id == "" {
 		return nil, ErrContainerNotFound
 	}
@@ -242,7 +242,7 @@ func (s *containerServiceImpl) RecycleContainer(ctx context.Context, id string) 
 	if jobID == 0 {
 		return nil, ErrContainerNotFound
 	}
-	if err := s.jobs.CancelJob(jobID); err != nil {
+	if err := s.jobs.CancelJobAs(jobID, actAs); err != nil {
 		return nil, fmt.Errorf("cancel job %d: %w", jobID, err)
 	}
 	_ = s.meta.Delete(id) // best-effort 清理
