@@ -87,6 +87,7 @@ services:
       - /dev/nvidia-uvm-tools:/dev/nvidia-uvm-tools
     volumes:
       - ./config/slurm.conf:/etc/slurm/slurm.conf:ro
+      - ./config/entrypoint.sh:/entrypoint.sh:ro
       - ./config/gres.conf:/etc/slurm/gres.conf:ro
       - ./config/users.yaml:/etc/slurm/ails-users.yaml:ro
       - shared-storage:/shared
@@ -111,6 +112,7 @@ services:
       - SYS_ADMIN
     volumes:
       - ./config/slurm.conf:/etc/slurm/slurm.conf:ro
+      - ./config/entrypoint.sh:/entrypoint.sh:ro
       - ./config/users.yaml:/etc/slurm/ails-users.yaml:ro
       - shared-storage:/shared
     depends_on:
@@ -134,6 +136,7 @@ services:
       - SYS_ADMIN
     volumes:
       - ./config/slurm.conf:/etc/slurm/slurm.conf:ro
+      - ./config/entrypoint.sh:/entrypoint.sh:ro
       - ./config/users.yaml:/etc/slurm/ails-users.yaml:ro
       - shared-storage:/shared
     depends_on:
