@@ -73,7 +73,7 @@ func FetchToken() string {
 func (c *Client) userToken(clusterUser string, refresh bool) string {
 	if clusterUser == "" {
 		if refresh || c.UserToken == "" {
-			if t := FetchToken(); t != "" {
+			if t := c.mint("root"); t != "" {
 				c.UserToken = t
 			}
 		}
@@ -86,11 +86,34 @@ func (c *Client) userToken(clusterUser string, refresh bool) string {
 			return t
 		}
 	}
-	t := mintToken(clusterUser)
+	t := c.mint(clusterUser)
 	if t != "" {
 		c.tokens[clusterUser] = t
 	}
 	return t
+}
+
+// softErrors 探测 slurmrestd 的"软失败"：HTTP 2xx 但 errors[] 非空。
+// v0.0.37 对无效令牌等鉴权问题也返回 200 + errors[]（如 error_code 5005
+// "Zero Bytes were transmitted or received"），而非 401——典型触发场景是
+// slurmctld 容器重建重签 JWT key 后，客户端缓存的旧令牌全部失效。
+// 返回非空列表即视为软失败，调用方应刷新令牌重试一次。
+func softErrors(body []byte) []string {
+	var probe struct {
+		Errors []struct {
+			Error string `json:"error"`
+		} `json:"errors"`
+	}
+	if err := json.Unmarshal(body, &probe); err != nil {
+		return nil // 非 JSON 响应体（如裸文本）不走软失败路径
+	}
+	msgs := make([]string, 0, len(probe.Errors))
+	for _, e := range probe.Errors {
+		if e.Error != "" {
+			msgs = append(msgs, e.Error)
+		}
+	}
+	return msgs
 }
 
 // SacctQuery 在 slurmctld 容器内执行 sacct 并返回原始 stdout，供调用方按
@@ -118,7 +141,8 @@ func UpdateNodeStateCLI(name, state, reason string) error {
 
 // Client 封装了与原生 slurmrestd REST API 交互的客户端。
 // UserToken 为 root 特权令牌（读/控制类调用）；tokens 为 per-user 令牌缓存（submit 类调用，
-// 使作业以各用户真实 unix 身份运行——L1 隔离）。
+// 使作业以各用户真实 unix 身份运行——L1 隔离）。mint 为令牌铸造函数（默认走 scontrol token，
+// 测试可注入）。
 type Client struct {
 	BaseURL    string
 	UserName   string
@@ -126,6 +150,7 @@ type Client struct {
 	HTTPClient *http.Client
 	tokens     map[string]string
 	tokenMu    sync.Mutex
+	mint       func(username string) string
 }
 
 // NewClient 创建并初始化一个新的 Slurm REST API Client
@@ -141,6 +166,7 @@ func NewClient(baseURL, userName, userToken string) *Client {
 			Timeout: 10 * time.Second,
 		},
 		tokens: make(map[string]string),
+		mint:   mintToken,
 	}
 }
 
@@ -184,16 +210,17 @@ func (c *Client) executeRequestWithBody(method, path string, bodyData interface{
 		return resp, body, nil
 	}
 
-	resp, body, err := makeReq(c.UserToken)
+	used := c.UserToken
+	resp, body, err := makeReq(used)
 	if err != nil {
 		return nil, err
 	}
 
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		newToken := FetchToken()
-		if newToken != "" && newToken != c.UserToken {
-			c.UserToken = newToken
-			resp, body, err = makeReq(c.UserToken)
+		newToken := c.userToken("", true)
+		if newToken != "" && newToken != used {
+			used = newToken
+			resp, body, err = makeReq(used)
 			if err != nil {
 				return nil, err
 			}
@@ -202,6 +229,17 @@ func (c *Client) executeRequestWithBody(method, path string, bodyData interface{
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return body, fmt.Errorf("slurmrestd returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// 软失败（200 + errors[] 非空，如 slurmctld 重建后旧令牌失效）：刷新令牌重试一次。
+	// 注意与 used（本次实际使用的令牌）比较——userToken 刷新会同步改写 c.UserToken。
+	if msgs := softErrors(body); len(msgs) > 0 {
+		if newToken := c.userToken("", true); newToken != "" && newToken != used {
+			if resp2, body2, err2 := makeReq(newToken); err2 == nil && resp2.StatusCode >= 200 && resp2.StatusCode < 300 && len(softErrors(body2)) == 0 {
+				return body2, nil
+			}
+		}
+		return body, fmt.Errorf("slurmrestd errors: %s", strings.Join(msgs, "; "))
 	}
 
 	return body, nil
@@ -267,6 +305,16 @@ func (c *Client) executeRequestAs(method, path string, bodyData interface{}, act
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return body, fmt.Errorf("slurmrestd returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// 软失败（200 + errors[] 非空，如 slurmctld 重建后旧令牌失效）：刷新该用户令牌重试一次
+	if msgs := softErrors(body); len(msgs) > 0 {
+		if newToken := c.userToken(actAs, true); newToken != "" && newToken != token {
+			if resp2, body2, err2 := makeReq(newToken); err2 == nil && resp2.StatusCode >= 200 && resp2.StatusCode < 300 && len(softErrors(body2)) == 0 {
+				return body2, nil
+			}
+		}
+		return body, fmt.Errorf("slurmrestd errors: %s", strings.Join(msgs, "; "))
 	}
 
 	return body, nil
