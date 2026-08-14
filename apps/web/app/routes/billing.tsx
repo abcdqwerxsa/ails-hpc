@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useEffect, useState, type ChangeEvent, type ReactNode } from 'react';
-import { slurm, type BillingUsage } from '../services/slurm';
+import { slurm, type BillingUsage, type BreakdownRow } from '../services/slurm';
 
 export const Route = createFileRoute('/billing')({ component: BillingPage });
 
@@ -83,14 +83,80 @@ function BillingPage() {
             <Stat label="作业数" value={String(data.job_count)} />
             <Stat label="容器会话数" value={String(data.container_count)} />
           </div>
-          <div style={{ marginTop: '1rem', fontSize: '0.85rem', color: 'var(--text-muted,#94a3b8)' }}>
+          <div style={{ marginTop: '1rem', fontSize: '0.85rem', color: 'var(--text-muted,#94a3b8)', marginBottom: '1.5rem' }}>
             范围：用户 {data.user || '(全部)'}{data.project ? ` · 项目 ${data.project}` : ''}
           </div>
+          <BreakdownTable rows={data.breakdown || []} />
         </>
       )}
     </div>
   );
 }
+
+// 用量明细表：后端按 cpu_hours 降序预排序，前端保持顺序。
+function BreakdownTable({ rows }: { rows: BreakdownRow[] }) {
+  return (
+    <div className="table-card">
+      <div style={{ padding: '1rem 1.25rem 0', fontSize: '1rem', fontWeight: 700 }}>用量明细（按用户/账号）</div>
+      {rows.length === 0 ? (
+        <div style={{ padding: '2.5rem', textAlign: 'center', color: 'var(--text-muted,#94a3b8)' }}>暂无明细数据</div>
+      ) : (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+            <thead>
+              <tr style={{ textAlign: 'left' }}>
+                <th style={th}>用户</th>
+                <th style={th}>账号</th>
+                <th style={{ ...th, textAlign: 'right' }}>CPU 小时</th>
+                <th style={{ ...th, textAlign: 'right' }}>内存 GB·小时</th>
+                <th style={{ ...th, textAlign: 'right' }}>GPU 小时</th>
+                <th style={{ ...th, textAlign: 'right' }}>作业数</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => {
+                const isLast = i === rows.length - 1;
+                return (
+                  <tr key={`${r.user}/${r.account}`} style={{ borderBottom: isLast ? 'none' : '1px solid var(--border-color,#2a2f3a)' }}>
+                    <td style={td}>
+                      <span style={{ fontWeight: 700 }}>{r.user || '-'}</span>
+                    </td>
+                    <td style={{ ...td, color: 'var(--text-muted,#94a3b8)' }}>{r.account || '-'}</td>
+                    <td style={{ ...td, ...num }}>{r.cpu_hours.toFixed(2)}</td>
+                    <td style={{ ...td, ...num }}>{r.mem_gb_hours.toFixed(2)}</td>
+                    <td style={{ ...td, ...num }}>{r.gpu_hours.toFixed(2)}</td>
+                    <td style={{ ...td, ...num }}>{r.job_count}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const th = {
+  padding: '0.85rem 1.25rem',
+  fontSize: '0.72rem',
+  textTransform: 'uppercase',
+  letterSpacing: '0.05em',
+  color: 'var(--text-muted,#94a3b8)',
+  fontWeight: 700,
+  borderBottom: '1px solid var(--border-color,#2a2f3a)',
+} as const;
+
+const td = {
+  padding: '0.9rem 1.25rem',
+  fontSize: '0.875rem',
+  color: 'var(--text-main,#f1f5f9)',
+} as const;
+
+const num = {
+  fontFamily: "'JetBrains Mono', monospace",
+  textAlign: 'right',
+} as const;
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return <label style={{ display: 'grid', gap: '0.25rem', fontSize: '0.8rem', color: 'var(--text-muted,#94a3b8)' }}>{label}{children}</label>;
