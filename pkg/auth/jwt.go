@@ -47,6 +47,8 @@ type Claims struct {
 	TenantNS    string `json:"tenantNs"`
 	ClusterUser string `json:"clusterUser"`
 	Account     string `json:"account"`
+	// TID 租户 slug（多租户 Phase 2 起签发；空=迁移期旧 token，scope 回退 OrgSlug）
+	TID string `json:"tid,omitempty"`
 	Iss         string `json:"iss"`
 	Aud         string `json:"aud"`
 	Exp         int64  `json:"exp"`
