@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>LuminaHome Dashboard</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&amp;family=Montserrat:wght@600;700&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+  tailwind.config = {
+    darkMode: "class",
+    theme: {
+      extend: {
+        "colors": {
+                "on-surface": "#1b1b22",
+                "outline": "#767684",
+                "on-tertiary-fixed": "#2e1500",
+                "on-primary-fixed": "#000965",
+                "on-primary": "#ffffff",
+                "surface-container-low": "#e0e0e5",
+                "surface-bright": "#f0f0f5",
+                "on-error": "#ffffff",
+                "primary-fixed": "#dfe0ff",
+                "secondary-fixed-dim": "#bac8da",
+                "on-tertiary-fixed-variant": "#6c3a00",
+                "inverse-primary": "#bdc2ff",
+                "surface-container-highest": "#c8c8d0",
+                "secondary-container": "#d3e1f4",
+                "secondary-fixed": "#d6e4f7",
+                "background": "#e5e5ec",
+                "tertiary": "#874a00",
+                "tertiary-fixed": "#ffdcc1",
+                "on-primary-container": "#faf7ff",
+                "secondary": "#526070",
+                "surface-variant": "#c8c8d0",
+                "surface-tint": "#4552c3",
+                "error-container": "#ffdad6",
+                "on-secondary-fixed-variant": "#3b4857",
+                "on-background": "#1b1b22",
+                "tertiary-fixed-dim": "#ffb778",
+                "primary-fixed-dim": "#bdc2ff",
+                "surface-container-lowest": "#ffffff",
+                "on-surface-variant": "#454653",
+                "on-secondary": "#ffffff",
+                "on-tertiary": "#ffffff",
+                "on-secondary-container": "#566474",
+                "on-primary-fixed-variant": "#2b38aa",
+                "surface-container-high": "#d0d0d8",
+                "inverse-on-surface": "#f2effa",
+                "primary-container": "#5a67d8",
+                "tertiary-container": "#aa5f00",
+                "surface": "#e5e5ec",
+                "on-error-container": "#93000a",
+                "on-secondary-fixed": "#0f1d2a",
+                "outline-variant": "#a0a0ab",
+                "surface-dim": "#d0d0d8",
+                "error": "#ba1a1a",
+                "inverse-surface": "#303037",
+                "on-tertiary-container": "#fff6f2",
+                "primary": "#404dbe",
+                "surface-container": "#d8d8e0"
+        },
+        "borderRadius": {
+                "DEFAULT": "0.25rem",
+                "lg": "0.5rem",
+                "xl": "0.75rem",
+                "full": "9999px"
+        },
+        "spacing": {
+                "unit": "8px",
+                "container-padding": "24px",
+                "margin-desktop": "32px",
+                "gutter": "16px",
+                "margin-mobile": "16px"
+        },
+        "fontFamily": {
+                "headline-md": [
+                        "Montserrat"
+                ],
+                "label-caps": [
+                        "Inter"
+                ],
+                "headline-lg": [
+                        "Montserrat"
+                ],
+                "headline-lg-mobile": [
+                        "Montserrat"
+                ],
+                "body-md": [
+                        "Inter"
+                ],
+                "body-lg": [
+                        "Inter"
+                ]
+        },
+        "fontSize": {
+                "headline-md": [
+                        "20px",
+                        {
+                                "lineHeight": "1.3",
+                                "letterSpacing": "0.01em",
+                                "fontWeight": "600"
+                        }
+                ],
+                "label-caps": [
+                        "12px",
+                        {
+                                "lineHeight": "1.2",
+                                "letterSpacing": "0.08em",
+                                "fontWeight": "600"
+                        }
+                ],
+                "headline-lg": [
+                        "32px",
+                        {
+                                "lineHeight": "1.2",
+                                "letterSpacing": "0.02em",
+                                "fontWeight": "700"
+                        }
+                ],
+                "headline-lg-mobile": [
+                        "24px",
+                        {
+                                "lineHeight": "1.2",
+                                "letterSpacing": "0.02em",
+                                "fontWeight": "700"
+                        }
+                ],
+                "body-md": [
+                        "16px",
+                        {
+                                "lineHeight": "1.5",
+                                "letterSpacing": "0.01em",
+                                "fontWeight": "400"
+                        }
+                ],
+                "body-lg": [
+                        "18px",
+                        {
+                                "lineHeight": "1.6",
+                                "letterSpacing": "0.01em",
+                                "fontWeight": "400"
+                        }
+                ]
+        }
+},
+    },
+  }
+</script>
+<style>
+        .hardware-outset {
+            box-shadow: 
+                -8px -8px 16px rgba(255, 255, 255, 0.7),
+                8px 8px 16px rgba(160, 160, 171, 0.6),
+                inset 1px 1px 2px rgba(255, 255, 255, 0.9),
+                inset -1px -1px 2px rgba(160, 160, 171, 0.3);
+            background: linear-gradient(135deg, #f0f0f5 0%, #e5e5ec 100%);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+        }
+        .hardware-inset {
+            box-shadow: 
+                inset 4px 4px 8px rgba(160, 160, 171, 0.8),
+                inset -4px -4px 8px rgba(255, 255, 255, 0.9),
+                1px 1px 2px rgba(255, 255, 255, 1);
+            background: #d8d8e0;
+            border: 1px solid rgba(160, 160, 171, 0.3);
+        }
+        .hardware-pressed {
+            box-shadow: 
+                inset 6px 6px 12px rgba(160, 160, 171, 0.9),
+                inset -6px -6px 12px rgba(255, 255, 255, 0.9);
+            background: #d0d0d8;
+        }
+        .hardware-toggle-track {
+            box-shadow: 
+                inset 4px 4px 6px rgba(160, 160, 171, 0.8),
+                inset -4px -4px 6px rgba(255, 255, 255, 0.9);
+            background: #d0d0d8;
+            border: 1px solid rgba(160, 160, 171, 0.5);
+        }
+        .hardware-toggle-track.toggle-active {
+            background: #c8c8f0;
+            box-shadow: 
+                inset 4px 4px 6px rgba(64, 77, 190, 0.4),
+                inset -4px -4px 6px rgba(255, 255, 255, 0.9);
+        }
+        .hardware-toggle-thumb {
+            box-shadow: 
+                -2px -2px 4px rgba(255, 255, 255, 0.9),
+                2px 2px 4px rgba(160, 160, 171, 0.6),
+                inset 1px 1px 2px rgba(255, 255, 255, 1);
+            background: linear-gradient(135deg, #fbf8ff 0%, #e5e5ec 100%);
+            border: 1px solid rgba(255, 255, 255, 0.8);
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .toggle-active .hardware-toggle-thumb {
+            transform: translateX(24px);
+        }
+        .metal-texture {
+            background-image: repeating-linear-gradient(
+                45deg,
+                transparent,
+                transparent 2px,
+                rgba(255,255,255,0.1) 2px,
+                rgba(255,255,255,0.1) 4px
+            );
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body-md min-h-screen flex">
+<!-- SideNavBar -->
+<nav class="hidden md:flex flex-col p-6 gap-y-4 bg-background w-64 docked left-0 h-screen shadow-[8px_0_16px_rgba(160,160,171,0.4)] z-10 shrink-0 hardware-outset border-r-0 border-y-0">
+<div class="mb-8">
+<h1 class="font-headline-md text-headline-md font-bold text-primary" style="text-shadow: 1px 1px 2px rgba(255,255,255,0.8), -1px -1px 2px rgba(160,160,171,0.3);"> LuminaHome</h1>
+</div>
+<div class="flex items-center gap-4 mb-8">
+<div class="hardware-inset p-1 rounded-full">
+<img class="w-12 h-12 rounded-full object-cover border-2 border-surface" data-alt="A modern, high-quality circular profile image or home icon with a clean background. The image should be minimalist and suitable for a smart home dashboard avatar." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAhj0Xh29aWhfqQMX1ujLHW5X6nTG0OQKdBX8w0kXJpJNMB7kn6bzYDL21wcUdMs8FLxCOGnczkAXbYNn6nQvvk7LkLdGwrn3spza8G9qpxrZtFcjukZWc5cEq_xNGXEjiJW0_3WGP0WT-xQHbdbZohogwSTzzER_xpCwy12GRJjsfkBOydyUJYJnQ0tmAVzL_zQ6MB-0dSnmDNgeNoHyJV1uq04hMUWM2zFBFlTuPqmr2xAfPN30Dt"/>
+</div>
+<div>
+<p class="font-headline-md text-headline-md text-sm font-bold">My Sanctuary</p>
+<p class="font-body-md text-body-md text-xs text-on-secondary-container">72°F • Sunny</p>
+</div>
+</div>
+<div class="flex-1 flex flex-col gap-3">
+<!-- Navigation Items -->
+<button class="flex items-center gap-4 p-3 hardware-pressed text-primary font-bold rounded-xl active:scale-95 transition-all duration-150">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1; text-shadow: 1px 1px 2px rgba(255,255,255,0.5);">chair</span>
+<span class="">Living Room</span>
+</button>
+<button class="flex items-center gap-4 p-3 text-on-secondary-container hover:text-primary hardware-outset rounded-xl transition-all active:scale-95 active:hardware-pressed duration-150">
+<span class="material-symbols-outlined">cooking</span>
+<span class="">Kitchen</span>
+</button>
+<button class="flex items-center gap-4 p-3 text-on-secondary-container hover:text-primary hardware-outset rounded-xl transition-all active:scale-95 active:hardware-pressed duration-150">
+<span class="material-symbols-outlined">bed</span>
+<span class="">Bedroom</span>
+</button>
+<button class="flex items-center gap-4 p-3 text-on-secondary-container hover:text-primary hardware-outset rounded-xl transition-all active:scale-95 active:hardware-pressed duration-150">
+<span class="material-symbols-outlined">shield</span>
+<span class="">Security</span>
+</button>
+<button class="flex items-center gap-4 p-3 text-on-secondary-container hover:text-primary hardware-outset rounded-xl transition-all active:scale-95 active:hardware-pressed duration-150">
+<span class="material-symbols-outlined">settings</span>
+<span class="">Settings</span>
+</button>
+</div>
+<button class="mt-auto py-3 px-4 rounded-xl hardware-outset text-primary font-bold hover:scale-[1.02] active:scale-95 active:hardware-pressed transition-all metal-texture">
+            Add Room
+        </button>
+</nav>
+<!-- Main Content Area -->
+<div class="flex-1 flex flex-col h-screen overflow-hidden bg-background">
+<!-- TopAppBar -->
+<header class="flex justify-between items-center w-full h-20 bg-background px-margin-desktop py-unit z-0 hardware-outset border-x-0 border-t-0">
+<div class="md:hidden">
+<h1 class="font-headline-lg-mobile text-headline-lg-mobile font-bold text-on-background" style="text-shadow: 1px 1px 2px rgba(255,255,255,0.8), -1px -1px 2px rgba(160,160,171,0.3);">LuminaHome</h1>
+</div>
+<div class="hidden md:block">
+<!-- Title hidden on desktop as it's in sidebar -->
+</div>
+<div class="flex items-center gap-4">
+<button class="p-3 rounded-full hardware-outset text-on-secondary-container hover:scale-[1.02] active:scale-95 active:hardware-pressed transition-all">
+<span class="material-symbols-outlined">qr_code_2</span>
+</button>
+<button class="p-3 rounded-full hardware-outset text-on-secondary-container hover:scale-[1.02] active:scale-95 active:hardware-pressed transition-all">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<img alt="User profile" class="w-10 h-10 rounded-full object-cover md:hidden border-2 border-surface hardware-outset" data-alt="A small, circular user profile picture. It should look modern, professional, and well-lit, suitable for a dashboard header icon." src="https://lh3.googleusercontent.com/aida-public/AB6AXuD0k8JmCmsrhJWT4v26vpY6FLyBoQU4K0sPhKH-vBX359xC7MKafkz0CstPtP31BC5CsqHGtDcSPjcjoGtb0cjzDIP8S7MuPnOqdce_DDMjSvCdMptLQFkkaIH7s8_rYwuJw5whccEwbcadYeLWVXEvYqrBDdntM7_yLfHm1qxN0zkEEDvZUxZW10oGj2WddOQgV9EbhIFhk64EHqbYpL924EuQUpbmmQJ5e1zw41frssnkhze2rUMs"/>
+</div>
+</header>
+<!-- Dashboard Canvas -->
+<main class="flex-1 overflow-y-auto p-margin-mobile md:p-margin-desktop">
+<div class="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-12 gap-8">
+<!-- Weather Card -->
+<div class="md:col-span-8 rounded-[32px] p-8 hardware-outset bg-background">
+<div class="flex justify-between items-start mb-6">
+<h2 class="font-headline-md text-headline-md text-on-surface font-bold text-lg" style="text-shadow: 1px 1px 0 rgba(255,255,255,0.8);">Current Weather</h2>
+<div class="p-2 hardware-inset rounded-lg">
+<span class="material-symbols-outlined text-primary text-2xl" style="text-shadow: 1px 1px 2px rgba(255,255,255,0.5);">qr_code_2</span>
+</div>
+</div>
+<div class="flex gap-10 items-end">
+<div class="hardware-inset p-6 rounded-3xl">
+<p class="text-6xl font-bold text-primary" style="text-shadow: inset 1px 1px 2px rgba(0,0,0,0.1);">72°</p>
+<p class="font-body-md text-body-md text-on-secondary-container mt-2 font-medium">Feels like 74°</p>
+</div>
+<div class="pb-2 hardware-inset p-4 rounded-2xl flex flex-col justify-center h-full">
+<p class="font-body-md text-body-md text-on-secondary-container font-medium mb-1">Humidity: 45%</p>
+<p class="font-body-md text-body-md text-on-secondary-container font-medium">Wind: 5 mph SW</p>
+</div>
+</div>
+</div>
+<!-- Security Card -->
+<div class="md:col-span-4 rounded-[32px] p-8 hardware-outset bg-background flex flex-col items-center justify-center text-center">
+<h2 class="font-headline-md text-headline-md text-on-surface mb-8 w-full text-left font-bold text-lg" style="text-shadow: 1px 1px 0 rgba(255,255,255,0.8);">Security</h2>
+<button class="w-36 h-36 rounded-full hardware-inset flex flex-col items-center justify-center gap-2 group transition-all duration-300 relative border-4 border-background" style="box-shadow: inset 6px 6px 12px rgba(160, 160, 171, 0.9), inset -6px -6px 12px rgba(255, 255, 255, 0.9), 0 0 0 4px #e5e5ec, 8px 8px 16px rgba(160, 160, 171, 0.6), -8px -8px 16px rgba(255, 255, 255, 0.7);">
+<div class="w-28 h-28 rounded-full bg-surface-tint opacity-10 absolute scale-0 group-active:scale-100 transition-transform duration-300"></div>
+<span class="material-symbols-outlined text-primary text-5xl z-10" style="font-variation-settings: 'FILL' 1; text-shadow: 0px 2px 4px rgba(64, 77, 190, 0.3);">shield</span>
+<span class="font-label-caps text-label-caps text-primary z-10 font-bold tracking-widest mt-1">ARMED</span>
+</button>
+<div class="mt-6 hardware-inset px-4 py-2 rounded-full">
+<p class="font-body-md text-body-md text-on-secondary-container text-sm font-medium">System is active</p>
+</div>
+</div>
+<!-- Room Controls Bento -->
+<div class="md:col-span-12 grid grid-cols-1 md:grid-cols-3 gap-8">
+<!-- Living Room -->
+<div class="rounded-[32px] p-6 hardware-outset bg-background">
+<div class="flex justify-between items-center mb-8">
+<div class="flex items-center gap-4">
+<div class="w-12 h-12 rounded-full hardware-inset flex items-center justify-center">
+<span class="material-symbols-outlined text-primary text-xl" style="text-shadow: 1px 1px 0 rgba(255,255,255,0.5);">chair</span>
+</div>
+<h3 class="font-headline-md text-headline-md text-lg font-bold" style="text-shadow: 1px 1px 0 rgba(255,255,255,0.8);">Living Room</h3>
+</div>
+<!-- Hardware Toggle -->
+<div class="w-16 h-8 rounded-full hardware-toggle-track relative cursor-pointer toggle-container toggle-active flex items-center p-1" onclick="this.classList.toggle('toggle-active')">
+<div class="w-6 h-6 rounded-full hardware-toggle-thumb flex items-center justify-center absolute left-1">
+<div class="w-2 h-2 rounded-full bg-primary" style="box-shadow: inset 1px 1px 2px rgba(0,0,0,0.3);"></div>
+</div>
+</div>
+</div>
+<div class="grid grid-cols-2 gap-6">
+<div class="p-4 rounded-2xl hardware-inset text-center relative overflow-hidden">
+<div class="absolute top-0 left-0 w-full h-1 bg-primary"></div>
+<p class="font-label-caps text-label-caps text-on-secondary-container mb-2 mt-1">LIGHTS</p>
+<p class="font-body-md text-body-md font-bold text-primary text-xl" style="text-shadow: 1px 1px 0 rgba(255,255,255,0.5);">100%</p>
+</div>
+<div class="p-4 rounded-2xl hardware-inset text-center">
+<p class="font-label-caps text-label-caps text-on-secondary-container mb-2 mt-1">TEMP</p>
+<p class="font-body-md text-body-md font-bold text-on-surface text-xl" style="text-shadow: 1px 1px 0 rgba(255,255,255,0.5);">71°</p>
+</div>
+</div>
+</div>
+<!-- Kitchen -->
+<div class="rounded-[32px] p-6 hardware-outset bg-background">
+<div class="flex justify-between items-center mb-8">
+<div class="flex items-center gap-4">
+<div class="w-12 h-12 rounded-full hardware-inset flex items-center justify-center">
+<span class="material-symbols-outlined text-on-secondary-container text-xl" style="text-shadow: 1px 1px 0 rgba(255,255,255,0.5);">cooking</span>
+</div>
+<h3 class="font-headline-md text-headline-md text-lg text-on-secondary-container font-bold" style="text-shadow: 1px 1px 0 rgba(255,255,255,0.8);">Kitchen</h3>
+</div>
+<div class="w-16 h-8 rounded-full hardware-toggle-track relative cursor-pointer toggle-container flex items-center p-1" onclick="this.classList.toggle('toggle-active')">
+<div class="w-6 h-6 rounded-full hardware-toggle-thumb flex items-center justify-center absolute left-1">
+<div class="w-2 h-2 rounded-full bg-outline-variant" style="box-shadow: inset 1px 1px 2px rgba(0,0,0,0.3);"></div>
+</div>
+</div>
+</div>
+<div class="grid grid-cols-2 gap-6 opacity-80">
+<div class="p-4 rounded-2xl hardware-inset text-center">
+<p class="font-label-caps text-label-caps text-on-secondary-container mb-2 mt-1">LIGHTS</p>
+<p class="font-body-md text-body-md font-bold text-on-surface text-xl" style="text-shadow: 1px 1px 0 rgba(255,255,255,0.5);">OFF</p>
+</div>
+<div class="p-4 rounded-2xl hardware-inset text-center">
+<p class="font-label-caps text-label-caps text-on-secondary-container mb-2 mt-1">TEMP</p>
+<p class="font-body-md text-body-md font-bold text-on-surface text-xl" style="text-shadow: 1px 1px 0 rgba(255,255,255,0.5);">72°</p>
+</div>
+</div>
+</div>
+<!-- Bedroom -->
+<div class="rounded-[32px] p-6 hardware-outset bg-background">
+<div class="flex justify-between items-center mb-8">
+<div class="flex items-center gap-4">
+<div class="w-12 h-12 rounded-full hardware-inset flex items-center justify-center">
+<span class="material-symbols-outlined text-primary text-xl" style="text-shadow: 1px 1px 0 rgba(255,255,255,0.5);">bed</span>
+</div>
+<h3 class="font-headline-md text-headline-md text-lg font-bold" style="text-shadow: 1px 1px 0 rgba(255,255,255,0.8);">Bedroom</h3>
+</div>
+<div class="w-16 h-8 rounded-full hardware-toggle-track relative cursor-pointer toggle-container toggle-active flex items-center p-1" onclick="this.classList.toggle('toggle-active')">
+<div class="w-6 h-6 rounded-full hardware-toggle-thumb flex items-center justify-center absolute left-1">
+<div class="w-2 h-2 rounded-full bg-primary" style="box-shadow: inset 1px 1px 2px rgba(0,0,0,0.3);"></div>
+</div>
+</div>
+</div>
+<div class="grid grid-cols-2 gap-6">
+<div class="p-4 rounded-2xl hardware-inset text-center relative overflow-hidden">
+<div class="absolute top-0 left-0 w-full h-1 bg-primary opacity-40"></div>
+<p class="font-label-caps text-label-caps text-on-secondary-container mb-2 mt-1">LIGHTS</p>
+<p class="font-body-md text-body-md font-bold text-primary text-xl" style="text-shadow: 1px 1px 0 rgba(255,255,255,0.5);">40%</p>
+</div>
+<div class="p-4 rounded-2xl hardware-inset text-center">
+<p class="font-label-caps text-label-caps text-on-secondary-container mb-2 mt-1">TEMP</p>
+<p class="font-body-md text-body-md font-bold text-on-surface text-xl" style="text-shadow: 1px 1px 0 rgba(255,255,255,0.5);">68°</p>
+</div>
+</div>
+</div>
+</div>
+<!-- Energy Chart Placeholder -->
+<div class="md:col-span-12 rounded-[32px] p-8 hardware-outset bg-background mt-4">
+<h2 class="font-headline-md text-headline-md text-on-surface mb-8 font-bold text-lg" style="text-shadow: 1px 1px 0 rgba(255,255,255,0.8);">Energy Consumption</h2>
+<div class="w-full h-72 rounded-3xl hardware-inset relative overflow-hidden flex items-center justify-center border-2 border-surface-container-high" style="box-shadow: inset 8px 8px 16px rgba(160, 160, 171, 0.9), inset -8px -8px 16px rgba(255, 255, 255, 0.9);">
+<!-- Abstract soft chart representation -->
+<div class="absolute bottom-0 w-full flex items-end justify-between px-12 py-6 opacity-70">
+<div class="w-10 h-24 bg-primary-fixed-dim rounded-t-xl mx-2 shadow-[2px_0_5px_rgba(0,0,0,0.1),inset_2px_2px_4px_rgba(255,255,255,0.5)]"></div>
+<div class="w-10 h-32 bg-primary-fixed-dim rounded-t-xl mx-2 shadow-[2px_0_5px_rgba(0,0,0,0.1),inset_2px_2px_4px_rgba(255,255,255,0.5)]"></div>
+<div class="w-10 h-20 bg-primary-fixed-dim rounded-t-xl mx-2 shadow-[2px_0_5px_rgba(0,0,0,0.1),inset_2px_2px_4px_rgba(255,255,255,0.5)]"></div>
+<div class="w-10 h-48 bg-primary-fixed-dim rounded-t-xl mx-2 shadow-[2px_0_5px_rgba(0,0,0,0.1),inset_2px_2px_4px_rgba(255,255,255,0.5)]"></div>
+<div class="w-10 h-40 bg-primary-fixed-dim rounded-t-xl mx-2 shadow-[2px_0_5px_rgba(0,0,0,0.1),inset_2px_2px_4px_rgba(255,255,255,0.5)]"></div>
+<div class="w-10 h-16 bg-primary-fixed-dim rounded-t-xl mx-2 shadow-[2px_0_5px_rgba(0,0,0,0.1),inset_2px_2px_4px_rgba(255,255,255,0.5)]"></div>
+<div class="w-10 h-28 bg-primary-fixed-dim rounded-t-xl mx-2 shadow-[2px_0_5px_rgba(0,0,0,0.1),inset_2px_2px_4px_rgba(255,255,255,0.5)]"></div>
+</div>
+<div class="hardware-outset px-6 py-3 rounded-full relative z-10 metal-texture">
+<p class="font-body-md text-body-md text-on-secondary-container font-bold" style="text-shadow: 1px 1px 0 rgba(255,255,255,0.8);">Weekly Usage Overview</p>
+</div>
+</div>
+</div>
+</div>
+</main>
+</div>
+</body></html>
