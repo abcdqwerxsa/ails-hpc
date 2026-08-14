@@ -53,6 +53,23 @@ func NewNodeServiceWithApplier(client *slurmrest.Client, apply func(name, state,
 	}
 }
 
+// parseGpuGres 从 Slurm GRES 字符串里提取 GPU 数量。
+// 形如 "gpu:1"、"gpu:1(S:0-0)"、"gpu:0"、""（无 GPU）。多 GRES 类型时只取 gpu。
+func parseGpuGres(gres string) int {
+	idx := strings.Index(gres, "gpu:")
+	if idx < 0 {
+		return 0
+	}
+	n := 0
+	for _, ch := range gres[idx+4:] {
+		if ch < '0' || ch > '9' {
+			break
+		}
+		n = n*10 + int(ch-'0')
+	}
+	return n
+}
+
 // refreshLocked 从 slurmrestd 拉取真实节点并合并进缓存，保留本地 DRAIN 覆盖与 Reason
 // （scontrol 下发后 slurmrestd 可能尚未反映）。调用方需持 s.mu。
 //
@@ -87,6 +104,8 @@ func (s *nodeServiceImpl) refreshLocked() error {
 					if sn.Cores > 0 { existing.Cores = sn.Cores }
 					existing.AllocCPUs = sn.AllocCPUs
 					existing.AllocMemory = sn.AllocMemory
+					existing.Gpus = parseGpuGres(sn.Gres)
+					existing.AllocGpus = parseGpuGres(sn.GresUsed)
 				} else {
 					s.nodes[sn.Name] = &NodeStateInfo{
 						Name:        sn.Name,
@@ -96,6 +115,8 @@ func (s *nodeServiceImpl) refreshLocked() error {
 						RealMemory:  sn.RealMemory,
 						AllocMemory: sn.AllocMemory,
 						Cores:       sn.Cores,
+						Gpus:        parseGpuGres(sn.Gres),
+						AllocGpus:   parseGpuGres(sn.GresUsed),
 					}
 				}
 			}
@@ -103,7 +124,7 @@ func (s *nodeServiceImpl) refreshLocked() error {
 		}
 
 		// 当 SlurmRESTd 连通但 Nodes 列表为空时，从 sinfo 命令行拉取集群真实节点
-		out, sinfoErr := slurmrest.RunInSlurmctld("sinfo", "-N", "-h", "-o", "%N|%t|%c|%m")
+		out, sinfoErr := slurmrest.RunInSlurmctld("sinfo", "-N", "-h", "-o", "%N|%t|%c|%m|%G")
 		if sinfoErr == nil && len(out) > 0 {
 			lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 			for _, line := range lines {
@@ -113,6 +134,10 @@ func (s *nodeServiceImpl) refreshLocked() error {
 					state := strings.ToUpper(strings.TrimSpace(parts[1]))
 					cpus, _ := strconv.Atoi(strings.TrimSpace(parts[2]))
 					mem, _ := strconv.Atoi(strings.TrimSpace(parts[3]))
+					gpus := 0
+					if len(parts) >= 5 {
+						gpus = parseGpuGres(strings.TrimSpace(parts[4]))
+					}
 
 					if cpus <= 0 { cpus = 8 }
 					if mem <= 0 { mem = 3000 }
@@ -121,12 +146,14 @@ func (s *nodeServiceImpl) refreshLocked() error {
 						if existing.State != "DRAIN" { existing.State = state }
 						existing.CPUs = cpus
 						existing.RealMemory = mem
+						existing.Gpus = gpus
 					} else {
 						s.nodes[name] = &NodeStateInfo{
 							Name:       name,
 							State:      state,
 							CPUs:       cpus,
 							RealMemory: mem,
+							Gpus:       gpus,
 						}
 					}
 				}
@@ -156,6 +183,8 @@ func (s *nodeServiceImpl) ListNodes(ctx context.Context) ([]*NodeStateInfo, erro
 			RealMemory:  n.RealMemory,
 			AllocMemory: n.AllocMemory,
 			Cores:       n.Cores,
+			Gpus:        n.Gpus,
+			AllocGpus:   n.AllocGpus,
 			Reason:      n.Reason,
 		})
 	}

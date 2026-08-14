@@ -50,6 +50,9 @@ function OverviewPage() {
   const pending = jobs.filter((j) => (j.job_state || '').toUpperCase() === 'PENDING').length;
   const cpuPct = cpuTot > 0 ? Math.round((cpuAlloc / cpuTot) * 100) : 0;
   const memPct = memTot > 0 ? Math.round((memAlloc / memTot) * 100) : 0;
+  const gpuAlloc = nodes.reduce((s, n) => s + (n.alloc_gpus || 0), 0);
+  const gpuTot = nodes.reduce((s, n) => s + (n.gpus || 0), 0);
+  const gpuPct = gpuTot > 0 ? Math.round((gpuAlloc / gpuTot) * 100) : 0;
 
   return (
     <div>
@@ -68,6 +71,7 @@ function OverviewPage() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
         <Gauge label="CPU 占用" alloc={cpuAlloc} tot={cpuTot} pct={cpuPct} unit="核" color="#3b82f6" />
         <Gauge label="内存占用" alloc={memAlloc} tot={memTot} pct={memPct} unit="MB" color="#10b981" />
+        {gpuTot > 0 && <Gauge label="GPU 占用" alloc={gpuAlloc} tot={gpuTot} pct={gpuPct} unit="卡" color="#a855f7" />}
       </div>
 
       {release && <div style={{ color: 'var(--text-muted,#94a3b8)', fontSize: '0.85rem' }}>Slurm 版本：{release}</div>}

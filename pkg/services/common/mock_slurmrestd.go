@@ -78,6 +78,8 @@ func NewMockSlurmServer() *MockSlurmServer {
 					"cpus":        64,
 					"real_memory": 128000,
 					"cores":       32,
+					"gres":        "gpu:1",
+					"gres_used":   "gpu:0",
 				},
 				{
 					"name":        "node2",

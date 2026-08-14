@@ -320,6 +320,8 @@ type NodesResponse struct {
 		RealMemory  int      `json:"real_memory"`
 		AllocMemory int      `json:"alloc_memory"`
 		Cores       int      `json:"cores"`
+		Gres        string   `json:"gres"`     // 配置的 GRES，如 "gpu:1"（无 GPU 为空）
+		GresUsed    string   `json:"gres_used"` // 已占用的 GRES，如 "gpu:0"
 	} `json:"nodes"`
 }
 

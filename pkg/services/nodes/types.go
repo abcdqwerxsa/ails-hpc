@@ -11,6 +11,8 @@ type NodeStateInfo struct {
 	RealMemory  int       `json:"real_memory"`
 	AllocMemory int       `json:"alloc_memory"`
 	Cores       int       `json:"cores"`
+	Gpus        int       `json:"gpus"`        // 配置的 GPU 数（来自 gres "gpu:N"）
+	AllocGpus   int       `json:"alloc_gpus"`  // 已占用 GPU 数（来自 gres_used）
 	Reason      string    `json:"reason,omitempty"`
 	UpdatedAt   time.Time `json:"updated_at,omitempty"`
 	UserDrained bool      `json:"-"`

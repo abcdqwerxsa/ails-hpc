@@ -59,6 +59,8 @@ export interface NodeStateInfo {
   real_memory: number;
   alloc_memory: number;
   cores: number;
+  gpus: number; // 配置 GPU 数（来自 gres gpu:N）
+  alloc_gpus: number; // 已占用 GPU 数
   reason?: string;
 }
 export interface NodesListResponse {
