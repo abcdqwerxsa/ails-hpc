@@ -62,6 +62,11 @@ function RootLayout() {
               </Link>
             </li>
             <li className="nav-item">
+              <Link to="/monitor" activeProps={{ className: 'active' }}>
+                集群监控
+              </Link>
+            </li>
+            <li className="nav-item">
               <Link to="/nodes" activeProps={{ className: 'active' }}>
                 节点状态
               </Link>

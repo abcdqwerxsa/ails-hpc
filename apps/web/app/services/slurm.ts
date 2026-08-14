@@ -87,6 +87,7 @@ export interface JobSummary {
   nodes: string;
   time_limit: number;
   submit_time: number;
+  owner?: string; // 提交者 clusterUser（slurm account 回填）
 }
 export interface JobListResponse {
   code?: number;

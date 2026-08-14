@@ -22,6 +22,15 @@ const emptyForm = {
   script: '#!/bin/bash\nsleep 30\n',
 };
 
+// 作业状态过滤选项（值对齐 job_state 大写形式）
+const FILTERS: { label: string; value: string }[] = [
+  { label: '全部', value: 'ALL' },
+  { label: 'RUNNING', value: 'RUNNING' },
+  { label: 'PENDING', value: 'PENDING' },
+  { label: 'COMPLETED', value: 'COMPLETED' },
+  { label: 'FAILED', value: 'FAILED' },
+];
+
 function JobsPage() {
   const [jobs, setJobs] = useState<JobSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -30,6 +39,7 @@ function JobsPage() {
   const [form, setForm] = useState(emptyForm);
   const [submitting, setSubmitting] = useState(false);
   const [acting, setActing] = useState('');
+  const [filter, setFilter] = useState('ALL');
 
   const refresh = useCallback(async () => {
     try {
@@ -95,6 +105,9 @@ function JobsPage() {
 
   const field = (k: keyof typeof emptyForm) => (e: ChangeEvent<HTMLInputElement>) => setForm({ ...form, [k]: e.target.value });
 
+  // 按状态过滤渲染的作业（filter==='ALL' 或 job_state 大写匹配）
+  const visibleJobs = jobs.filter((j) => filter === 'ALL' || (j.job_state || '').toUpperCase() === filter);
+
   return (
     <div>
       <h2 style={{ marginTop: 0, marginBottom: '1rem' }}>作业管理</h2>
@@ -132,10 +145,38 @@ function JobsPage() {
         <button className="btn-primary" onClick={refresh} style={{ padding: '0.3rem 0.9rem' }}>刷新</button>
       </div>
 
+      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
+        {FILTERS.map((f) => {
+          const active = filter === f.value;
+          return (
+            <button
+              key={f.value}
+              onClick={() => setFilter(f.value)}
+              style={{
+                background: 'var(--card-bg)',
+                boxShadow: 'var(--shadow-btn)',
+                border: `1px solid ${active ? 'var(--accent-primary)' : 'transparent'}`,
+                borderRadius: 8,
+                padding: '0.3rem 0.8rem',
+                fontSize: '0.8rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+                color: active ? 'var(--accent-primary)' : 'var(--text-main,#f1f5f9)',
+                transition: 'border-color .2s ease, color .2s ease',
+              }}
+            >
+              {f.label}
+            </button>
+          );
+        })}
+      </div>
+
       {loading ? (
         <div style={{ color: 'var(--text-muted,#888)' }}>加载中…</div>
       ) : jobs.length === 0 ? (
         <div style={{ color: 'var(--text-muted,#888)' }}>当前无作业。</div>
+      ) : visibleJobs.length === 0 ? (
+        <div style={{ color: 'var(--text-muted,#888)' }}>无匹配条件的作业。</div>
       ) : (
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
@@ -143,18 +184,21 @@ function JobsPage() {
               <tr style={{ textAlign: 'left', color: 'var(--text-muted,#94a3b8)', borderBottom: '1px solid var(--border-color,#2a2f3a)' }}>
                 <th style={th}>ID</th>
                 <th style={th}>名称</th>
+                <th style={th}>用户</th>
                 <th style={th}>分区</th>
                 <th style={th}>状态</th>
                 <th style={th}>节点</th>
                 <th style={th}>时限</th>
+                <th style={th}>提交时间</th>
                 <th style={th}>操作</th>
               </tr>
             </thead>
             <tbody>
-              {jobs.map((j) => (
+              {visibleJobs.map((j) => (
                 <tr key={j.job_id} style={{ borderBottom: '1px solid var(--border-color,#2a2f3a)' }}>
                   <td style={td}>{j.job_id}</td>
                   <td style={td}>{j.name}</td>
+                  <td style={td}>{j.owner || '-'}</td>
                   <td style={td}>{j.partition}</td>
                   <td style={td}>
                     <span style={{ padding: '0.15rem 0.5rem', borderRadius: 6, fontSize: '0.72rem', fontWeight: 700, color: '#fff', background: jobStateColor(j.job_state) }}>
@@ -163,6 +207,7 @@ function JobsPage() {
                   </td>
                   <td style={td}>{j.nodes || '-'}</td>
                   <td style={td}>{j.time_limit || '-'}</td>
+                  <td style={td}>{j.submit_time ? new Date(j.submit_time * 1000).toLocaleString() : '-'}</td>
                   <td style={{ ...td, display: 'flex', gap: '0.4rem' }}>
                     <MiniBtn disabled={!!acting} onClick={() => act(j.job_id, 'cancel')}>取消</MiniBtn>
                     <MiniBtn disabled={!!acting} onClick={() => act(j.job_id, 'hold')}>挂起</MiniBtn>
