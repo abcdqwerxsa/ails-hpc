@@ -123,7 +123,7 @@ for r in recs:
 
         echo "Starting slurmrestd API daemon with SLURM_JWT=daemon on port 6820..."
         export SLURM_JWT=daemon
-        gosu hpcuser /usr/sbin/slurmrestd -a rest_auth/jwt -f /etc/slurm/slurm.conf 0.0.0.0:6820 &
+        gosu hpcuser /usr/sbin/slurmrestd -a rest_auth/local,rest_auth/jwt -a rest_auth/jwt -f /etc/slurm/slurm.conf 0.0.0.0:6820 &
         
         echo "Slurmctld and SlurmRESTd services initialized successfully."
         exec tail -f /var/log/slurm/slurmctld.log

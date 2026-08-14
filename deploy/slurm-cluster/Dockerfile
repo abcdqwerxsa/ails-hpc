@@ -59,8 +59,7 @@ RUN groupadd -g 1001 hpcuser && \
 RUN mkdir -p /var/spool/slurmctld /var/spool/slurmd /var/log/slurm /var/run/slurm /shared /etc/slurm \
     && chown -R slurm:slurm /var/spool/slurmctld /var/spool/slurmd /var/log/slurm /var/run/slurm /etc/slurm \
     && mkdir -p /etc/munge /var/log/munge /var/lib/munge /var/run/munge \
-    && chown -R munge:munge /etc/munge /var/log/munge /var/lib/munge /var/run/munge \
-    && chmod 1777 /shared
+    && chown -R munge:munge /etc/munge /var/log/munge /var/lib/munge /var/run/munge
 
 WORKDIR /shared
 
