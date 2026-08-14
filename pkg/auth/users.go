@@ -44,6 +44,8 @@ type UserStore interface {
 	Lookup(username string) (*User, bool)
 	// Verify 校验用户名+密码，成功返回该用户，失败返回 ErrInvalidCredentials。
 	Verify(username, password string) (*User, error)
+	// ListUsers 全量用户（多租户 scope 解析租户成员用；DB 库未来同面实现）。
+	ListUsers() []*User
 }
 
 type userStoreImpl struct {
@@ -71,6 +73,14 @@ func LoadUserStore(path string) (UserStore, error) {
 		return nil, err
 	}
 	return NewUserStoreFromList(uf.Users), nil
+}
+
+func (s *userStoreImpl) ListUsers() []*User {
+	out := make([]*User, 0, len(s.users))
+	for _, u := range s.users {
+		out = append(out, u)
+	}
+	return out
 }
 
 func (s *userStoreImpl) Lookup(username string) (*User, bool) {

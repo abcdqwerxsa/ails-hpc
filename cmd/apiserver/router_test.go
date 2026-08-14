@@ -31,6 +31,27 @@ func (zeroSacctFetcher) Query(ctx context.Context, user string, start, end time.
 	return nil, nil
 }
 
+// captureFetcher 记录传给 sacct 的 user 参数并返回固定行（计费 scope 断言用）。
+type captureFetcher struct {
+	gotUser []string
+	rows    []billing.SacctRow
+}
+
+func (f *captureFetcher) Query(ctx context.Context, user string, start, end time.Time) ([]billing.SacctRow, error) {
+	f.gotUser = append(f.gotUser, user)
+	if user == "" {
+		return f.rows, nil // 空 user = 全量（同 sacct 不带 --user）
+	}
+	// 忠实效仿 sacct --user=：服务端按用户过滤
+	out := make([]billing.SacctRow, 0, len(f.rows))
+	for _, r := range f.rows {
+		if r.User == user {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
 // setupTestRouter 构造一个接入真实 NewRouter 的测试路由：
 //   - 内存四角色用户库（admin/member/tenant_admin/ops，明文 *123）
 //   - common.MockSlurmServer 承载 slurmrestd v0.0.37 调用
@@ -44,7 +65,11 @@ func setupTestRouter(t *testing.T) (*gin.Engine, *common.MockSlurmServer) {
 	t.Cleanup(mock.Close)
 
 	slurmClient := slurmrest.NewClient(mock.URL, "hpcuser", "test-token")
-	billingService := billing.NewBillingServiceWithFetcher(zeroSacctFetcher{})
+	fetcher := &captureFetcher{rows: []billing.SacctRow{
+		{JobID: "1", User: "ailsmember", Account: "ailsmember", ElapsedRaw: 3600, AllocCPUS: 2},
+		{JobID: "2", User: "ailsother", Account: "ailsother", ElapsedRaw: 3600, AllocCPUS: 4},
+	}}
+	billingService := billing.NewBillingServiceWithFetcher(fetcher)
 
 	store := auth.NewUserStoreFromList([]auth.User{
 		{Username: "admin", PasswordHash: hashPw("admin123"), Role: auth.RoleSystemAdmin, OrgSlug: "hpc-lab", TenantNS: "default", ClusterUser: "ailsadmin", Account: "ailsadmin"},
@@ -59,7 +84,15 @@ func setupTestRouter(t *testing.T) (*gin.Engine, *common.MockSlurmServer) {
 		Nodes:      nodes.NewNodeHandler(nodes.NewNodeServiceWithApplier(slurmClient, func(string, string, string) error { return nil })),
 		Jobs:       jobs.NewJobHandler(jobs.NewJobService(slurmClient)),
 		Containers: containers.NewContainerHandler(containers.NewContainerService(slurmClient)),
-		Billing:    billing.NewBillingHandler(billingService),
+				Billing: billing.NewBillingHandlerWithScope(billingService, func(tenant string) ([]string, error) {
+			var members []string
+			for _, u := range store.ListUsers() {
+				if u.OrgSlug == tenant {
+					members = append(members, u.ClusterUser)
+				}
+			}
+			return members, nil
+		}),
 	}
 	return NewRouter(h), mock
 }
@@ -214,6 +247,62 @@ func TestRouter_L4ControlAuthz(t *testing.T) {
 	if got := mock.LastControlUser(); got != "root" {
 		t.Errorf("override control acting user = %q, want \"root\"", got)
 	}
+}
+
+
+// TestRouter_BillingScope 多租户 Phase 0：计费读按登录者收口。
+//   - member 带 ?user=他人 → 无视 query，强制本人（修复"可读任意用户账单"漏洞）
+//   - tenant_admin ?user= 跨租户 → 403
+//   - tenant_admin 缺省 → 全量拉取后按本租户成员过滤（响应只含本租户用户）
+func TestRouter_BillingScope(t *testing.T) {
+	r, _ := setupTestRouter(t)
+	// clusterUser 与测试用户库对齐（ailsmember ∈ hpc-lab），使 scope 过滤可断言
+	memberTok, _ := auth.GenerateToken("member", auth.RoleMember, "hpc-lab", "default", "ailsmember", "ailsmember")
+	tenantTok := tokenFor(t, auth.RoleTenantAdmin)
+	opsTok := tokenFor(t, auth.RoleOpsAdmin)
+
+	get := func(path, tok string) (int, string) { return doAuth(r, http.MethodGet, path, "", tok) }
+
+	// 1) member 试图读他人：query 被无视，数据只含本维度（fetcher 收到 user="member"）
+	code, body := get("/api/v1/slurm/billing/usage?user=ailsother", memberTok)
+	if code != http.StatusOK {
+		t.Fatalf("member usage: want 200 got %d body=%s", code, body)
+	}
+	if !jsonContains(body, `"user":"ailsmember"`) || jsonContains(body, `"user":"ailsother"`) {
+		t.Errorf("member must be forced to own data only; body=%s", body)
+	}
+
+	// 2) tenant_admin 跨租户 ?user= → 403
+	if code, _ := get("/api/v1/slurm/billing/usage?user=not-in-tenant", tenantTok); code != http.StatusForbidden {
+		t.Errorf("tenant_admin cross-tenant ?user=: want 403 got %d", code)
+	}
+
+	// 3) tenant_admin 缺省：只看到本租户成员（测试库 4 用户全在 hpc-lab → 含 ailsmember 不含外部用户）
+	code, body = get("/api/v1/slurm/billing/usage", tenantTok)
+	if code != http.StatusOK {
+		t.Fatalf("tenant_admin usage: want 200 got %d", code)
+	}
+	if !jsonContains(body, `"user":"ailsmember"`) || jsonContains(body, `"user":"ailsother"`) {
+		t.Errorf("tenant_admin default view must be tenant-scoped; body=%s", body)
+	}
+
+	// 4) ops_admin 不受限
+	if code, _ := get("/api/v1/slurm/billing/usage?user=ailsother", opsTok); code != http.StatusOK {
+		t.Errorf("ops_admin unrestricted: want 200 got %d", code)
+	}
+}
+
+func jsonContains(body, sub string) bool {
+	return len(sub) == 0 || indexOf(body, sub) >= 0
+}
+
+func indexOf(s, sub string) int {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return i
+		}
+	}
+	return -1
 }
 
 // TestRouter_Login 校验登录契约与失败路径

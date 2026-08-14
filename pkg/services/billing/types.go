@@ -8,6 +8,8 @@ type UsageQueryParam struct {
 	EndTime   string `form:"end_time"`
 	Limit     int    `form:"limit"`
 	Format    string `form:"format"`
+	// AllowedUsers 非空时行级后过滤（多租户 scope：tenant_admin 限本租户成员）
+	AllowedUsers []string
 }
 
 // UsageResponse represents the payload returned by GET /api/v1/slurm/billing/usage
@@ -37,6 +39,7 @@ type ExportQueryParam struct {
 	Format  string `form:"format"` // "json" or "chart"
 	User    string `form:"user"`
 	Project string `form:"project"`
+	AllowedUsers []string // 多租户 scope：租户成员后过滤（透传 GetUsage）
 }
 
 // ExportJSONResponse represents the JSON export report payload

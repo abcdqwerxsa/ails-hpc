@@ -50,13 +50,24 @@ func main() {
 	slurmClient := slurmrest.NewClient(cfg.SlurmRESTDURL, cfg.SlurmUserName, "")
 	billingService := billing.NewBillingService(slurmClient)
 
+	// 多租户 Phase 0：租户成员解析器（users.yaml 时代按 orgSlug=租户 派生 clusterUser 清单）
+	tenantResolver := func(tenantSlug string) ([]string, error) {
+		var members []string
+		for _, u := range userStore.ListUsers() {
+			if u.OrgSlug == tenantSlug {
+				members = append(members, u.ClusterUser)
+			}
+		}
+		return members, nil
+	}
+
 	handlers := Handlers{
 		Auth:       auth.NewAuthHandler(userStore),
 		Cluster:    cluster.NewClusterHandler(cluster.NewClusterService(slurmClient)),
 		Nodes:      nodes.NewNodeHandler(nodes.NewNodeService(slurmClient)),
 		Jobs:       jobs.NewJobHandler(jobs.NewJobService(slurmClient)),
 		Containers: containers.NewContainerHandler(containers.NewContainerService(slurmClient)),
-		Billing:    billing.NewBillingHandler(billingService),
+		Billing:    billing.NewBillingHandlerWithScope(billingService, tenantResolver),
 		Monitor:    monitor.NewMonitorHandler(monitor.NewMonitorService(slurmClient)),
 	}
 

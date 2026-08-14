@@ -107,6 +107,22 @@ func (s *billingService) GetUsage(ctx context.Context, param UsageQueryParam) (*
 		}
 		rows = filtered
 	}
+	// 多租户 scope：tenant_admin 限本租户成员（member 已在 handler 层强制 ?user=本人，
+	// 无需列表过滤）。空 User 拉全量后按清单收口。
+	if len(param.AllowedUsers) > 0 {
+		allowed := make(map[string]bool, len(param.AllowedUsers))
+		for _, u := range param.AllowedUsers {
+			allowed[u] = true
+		}
+		filtered := rows[:0]
+		for _, r := range rows {
+			if allowed[r.User] {
+				filtered = append(filtered, r)
+			}
+		}
+		rows = filtered
+	}
+
 	if param.Limit > 0 && len(rows) > param.Limit {
 		rows = rows[:param.Limit]
 	}
@@ -165,7 +181,7 @@ func breakdownByUserAccount(rows []SacctRow) []UsageBreakdown {
 }
 
 func (s *billingService) ExportReport(ctx context.Context, param ExportQueryParam) (interface{}, error) {
-	usage, err := s.GetUsage(ctx, UsageQueryParam{User: param.User, Project: param.Project})
+	usage, err := s.GetUsage(ctx, UsageQueryParam{User: param.User, Project: param.Project, AllowedUsers: param.AllowedUsers})
 	if err != nil {
 		return nil, err
 	}
