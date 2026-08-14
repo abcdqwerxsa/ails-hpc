@@ -15,6 +15,7 @@ import (
 	"ails-hpc/pkg/services/cluster"
 	"ails-hpc/pkg/services/containers"
 	"ails-hpc/pkg/services/jobs"
+	"ails-hpc/pkg/services/monitor"
 	"ails-hpc/pkg/services/nodes"
 	"ails-hpc/pkg/slurmrest"
 )
@@ -56,6 +57,7 @@ func main() {
 		Jobs:       jobs.NewJobHandler(jobs.NewJobService(slurmClient)),
 		Containers: containers.NewContainerHandler(containers.NewContainerService(slurmClient)),
 		Billing:    billing.NewBillingHandler(billingService),
+		Monitor:    monitor.NewMonitorHandler(monitor.NewMonitorService(slurmClient)),
 	}
 
 	r := NewRouter(handlers)
