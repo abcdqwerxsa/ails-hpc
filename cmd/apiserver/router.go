@@ -8,6 +8,7 @@ import (
 	"ails-hpc/pkg/services/cluster"
 	"ails-hpc/pkg/services/containers"
 	"ails-hpc/pkg/services/jobs"
+	"ails-hpc/pkg/services/monitor"
 	"ails-hpc/pkg/services/nodes"
 
 	"github.com/gin-gonic/gin"
@@ -21,6 +22,7 @@ type Handlers struct {
 	Jobs       *jobs.JobHandler
 	Containers *containers.ContainerHandler
 	Billing    *billing.BillingHandler
+	Monitor    *monitor.MonitorHandler
 }
 
 // NewRouter 装配整套路由：CORS、公开登录端点、JWT 保护的 /api/v1 组，
@@ -50,6 +52,7 @@ func NewRouter(h Handlers) *gin.Engine {
 		slurm.GET("/nodes", h.Nodes.GetNodes)
 		slurm.GET("/jobs", h.Jobs.ListJobs)
 		slurm.GET("/partitions", h.Cluster.GetPartitions)
+		slurm.GET("/monitor/snapshot", h.Monitor.GetSnapshot)
 
 		// 管理员独占：节点 DRAIN/RESUME
 		slurm.POST("/nodes/:name/state", auth.RequireRole(auth.RoleSystemAdmin), h.Nodes.UpdateNodeState)

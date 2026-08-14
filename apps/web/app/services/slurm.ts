@@ -166,6 +166,22 @@ export interface PartitionsResponse {
   partitions: Partition[];
 }
 
+export interface MonitorResource {
+  alloc: number;
+  total: number;
+}
+export interface MonitorDisk {
+  used_kb: number;
+  total_kb: number;
+  percent: number;
+}
+export interface MonitorSnapshot {
+  cpu: MonitorResource;
+  mem: MonitorResource;
+  gpu: MonitorResource;
+  disk: MonitorDisk;
+}
+
 // 计费（阶段 4）
 export interface BillingUsage {
   user: string;
@@ -209,6 +225,9 @@ export const slurm = {
   getClusterStatus: () => apiFetch<PingResponse>("/slurm/ping"),
 
   getNodes: () => apiFetch<NodesListResponse>("/slurm/nodes"),
+
+  // 监控快照：CPU/内存/GPU 分配 + /shared 磁盘用量（供监控页累积趋势图）
+  getMonitorSnapshot: () => apiFetch<MonitorSnapshot>("/slurm/monitor/snapshot"),
   updateNodeState: (name: string, state: NodeStateOp, reason?: string) =>
     apiFetch<NodeStateUpdateResponse>(
       `/slurm/nodes/${encodeURIComponent(name)}/state`,
