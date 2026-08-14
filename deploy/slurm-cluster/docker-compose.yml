@@ -80,8 +80,14 @@ services:
       - seccomp:unconfined
     cap_add:
       - SYS_ADMIN
+    devices:
+      - /dev/nvidia0:/dev/nvidia0
+      - /dev/nvidiactl:/dev/nvidiactl
+      - /dev/nvidia-uvm:/dev/nvidia-uvm
+      - /dev/nvidia-uvm-tools:/dev/nvidia-uvm-tools
     volumes:
       - ./config/slurm.conf:/etc/slurm/slurm.conf:ro
+      - ./config/gres.conf:/etc/slurm/gres.conf:ro
       - ./config/users.yaml:/etc/slurm/ails-users.yaml:ro
       - shared-storage:/shared
     depends_on:
