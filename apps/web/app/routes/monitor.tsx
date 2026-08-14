@@ -1,14 +1,19 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { slurm, type MonitorSnapshot } from '../services/slurm';
 import { ChartLegend, Donut, LineChart, type LineSeries } from '../components/charts';
 
 export const Route = createFileRoute('/monitor')({ component: MonitorPage });
 
-// 滚动窗口点数（5s × 60 = 近 5 分钟趋势）；客户端累积，无需后端时序存储。
+// 滚动窗口点数（5s × 60 = 近 5 分钟趋势）；客户端累积 + 服务端历史播种。
 const WIN = 60;
-// 门户 accent 配色（CPU=青 / 内存=绿 / GPU=紫 / 磁盘=橙）
-const COL = { cpu: '#06b6d4', mem: '#10b981', gpu: '#a855f7', disk: '#f59e0b' };
+// 门户 accent 配色（CPU=青 / 内存=绿 / GPU=紫 / 磁盘=橙）——引用 CSS 令牌以跟随明暗主题。
+const COL = {
+  cpu: 'var(--accent-primary,#06b6d4)',
+  mem: 'var(--accent-emerald,#10b981)',
+  gpu: 'var(--accent-violet,#A855F7)',
+  disk: 'var(--accent-amber,#F59E0B)',
+};
 
 const pct = (a: number, t: number) => (t > 0 ? Math.min(100, Math.round((a / t) * 100)) : 0);
 const gb = (kb: number) => (kb / 1024 / 1024).toFixed(1);
@@ -30,6 +35,22 @@ function MonitorPage() {
   const [hist, setHist] = useState<Hist>(emptyHist);
   const [err, setErr] = useState('');
   const [status, setStatus] = useState<'UP' | 'DEGRADED' | '…'>('…');
+  const seeded = useRef(false);
+
+  // 挂载时播种服务端持久化趋势（刷新后不丢近 5 分钟）；端点未就绪/失败则静默降级为空启动。
+  useEffect(() => {
+    slurm
+      .getMonitorHistory()
+      .then((h) => {
+        if (seeded.current) return;
+        seeded.current = true;
+        const last = (a?: number[]) => (a || []).slice(-WIN);
+        setHist({ cpu: last(h.cpu), mem: last(h.mem), gpu: last(h.gpu), disk: last(h.disk) });
+      })
+      .catch(() => {
+        /* 后端未部署 /slurm/monitor/history：保持现状（可能已有实时采样点） */
+      });
+  }, []);
 
   useEffect(() => {
     const tick = async () => {
@@ -90,7 +111,7 @@ function MonitorPage() {
         </div>
       )}
 
-      <Section title="资源分配趋势（近 5 分钟 · 客户端累积）">
+      <Section title="资源分配趋势（近 5 分钟）">
         <LineChart series={series} />
         <ChartLegend series={series} />
       </Section>

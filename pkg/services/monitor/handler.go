@@ -32,3 +32,9 @@ func (h *MonitorHandler) GetSnapshot(c *gin.Context) {
 		Disk: snap.Disk,
 	})
 }
+
+// GetHistory GET /api/v1/slurm/monitor/history —— 服务端滚动趋势（≤360 点，进程内存态）。
+// 供监控页刷新后播种趋势图，不因页面刷新丢失窗口。
+func (h *MonitorHandler) GetHistory(c *gin.Context) {
+	c.JSON(http.StatusOK, h.service.History())
+}
