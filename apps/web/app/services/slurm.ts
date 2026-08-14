@@ -182,7 +182,24 @@ export interface MonitorSnapshot {
   disk: MonitorDisk;
 }
 
+// 监控趋势持久化历史（服务端累积，0-100 百分比，旧→新，≤360 点）
+export interface MonitorHistory {
+  timestamps: number[];
+  cpu: number[];
+  mem: number[];
+  gpu: number[];
+  disk: number[];
+}
+
 // 计费（阶段 4）
+export interface BreakdownRow {
+  user: string;
+  account: string;
+  cpu_hours: number;
+  mem_gb_hours: number;
+  gpu_hours: number;
+  job_count: number;
+}
 export interface BillingUsage {
   user: string;
   project: string;
@@ -191,6 +208,7 @@ export interface BillingUsage {
   total_gpu_hours: number;
   job_count: number;
   container_count: number;
+  breakdown?: BreakdownRow[];
 }
 export interface BillingExportJSON {
   format: string;
@@ -228,6 +246,8 @@ export const slurm = {
 
   // 监控快照：CPU/内存/GPU 分配 + /shared 磁盘用量（供监控页累积趋势图）
   getMonitorSnapshot: () => apiFetch<MonitorSnapshot>("/slurm/monitor/snapshot"),
+  // 监控趋势历史（服务端持久化；后端未部署时调用方静默降级为空启动）
+  getMonitorHistory: () => apiFetch<MonitorHistory>("/slurm/monitor/history"),
   updateNodeState: (name: string, state: NodeStateOp, reason?: string) =>
     apiFetch<NodeStateUpdateResponse>(
       `/slurm/nodes/${encodeURIComponent(name)}/state`,

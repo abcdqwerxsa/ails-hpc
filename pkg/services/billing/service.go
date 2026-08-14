@@ -3,6 +3,7 @@ package billing
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -120,7 +121,47 @@ func (s *billingService) GetUsage(ctx context.Context, param UsageQueryParam) (*
 		TotalGPUHours:      round(gpuHrs),
 		JobCount:           jobCount,
 		ContainerCount:     0, // SACCT 无容器概念，如实为 0
+		Breakdown:          breakdownByUserAccount(rows),
 	}, nil
+}
+
+// breakdownByUserAccount 将与总量聚合相同的 sacct 行按 (User, Account) 二次聚合，
+// 复用 aggregate 的小时换算（ElapsedRaw→h、parseReqMemMB、parseTRESGPU），
+// 按 CPU 时长降序排序。空行集返回空切片（JSON 里为 []）。
+func breakdownByUserAccount(rows []SacctRow) []UsageBreakdown {
+	type key struct{ user, account string }
+	acc := make(map[key]*UsageBreakdown, len(rows))
+	for _, r := range rows {
+		k := key{r.User, r.Account}
+		b, ok := acc[k]
+		if !ok {
+			b = &UsageBreakdown{User: r.User, Account: r.Account}
+			acc[k] = b
+		}
+		hrs := float64(r.ElapsedRaw) / 3600.0
+		b.CpuHours += hrs * float64(r.AllocCPUS)
+		b.MemGBHours += hrs * (parseReqMemMB(r.ReqMem) / 1024.0)
+		b.GpuHours += hrs * float64(parseTRESGPU(r.AllocTRES))
+		b.JobCount++
+	}
+	out := make([]UsageBreakdown, 0, len(acc))
+	for _, b := range acc {
+		b.CpuHours = round(b.CpuHours)
+		b.MemGBHours = round(b.MemGBHours)
+		b.GpuHours = round(b.GpuHours)
+		out = append(out, *b)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CpuHours != out[j].CpuHours {
+			return out[i].CpuHours > out[j].CpuHours
+		}
+		// 稳定兜底：数值并列时按 (user, account) 字典序，保证输出确定
+		if out[i].User != out[j].User {
+			return out[i].User < out[j].User
+		}
+		return out[i].Account < out[j].Account
+	})
+	return out
 }
 
 func (s *billingService) ExportReport(ctx context.Context, param ExportQueryParam) (interface{}, error) {

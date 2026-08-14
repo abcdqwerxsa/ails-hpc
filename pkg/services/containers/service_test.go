@@ -19,6 +19,7 @@ type fakeJobsAPI struct {
 	submitErr  error
 	jobs       *slurmrest.JobsResponse
 	cancelled  []int
+	cancelActAs string
 	cancelErr  error
 }
 
@@ -36,8 +37,9 @@ func (f *fakeJobsAPI) GetJobs() (*slurmrest.JobsResponse, error) {
 	}
 	return f.jobs, nil
 }
-func (f *fakeJobsAPI) CancelJob(jobID int) error {
+func (f *fakeJobsAPI) CancelJobAs(jobID int, actAs string) error {
 	f.cancelled = append(f.cancelled, jobID)
+	f.cancelActAs = actAs
 	return f.cancelErr
 }
 
@@ -193,7 +195,7 @@ func TestRecycleContainer_CancelsJobAndDeletesMeta(t *testing.T) {
 	meta := &fakeMeta{m: map[string]containers.SessionMeta{"aaa": {SessionID: "aaa", JobID: 1001}}}
 	svc := newSvc(jobs, meta)
 
-	if _, err := svc.RecycleContainer(context.Background(), "aaa"); err != nil {
+	if _, err := svc.RecycleContainer(context.Background(), "aaa", "ailsmember"); err != nil {
 		t.Fatal(err)
 	}
 	if len(jobs.cancelled) != 1 || jobs.cancelled[0] != 1001 {
@@ -206,7 +208,7 @@ func TestRecycleContainer_CancelsJobAndDeletesMeta(t *testing.T) {
 
 func TestRecycleContainer_NotFound(t *testing.T) {
 	svc := newSvc(&fakeJobsAPI{}, &fakeMeta{m: map[string]containers.SessionMeta{}})
-	_, err := svc.RecycleContainer(context.Background(), "ghost")
+	_, err := svc.RecycleContainer(context.Background(), "ghost", "")
 	if !errors.Is(err, containers.ErrContainerNotFound) {
 		t.Fatalf("want ErrContainerNotFound, got %v", err)
 	}

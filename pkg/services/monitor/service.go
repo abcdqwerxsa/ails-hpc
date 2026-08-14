@@ -8,6 +8,8 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"ails-hpc/pkg/services/nodes"
 	"ails-hpc/pkg/slurmrest"
@@ -15,6 +17,12 @@ import (
 
 // ErrSlurmUnavailable 节点数据源不可用。
 var ErrSlurmUnavailable = errors.New("monitor: slurm unavailable")
+
+// 采样与历史默认参数：5s 一采，保留 360 点（约 30 分钟趋势）。
+const (
+	defaultSampleInterval = 5 * time.Second
+	defaultHistoryCap     = 360
+)
 
 // nodeProvider 隔离节点列表来源，便于测试注入。
 type nodeProvider interface {
@@ -27,24 +35,145 @@ type diskProvider func() (usedKB, totalKB, percent int)
 // Service 是监控快照服务接口。
 type Service interface {
 	Snapshot(ctx context.Context) (*Snapshot, error)
+	// History 返回进程内滚动趋势（oldest→newest，最多 360 点，拷贝）。
+	History() MonitorHistory
+}
+
+// sample 是一个历史采样点：unix 时间戳 + 四类资源的百分比。
+type sample struct {
+	ts         int64
+	cpu, mem   int
+	gpu, diskP int
 }
 
 type serviceImpl struct {
 	nodes nodeProvider
 	disk  diskProvider
+
+	// mu 保护 samples（采样 goroutine 写、History 读）。
+	mu         sync.Mutex
+	samples    []sample // oldest→newest，上限 historyCap
+	historyCap int
+
+	// 采样 goroutine 生命周期（仅 StartSampler 后非 nil）。
+	stopCh  chan struct{}
+	doneCh  chan struct{}
+	stopped bool
 }
 
 // NewMonitorService 用真实 slurmrestd 客户端构造：节点走 nodes 服务，磁盘走 df /shared。
+// 生产构造：自动启动后台采样（5s 间隔，360 点滚动历史）。
 func NewMonitorService(client *slurmrest.Client) Service {
-	return &serviceImpl{
-		nodes: nodes.NewNodeService(client),
-		disk:  querySharedDisk,
+	s := &serviceImpl{
+		nodes:      nodes.NewNodeService(client),
+		disk:       querySharedDisk,
+		historyCap: defaultHistoryCap,
+	}
+	s.StartSampler(defaultSampleInterval)
+	return s
+}
+
+// NewMonitorServiceWithDeps 注入节点来源与磁盘查询（测试用）。不自动启动采样，
+// 由测试自行调用 StartSampler（可用短间隔）以获得确定性。
+func NewMonitorServiceWithDeps(n nodeProvider, disk diskProvider) Service {
+	return &serviceImpl{nodes: n, disk: disk, historyCap: defaultHistoryCap}
+}
+
+// StartSampler 启动后台采样 goroutine（幂等；重复调用无效果）。
+// interval <= 0 时用默认 5s。每拍调用 Snapshot，失败则跳过该拍（保持运行）。
+// 用 StopSampler 停止；历史在停止后仍可读。
+func (s *serviceImpl) StartSampler(interval time.Duration) {
+	if interval <= 0 {
+		interval = defaultSampleInterval
+	}
+	s.mu.Lock()
+	if s.stopCh != nil { // 已在运行
+		s.mu.Unlock()
+		return
+	}
+	s.stopCh = make(chan struct{})
+	s.doneCh = make(chan struct{})
+	s.mu.Unlock()
+	go s.sampleLoop(interval)
+}
+
+// StopSampler 停止采样 goroutine 并等待其退出（幂等）。
+func (s *serviceImpl) StopSampler() {
+	s.mu.Lock()
+	if s.stopCh == nil {
+		s.mu.Unlock()
+		return
+	}
+	if !s.stopped {
+		s.stopped = true
+		close(s.stopCh)
+	}
+	done := s.doneCh
+	s.mu.Unlock()
+	if done != nil {
+		<-done
 	}
 }
 
-// NewMonitorServiceWithDeps 注入节点来源与磁盘查询（测试用）。
-func NewMonitorServiceWithDeps(n nodeProvider, disk diskProvider) Service {
-	return &serviceImpl{nodes: n, disk: disk}
+func (s *serviceImpl) sampleLoop(interval time.Duration) {
+	defer close(s.doneCh)
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-s.stopCh:
+			return
+		case <-t.C:
+			s.recordSample()
+		}
+	}
+}
+
+// recordSample 采一拍：Snapshot 失败直接跳过（下一拍继续），不中断采样循环。
+func (s *serviceImpl) recordSample() {
+	snap, err := s.Snapshot(context.Background())
+	if err != nil {
+		return
+	}
+	sm := sample{
+		ts:    time.Now().Unix(),
+		cpu:   snap.CPU.Pct(),
+		mem:   snap.Mem.Pct(),
+		gpu:   snap.GPU.Pct(),
+		diskP: snap.Disk.Percent,
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.historyCap <= 0 {
+		return
+	}
+	if len(s.samples) >= s.historyCap { // 滚动窗口：挤掉最老的一拍
+		copy(s.samples, s.samples[1:])
+		s.samples = s.samples[:s.historyCap-1]
+	}
+	s.samples = append(s.samples, sm)
+}
+
+// History 返回趋势历史的拷贝（oldest→newest）。空历史返回非 nil 空切片。
+func (s *serviceImpl) History() MonitorHistory {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := len(s.samples)
+	h := MonitorHistory{
+		Timestamps: make([]int64, 0, n),
+		CPU:        make([]int, 0, n),
+		Mem:        make([]int, 0, n),
+		GPU:        make([]int, 0, n),
+		Disk:       make([]int, 0, n),
+	}
+	for _, sm := range s.samples {
+		h.Timestamps = append(h.Timestamps, sm.ts)
+		h.CPU = append(h.CPU, sm.cpu)
+		h.Mem = append(h.Mem, sm.mem)
+		h.GPU = append(h.GPU, sm.gpu)
+		h.Disk = append(h.Disk, sm.diskP)
+	}
+	return h
 }
 
 // Snapshot 聚合集群资源分配 + 共享盘用量。节点不可达时如实返回错误（fail-closed）。
@@ -77,8 +206,9 @@ func (s *serviceImpl) Snapshot(ctx context.Context) (*Snapshot, error) {
 
 // querySharedDisk 通过 docker exec slurmctld df 读取共享卷 /shared 的用量。
 // 输出形如：
-//   1K-blocks     Used Use%
-//   959218776 80960288   9%
+//
+//	1K-blocks     Used Use%
+//	959218776 80960288   9%
 //
 // 失败时 percent 返回 -1 作为哨兵（区别于"空盘 0%"），供前端显示"磁盘不可用"。
 func querySharedDisk() (usedKB, totalKB, percent int) {

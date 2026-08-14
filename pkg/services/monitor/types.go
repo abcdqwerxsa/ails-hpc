@@ -36,6 +36,15 @@ type Snapshot struct {
 	Disk Disk     `json:"disk"`
 }
 
+// MonitorHistory 是监控趋势历史（oldest→newest，最多 360 个采样点，进程内存态）。
+type MonitorHistory struct {
+	Timestamps []int64 `json:"timestamps"` // unix 秒
+	CPU        []int   `json:"cpu"`        // 0-100
+	Mem        []int   `json:"mem"`
+	GPU        []int   `json:"gpu"`
+	Disk       []int   `json:"disk"`
+}
+
 // SnapshotResponse 是 GET /api/v1/slurm/monitor/snapshot 的响应体。
 type SnapshotResponse struct {
 	CPU  Resource `json:"cpu"`

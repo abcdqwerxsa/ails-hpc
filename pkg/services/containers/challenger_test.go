@@ -43,7 +43,7 @@ func TestChallenger_RecycleContainer_FallsBackToJobScan(t *testing.T) {
 	meta := &fakeMeta{m: map[string]containers.SessionMeta{"xyz": {SessionID: "xyz", JobID: 0}}} // 无 jobid
 	svc := newSvc(jobs, meta)
 
-	if _, err := svc.RecycleContainer(context.Background(), "xyz"); err != nil {
+	if _, err := svc.RecycleContainer(context.Background(), "xyz", ""); err != nil {
 		t.Fatalf("recycle via job scan: %v", err)
 	}
 	if len(jobs.cancelled) != 1 || jobs.cancelled[0] != 2002 {
@@ -56,7 +56,7 @@ func TestChallenger_RecycleContainer_CancelError(t *testing.T) {
 	jobs := &fakeJobsAPI{jobs: jobsResp(jrow{id: 1001, name: "jupyter-ide-aaa", state: "RUNNING", submit: 1}), cancelErr: errors.New("rpc")}
 	meta := &fakeMeta{m: map[string]containers.SessionMeta{"aaa": {SessionID: "aaa", JobID: 1001}}}
 	svc := newSvc(jobs, meta)
-	if _, err := svc.RecycleContainer(context.Background(), "aaa"); err == nil {
+	if _, err := svc.RecycleContainer(context.Background(), "aaa", ""); err == nil {
 		t.Fatal("want error when CancelJob fails")
 	}
 }

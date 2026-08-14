@@ -12,13 +12,24 @@ type UsageQueryParam struct {
 
 // UsageResponse represents the payload returned by GET /api/v1/slurm/billing/usage
 type UsageResponse struct {
-	User               string  `json:"user"`
-	Project            string  `json:"project"`
-	TotalCPUHours      float64 `json:"total_cpu_hours"`
-	TotalMemoryGBHours float64 `json:"total_memory_gb_hours"`
-	TotalGPUHours      float64 `json:"total_gpu_hours"`
-	JobCount           int     `json:"job_count"`
-	ContainerCount     int     `json:"container_count"`
+	User               string           `json:"user"`
+	Project            string           `json:"project"`
+	TotalCPUHours      float64          `json:"total_cpu_hours"`
+	TotalMemoryGBHours float64          `json:"total_memory_gb_hours"`
+	TotalGPUHours      float64          `json:"total_gpu_hours"`
+	JobCount           int              `json:"job_count"`
+	ContainerCount     int              `json:"container_count"`
+	Breakdown          []UsageBreakdown `json:"breakdown"`
+}
+
+// UsageBreakdown 是按 (用户, Slurm account) 聚合的用量明细。
+type UsageBreakdown struct {
+	User       string  `json:"user"`
+	Account    string  `json:"account"`
+	CpuHours   float64 `json:"cpu_hours"`
+	MemGBHours float64 `json:"mem_gb_hours"`
+	GpuHours   float64 `json:"gpu_hours"`
+	JobCount   int     `json:"job_count"`
 }
 
 // ExportQueryParam contains query parameters for /api/v1/slurm/billing/export
@@ -30,7 +41,7 @@ type ExportQueryParam struct {
 
 // ExportJSONResponse represents the JSON export report payload
 type ExportJSONResponse struct {
-	Format     string  `json:"format"`      // Always "json"
+	Format     string  `json:"format"` // Always "json"
 	User       string  `json:"user"`
 	Timestamp  string  `json:"timestamp"`   // RFC3339 format
 	TotalCost  float64 `json:"total_cost"`  // Total calculated cost
@@ -56,7 +67,7 @@ type SacctRow struct {
 	Partition  string
 	JobName    string
 	State      string
-	ElapsedRaw int64  // 秒
+	ElapsedRaw int64 // 秒
 	AllocCPUS  int
 	AllocTRES  string // 如 "cpu=4,mem=...,gres/gpu=1,node=1"
 	ReqMem     string // 如 "3000M"、"4G"、"0"

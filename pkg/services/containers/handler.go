@@ -55,6 +55,17 @@ func (h *ContainerHandler) forbidIfNotSessionOwner(c *gin.Context, id string) bo
 	return false
 }
 
+
+// controlActAs 决定回收操作的下发身份（L4）：member 用自己的 clusterUser（Slurm 层
+// 强制令牌身份==会话作业属主）；tenant_admin 越权走 root。
+func controlActAs(c *gin.Context) string {
+	_, role, clusterUser, _ := callerFromCtx(c)
+	if role == auth.RoleMember {
+		return clusterUser
+	}
+	return ""
+}
+
 func (h *ContainerHandler) LaunchContainer(c *gin.Context) {
 	var req ContainerLaunchRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -97,7 +108,7 @@ func (h *ContainerHandler) RecycleContainer(c *gin.Context) {
 		return
 	}
 
-	res, err := h.service.RecycleContainer(c.Request.Context(), id)
+	res, err := h.service.RecycleContainer(c.Request.Context(), id, controlActAs(c))
 	if err != nil {
 		if errors.Is(err, ErrContainerNotFound) {
 			httpx.NotFound(c, err.Error())

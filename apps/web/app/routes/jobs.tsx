@@ -231,9 +231,10 @@ function JobsPage() {
                   <td style={td}>{j.time_limit || '-'}</td>
                   <td style={td}>{j.submit_time ? new Date(j.submit_time * 1000).toLocaleString() : '-'}</td>
                   <td style={{ ...td, display: 'flex', gap: '0.4rem' }}>
-                    <MiniBtn disabled={!!acting} onClick={() => act(j.job_id, 'cancel')}>取消</MiniBtn>
-                    <MiniBtn disabled={!!acting} onClick={() => act(j.job_id, 'hold')}>挂起</MiniBtn>
-                    <MiniBtn disabled={!!acting} onClick={() => act(j.job_id, 'requeue')}>重排</MiniBtn>
+                    {/* 只禁用正在操作的这一行（acting = jobId+kind），其他行不受影响 */}
+                    <MiniBtn disabled={acting.startsWith(String(j.job_id))} onClick={() => act(j.job_id, 'cancel')}>取消</MiniBtn>
+                    <MiniBtn disabled={acting.startsWith(String(j.job_id))} onClick={() => act(j.job_id, 'hold')}>挂起</MiniBtn>
+                    <MiniBtn disabled={acting.startsWith(String(j.job_id))} onClick={() => act(j.job_id, 'requeue')}>重排</MiniBtn>
                   </td>
                 </tr>
               ))}

@@ -25,11 +25,16 @@ export function Donut({ pct, color, label, sub }: { pct: number; color: string; 
               cy="50"
               r={r}
               fill="none"
-              stroke={color}
               strokeWidth="9"
               strokeLinecap="round"
               strokeDasharray={`${dash} ${c - dash}`}
-              style={{ transition: 'stroke-dasharray .4s ease', filter: `drop-shadow(0 0 4px ${color}66)` }}
+              // 颜色走 style 而非 stroke 属性：color 可为 CSS var()（var 在展示属性中无效）。
+              // drop-shadow 内联 var() 同样合法；不追加 66 透明度后缀（对 var() 非法）。
+              style={{
+                stroke: color,
+                transition: 'stroke-dasharray .4s ease',
+                filter: `drop-shadow(0 0 4px ${color})`,
+              }}
             />
           )}
         </svg>
@@ -86,11 +91,12 @@ export function LineChart({ series, height = 200 }: { series: LineSeries[]; heig
             <polyline
               key={s.label}
               fill="none"
-              stroke={s.color}
               strokeWidth="2.5"
               strokeLinejoin="round"
               strokeLinecap="round"
               points={s.data.map((v, i) => `${x(i, s.data.length)},${y(v)}`).join(' ')}
+              // stroke 走 style 以支持 CSS var() 主题色
+              style={{ stroke: s.color }}
             />
           ) : null,
         )}

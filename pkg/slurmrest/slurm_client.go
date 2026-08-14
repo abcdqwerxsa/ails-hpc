@@ -502,31 +502,47 @@ func (c *Client) SubmitJob(req *SlurmJobSubmitReq) (*SlurmJobSubmitResp, error) 
 	return c.SubmitJobAs(req, "")
 }
 
-// CancelJob 通过 DELETE /slurm/v0.0.37/job/{job_id} 取消指定作业
-func (c *Client) CancelJob(jobID int) error {
+// CancelJobAs 以指定 clusterUser（actAs）身份取消作业——Slurm 层强制校验令牌身份与
+// 作业属主一致（L4 控制鉴权）。actAs 为空则退化为 root（管理性越权/系统操作）。
+func (c *Client) CancelJobAs(jobID int, actAs string) error {
 	path := fmt.Sprintf("/slurm/v0.0.37/job/%d", jobID)
-	_, err := c.executeRequestWithBody("DELETE", path, nil)
+	_, err := c.executeRequestAs("DELETE", path, nil, actAs)
 	return err
 }
 
-// HoldJob 通过 POST /slurm/v0.0.37/job/{job_id} 暂停指定作业
-func (c *Client) HoldJob(jobID int) error {
+// CancelJob 以 root 身份取消作业（兼容旧调用方）。
+func (c *Client) CancelJob(jobID int) error {
+	return c.CancelJobAs(jobID, "")
+}
+
+// HoldJobAs 以指定 clusterUser 身份挂起作业（L4：Slurm 校验属主）。actAs 空=root。
+func (c *Client) HoldJobAs(jobID int, actAs string) error {
 	path := fmt.Sprintf("/slurm/v0.0.37/job/%d", jobID)
 	payload := SlurmJobControlReq{
 		Hold:     true,
 		JobState: "HELD",
 	}
-	_, err := c.executeRequestWithBody("POST", path, payload)
+	_, err := c.executeRequestAs("POST", path, payload, actAs)
 	return err
 }
 
-// RequeueJob 通过 POST /slurm/v0.0.37/job/{job_id} 重新入队指定作业
-func (c *Client) RequeueJob(jobID int) error {
+// HoldJob 以 root 身份挂起作业（兼容旧调用方）。
+func (c *Client) HoldJob(jobID int) error {
+	return c.HoldJobAs(jobID, "")
+}
+
+// RequeueJobAs 以指定 clusterUser 身份重排作业（L4）。actAs 空=root。
+func (c *Client) RequeueJobAs(jobID int, actAs string) error {
 	path := fmt.Sprintf("/slurm/v0.0.37/job/%d", jobID)
 	payload := SlurmJobControlReq{
 		Requeue:  true,
 		JobState: "PENDING",
 	}
-	_, err := c.executeRequestWithBody("POST", path, payload)
+	_, err := c.executeRequestAs("POST", path, payload, actAs)
 	return err
+}
+
+// RequeueJob 以 root 身份重排作业（兼容旧调用方）。
+func (c *Client) RequeueJob(jobID int) error {
+	return c.RequeueJobAs(jobID, "")
 }

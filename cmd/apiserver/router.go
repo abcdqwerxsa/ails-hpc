@@ -53,6 +53,7 @@ func NewRouter(h Handlers) *gin.Engine {
 		slurm.GET("/jobs", h.Jobs.ListJobs)
 		slurm.GET("/partitions", h.Cluster.GetPartitions)
 		slurm.GET("/monitor/snapshot", h.Monitor.GetSnapshot)
+		slurm.GET("/monitor/history", h.Monitor.GetHistory)
 
 		// 管理员独占：节点 DRAIN/RESUME
 		slurm.POST("/nodes/:name/state", auth.RequireRole(auth.RoleSystemAdmin), h.Nodes.UpdateNodeState)

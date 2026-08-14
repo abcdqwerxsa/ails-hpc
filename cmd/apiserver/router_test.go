@@ -174,6 +174,48 @@ func TestRouter_PerUserSubmitIdentity(t *testing.T) {
 	}
 }
 
+
+// TestRouter_L4ControlAuthz 控制操作的下发身份（L4）：member 取消自己的作业时，
+// 到 slurmrestd 的请求必须以其 clusterUser 执行（"member"）；tenant_admin 越权取消
+// 走 root（"root"）。mock 按 Slurm 语义执法（非属主非 root → 403）。
+func TestRouter_L4ControlAuthz(t *testing.T) {
+	r, mock := setupTestRouter(t)
+	memberTok := tokenFor(t, auth.RoleMember) // clusterUser="member"
+	tenantTok := tokenFor(t, auth.RoleTenantAdmin)
+
+	sub := func() int {
+		code, body := doAuth(r, http.MethodPost, "/api/v1/slurm/jobs/submit", `{"name":"l4","script":"echo hi"}`, memberTok)
+		if code != http.StatusOK {
+			t.Fatalf("submit: want 200 got %d body=%s", code, body)
+		}
+		var resp struct{ JobID int `json:"job_id"` }
+		_ = json.Unmarshal([]byte(body), &resp)
+		return resp.JobID
+	}
+	cancel := func(id int, tok string) int {
+		c, _ := doAuth(r, http.MethodPost, fmt.Sprintf("/api/v1/slurm/jobs/%d/cancel", id), "", tok)
+		return c
+	}
+
+	// member 取消自己的作业 → 线上身份必须是 "member"（per-user 令牌）
+	id := sub()
+	if c := cancel(id, memberTok); c != http.StatusOK {
+		t.Fatalf("member cancel own: want 200 got %d", c)
+	}
+	if got := mock.LastControlUser(); got != "member" {
+		t.Errorf("control acting user = %q, want \"member\" (per-user token)", got)
+	}
+
+	// tenant_admin 越权取消 → 走 root
+	id2 := sub()
+	if c := cancel(id2, tenantTok); c != http.StatusOK {
+		t.Fatalf("tenant_admin override cancel: want 200 got %d", c)
+	}
+	if got := mock.LastControlUser(); got != "root" {
+		t.Errorf("override control acting user = %q, want \"root\"", got)
+	}
+}
+
 // TestRouter_Login 校验登录契约与失败路径
 func TestRouter_Login(t *testing.T) {
 	r, _ := setupTestRouter(t)

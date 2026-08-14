@@ -49,6 +49,18 @@ func (h *JobHandler) forbidIfNotOwner(c *gin.Context, jobID int) bool {
 	return false
 }
 
+
+// controlActAs 决定控制操作的下发身份（L4 控制鉴权）：member 用自己的 clusterUser
+// （Slurm 层强制令牌身份==作业属主，apiserver 校验之外的第二道门）；tenant_admin
+// 越权与管理性操作走 root（actAs=""）。
+func controlActAs(c *gin.Context) string {
+	_, role, clusterUser, _ := callerFromCtx(c)
+	if role == auth.RoleMember {
+		return clusterUser
+	}
+	return ""
+}
+
 func (h *JobHandler) SubmitJob(c *gin.Context) {
 	var req SubmitJobRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -100,7 +112,7 @@ func (h *JobHandler) CancelJob(c *gin.Context) {
 		return
 	}
 
-	resp, err := h.service.CancelJob(c.Request.Context(), jobID)
+	resp, err := h.service.CancelJob(c.Request.Context(), jobID, controlActAs(c))
 	if err != nil {
 		httpx.Internal(c, "CancelJob", err)
 		return
@@ -121,7 +133,7 @@ func (h *JobHandler) HoldJob(c *gin.Context) {
 		return
 	}
 
-	resp, err := h.service.HoldJob(c.Request.Context(), jobID)
+	resp, err := h.service.HoldJob(c.Request.Context(), jobID, controlActAs(c))
 	if err != nil {
 		if errors.Is(err, ErrCannotHoldCancelled) {
 			httpx.BadRequest(c, err.Error())
@@ -146,7 +158,7 @@ func (h *JobHandler) RequeueJob(c *gin.Context) {
 		return
 	}
 
-	resp, err := h.service.RequeueJob(c.Request.Context(), jobID)
+	resp, err := h.service.RequeueJob(c.Request.Context(), jobID, controlActAs(c))
 	if err != nil {
 		httpx.Internal(c, "RequeueJob", err)
 		return
