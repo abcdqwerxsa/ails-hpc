@@ -28,7 +28,7 @@ var (
 )
 
 const (
-	idePartition     = "debug"
+	idePartition     = "standard" // E 核默认分区（performance=P 核留给计算作业；见 slurm.conf 双分区）
 	ideTimeLimit     = 7200 // 2h 默认会话时长（秒）
 	ideBaseURLPath   = "/api/v1/ide" // 反代前缀；与应用 base_url 对齐
 	idePortBase      = 8800

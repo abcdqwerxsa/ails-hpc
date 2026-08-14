@@ -118,7 +118,7 @@ func TestLaunchContainer_SubmitsJobWithScript(t *testing.T) {
 	if jobs.lastSubmit.Job.Name != "jupyter-ide-"+resp.ContainerID {
 		t.Errorf("job name=%q", jobs.lastSubmit.Job.Name)
 	}
-	if jobs.lastSubmit.Job.CpusPerTask != 4 || jobs.lastSubmit.Job.Partition != "debug" {
+	if jobs.lastSubmit.Job.CpusPerTask != 4 || jobs.lastSubmit.Job.Partition != "standard" {
 		t.Errorf("job spec mismatch: %+v", jobs.lastSubmit.Job)
 	}
 	// 真·每用户身份：IDE 作业以 clusterUser 提交并带有效 account（L1+L3）
