@@ -129,7 +129,7 @@ func TestLaunchContainer_SubmitsJobWithScript(t *testing.T) {
 		t.Errorf("account=%q want ailsmember", jobs.lastSubmit.Job.Account)
 	}
 	s := jobs.lastSubmit.Script
-	for _, want := range []string{"--ServerApp.base_url=", "/shared/sessions/", "node_ip", "jupyter lab"} {
+	for _, want := range []string{"--ServerApp.base_url=", "/shared/sessions/", "/shared/home/", "node_ip", "jupyter lab"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("script missing %q:\n%s", want, s)
 		}

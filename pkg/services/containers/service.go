@@ -310,6 +310,11 @@ func buildIDEScript(envType, sessionID string, port, cpus, memoryMB, nodes int, 
 	fmt.Fprintf(&b, "NODE_NAME=$(hostname -s)\n")
 	fmt.Fprintf(&b, "NODE_IP=$(hostname -I | awk '{print $1}')\n")
 	fmt.Fprintf(&b, "mkdir -p /shared/sessions\n")
+	// per-user HOME：隔离 jupyter/code-server 的 runtime/config。作业默认 HOME=/shared，多用户会
+	// 争用 /shared/.local，非 root 用户无权覆盖前人留下的 runtime 文件（cookie secret、server-info、
+	// browser-open）而崩溃。改为各用户独享 /shared/home/<user>（/shared 是 1777，可自建子目录）。
+	fmt.Fprintf(&b, "export HOME=\"/shared/home/$(whoami)\"\n")
+	fmt.Fprintf(&b, "mkdir -p \"$HOME\"\n")
 	// 应用启动前先回写连接信息，apiserver 据此反代
 	fmt.Fprintf(&b, "cat > /shared/sessions/${SESSION_ID}.json <<EOF\n")
 	fmt.Fprintf(&b, "{\"session_id\":\"${SESSION_ID}\",\"job_id\":${SLURM_JOB_ID:-0},\"node\":\"${NODE_NAME}\",\"node_ip\":\"${NODE_IP}\",\"port\":${PORT},\"env_type\":\"%s\",\"cpus\":%d,\"memory_mb\":%d,\"nodes\":%d,\"owner\":\"%s\"}\n",
