@@ -16,7 +16,9 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/apiserver ./cmd/apiserver
 echo "2. Syncing apiserver binary, config/, apps/web static assets & systemd unit to ${REMOTE_HOST}:${REMOTE_DIR}..."
 ssh -o BatchMode=yes ${REMOTE_HOST} "mkdir -p ${REMOTE_DIR}/bin ${REMOTE_DIR}/apps/web ${REMOTE_DIR}/config"
 rsync -avz -e "ssh -o BatchMode=yes" bin/apiserver ${REMOTE_HOST}:${REMOTE_DIR}/bin/apiserver
-rsync -avz -e "ssh -o BatchMode=yes" config/   ${REMOTE_HOST}:${REMOTE_DIR}/config/
+# config/ 里有被容器**单文件 bind-mount** 的集群配置（slurm.conf 等）：必须 --inplace 原地写，
+# 否则 rsync 的"临时文件+改名"会让宿主路径指向新 inode，容器仍挂着旧 inode（改了不生效）。
+rsync -avz --inplace -e "ssh -o BatchMode=yes" config/   ${REMOTE_HOST}:${REMOTE_DIR}/config/
 rsync -avz --exclude node_modules -e "ssh -o BatchMode=yes" apps/web/  ${REMOTE_HOST}:${REMOTE_DIR}/apps/web/
 rsync -avz -e "ssh -o BatchMode=yes" deploy/slurm-cluster/ails-apiserver.service \
     ${REMOTE_HOST}:/etc/systemd/system/ails-apiserver.service
