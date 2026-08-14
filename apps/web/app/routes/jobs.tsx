@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
-import { slurm, type JobSummary } from '../services/slurm';
+import { slurm, type JobSummary, type Partition } from '../services/slurm';
 
 export const Route = createFileRoute('/jobs')({ component: JobsPage });
 
@@ -40,6 +40,15 @@ function JobsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [acting, setActing] = useState('');
   const [filter, setFilter] = useState('ALL');
+  const [partitions, setPartitions] = useState<Partition[]>([]);
+
+  // 分区列表（一次拉取，供提交表单下拉；standard=E核默认 / performance=P核，见 slurm.conf）
+  useEffect(() => {
+    slurm
+      .getPartitions()
+      .then((r) => setPartitions(r.partitions || []))
+      .catch(() => {});
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -121,7 +130,20 @@ function JobsPage() {
       >
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))', gap: '0.75rem' }}>
           <Field label="作业名"><input className="form-control" value={form.name} onChange={field('name')} placeholder="my-job" /></Field>
-          <Field label="分区"><input className="form-control" value={form.partition} onChange={field('partition')} /></Field>
+          <Field label="分区">
+            <select
+              className="form-control"
+              value={form.partition}
+              onChange={(e: ChangeEvent<HTMLSelectElement>) => setForm({ ...form, partition: e.target.value })}
+            >
+              {(partitions.length > 0 ? partitions.map((p) => p.name) : ['standard']).map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                  {name === 'performance' ? '（P 核）' : name === 'standard' ? '（E 核）' : ''}
+                </option>
+              ))}
+            </select>
+          </Field>
           <Field label="节点数"><input className="form-control" type="number" min="1" value={form.nodes} onChange={field('nodes')} /></Field>
           <Field label="任务数"><input className="form-control" type="number" min="1" value={form.tasks} onChange={field('tasks')} /></Field>
           <Field label="时限(分钟)"><input className="form-control" value={form.time_limit} onChange={field('time_limit')} /></Field>

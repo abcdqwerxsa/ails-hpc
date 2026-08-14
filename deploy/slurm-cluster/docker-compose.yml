@@ -76,6 +76,8 @@ services:
     hostname: node1
     environment:
       ROLE: slurmd
+    # 大小核切分：node1 绑全部 P 核线程（i9-13900 P=cpu0-15）→ slurm performance 分区
+    cpuset: "0-15"
     security_opt:
       - seccomp:unconfined
     cap_add:
@@ -106,6 +108,8 @@ services:
     hostname: node2
     environment:
       ROLE: slurmd
+    # 大小核切分：node2 绑 E 核 cpu16-23 → slurm standard 分区
+    cpuset: "16-23"
     security_opt:
       - seccomp:unconfined
     cap_add:
@@ -130,6 +134,8 @@ services:
     hostname: node3
     environment:
       ROLE: slurmd
+    # 大小核切分：node3 绑 E 核 cpu24-31 → slurm standard 分区
+    cpuset: "24-31"
     security_opt:
       - seccomp:unconfined
     cap_add:
