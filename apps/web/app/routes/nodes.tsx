@@ -80,6 +80,7 @@ function NodesPage() {
                   <div>CPU：{n.alloc_cpus}/{n.cpus} 核分配</div>
                   <div>内存：{n.alloc_memory}/{n.real_memory} MB 分配</div>
                   <div>核数：{n.cores}</div>
+                  {n.gpus > 0 && <div style={{ color: '#a855f7' }}>GPU：{n.alloc_gpus}/{n.gpus} 卡分配</div>}
                   {n.reason && <div style={{ color: '#f59e0b' }}>原因：{n.reason}</div>}
                 </div>
                 <div style={{ display: 'flex', gap: '0.5rem' }}>

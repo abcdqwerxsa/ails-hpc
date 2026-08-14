@@ -76,7 +76,6 @@ func NewRouter(h Handlers) *gin.Engine {
 	}
 
 	// 静态门户：React 构建产物（apps/web/dist）。SPA 用 hash 路由，gin.Static 即可（无需 fallback）。
-	// 历史 vanilla 门户保留在 apps/web/vanilla（不再服务，留作回退参考）。
 	r.Static("/portal", "./apps/web/dist")
 	r.GET("/", func(c *gin.Context) {
 		c.Redirect(http.StatusMovedPermanently, "/portal/")
