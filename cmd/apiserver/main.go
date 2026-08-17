@@ -13,6 +13,7 @@ import (
 
 	"ails-hpc/pkg/auth"
 	"ails-hpc/pkg/config"
+	"ails-hpc/pkg/services/admin"
 	"ails-hpc/pkg/services/billing"
 	"ails-hpc/pkg/services/cluster"
 	"ails-hpc/pkg/services/containers"
@@ -69,6 +70,7 @@ func main() {
 	// 用户库双模（多租户 Phase 1）：默认 yaml；AILS_USER_STORE=db 切 sqlite（读面同走
 	// auth.UserStore，登录/租户解析对后端无感知）。
 	var userStore auth.UserStore
+	var adminStore store.AdminStore // db 模式才可写（管理 API）；yaml=只读种子
 	switch cfg.UserStoreKind {
 	case "db":
 		st, err := store.Open(cfg.DBPath)
@@ -77,6 +79,11 @@ func main() {
 		}
 		defer st.Close()
 		userStore = st
+		if as, ok := st.(store.AdminStore); ok {
+			adminStore = as
+		} else {
+			log.Fatalf("sqlite store does not implement AdminStore (internal error)")
+		}
 	default:
 		var err error
 		userStore, err = auth.LoadUserStore(cfg.UsersFile)
@@ -108,6 +115,7 @@ func main() {
 		Containers: containers.NewContainerHandler(containers.NewContainerService(slurmClient)),
 		Billing:    billing.NewBillingHandlerWithScope(billingService, tenantResolver),
 		Monitor:    monitor.NewMonitorHandler(monitor.NewMonitorService(slurmClient)),
+		Admin:      admin.NewAdminHandler(admin.NewService(adminStore, admin.DefaultProvisioner)),
 	}
 
 	r := NewRouter(handlers)

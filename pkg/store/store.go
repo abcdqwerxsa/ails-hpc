@@ -1,8 +1,8 @@
 // Package store 是多租户用户库的持久层（Phase 1：sqlite + users.yaml 导入，读路径）。
 //
 // 设计（docs/multi-tenant-design.md §4.1）：DB 库与内存/yaml 库同走 auth.UserStore 读面，
-// apiserver 的租户解析（tenantResolver）与登录路径对两种后端无感知。CRUD（建/改/禁用
-// 用户、租户管理）在 Phase 3 随管理 API 落地；本包先提供读路径 + 导入。
+// apiserver 的租户解析（tenantResolver）与登录路径对两种后端无感知。写面（AdminStore：
+// 建/改/禁用用户、租户管理、审计）Phase 3 随管理 API 落地——仅 sqlite 实现，yaml 种子只读。
 package store
 
 import (
@@ -41,4 +41,29 @@ type Store interface {
 
 	// Close 关闭底层句柄。
 	Close() error
+}
+
+// AdminStore 是用户库写面（管理 API 用；sqlite 实现。yaml 种子只读——写操作走 db 库）。
+// Open 返回 Store；db 模式下调用方经类型断言取本面（yaml 库不实现 → 断言失败即"只读"）。
+type AdminStore interface {
+	Store
+
+	// CreateTenant 建租户（parent_account=slug，Phase 5 起 fairshare 层级用）。
+	// slug 'system' 不可建（保留给 admin/ops_admin）；重复返回 ErrTenantExists。
+	CreateTenant(ctx context.Context, slug, name string) (*Tenant, error)
+	// SetTenantStatus 置租户状态（active|suspended）；'system' 不可挂起（防平台自锁）。
+	SetTenantStatus(ctx context.Context, slug, status string) error
+	// CreateUser 建用户（校验 + bcrypt + 唯一性；细节见 admin.go）。
+	CreateUser(ctx context.Context, u NewUser) (*auth.User, error)
+	// UpdateUserStatus 置账号状态（active|disabled）；disabled 时 token_version+1
+	// （吊销在途令牌；重新启用不回退版本，旧令牌不复活）。
+	UpdateUserStatus(ctx context.Context, username, status string) error
+	// ResetUserPassword 重置密码哈希并 token_version+1（吊销在途令牌）。
+	ResetUserPassword(ctx context.Context, username, newHash string) error
+	// ListTenantUsers 列出租户全部用户（按 username 排序；不含密码哈希）。
+	ListTenantUsers(ctx context.Context, tenantSlug string) ([]auth.User, error)
+	// NextUID 分配下一个 uid（max(uid)+1，带宽 2001..2999 避让节点既存账号；满则错误）。
+	NextUID(ctx context.Context) (int, error)
+	// WriteAudit 落一条审计记录（actor/action/target/request_id/detail）。
+	WriteAudit(ctx context.Context, actor, action, target, requestID, detail string) error
 }

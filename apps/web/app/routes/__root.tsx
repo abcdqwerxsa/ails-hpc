@@ -86,6 +86,14 @@ function RootLayout() {
                 计费
               </Link>
             </li>
+            {/* 管理入口：仅 admin / tenant_admin 可见（角色来自 localStorage 'ails_user'，同 user 解析） */}
+            {(user?.role === 'admin' || user?.role === 'tenant_admin') && (
+              <li className="nav-item">
+                <Link to="/admin" activeProps={{ className: 'active' }}>
+                  管理
+                </Link>
+              </li>
+            )}
             <li className="nav-item">
               <Link to="/partitions" activeProps={{ className: 'active' }}>
                 分区

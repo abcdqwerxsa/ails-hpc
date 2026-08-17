@@ -1,0 +1,241 @@
+package admin
+
+import (
+	"errors"
+	"net/http"
+
+	"ails-hpc/pkg/auth"
+	"ails-hpc/pkg/httpx"
+	"ails-hpc/pkg/store"
+
+	"github.com/gin-gonic/gin"
+)
+
+// AdminHandler 暴露租户/用户管理端点（设计 §5）。
+// 平台组 /api/v1/admin/**：admin 独占；租户组 /api/v1/tenants/me/**：tenant_admin
+// （越权角色由路由层 RequireRole 拦截；租户归属在 service 层以 claims 为权威）。
+type AdminHandler struct {
+	service *Service
+}
+
+// NewAdminHandler 构造。service 为 nil（yaml 模式）时全部端点 503。
+func NewAdminHandler(service *Service) *AdminHandler {
+	return &AdminHandler{service: service}
+}
+
+// actorAndTenant 从 claims 取 (actor, tenantSlug, ok)。
+func actorAndTenant(c *gin.Context) (string, string) {
+	sc := scopeOf(c)
+	return sc.Username, sc.TenantSlug
+}
+
+func scopeOf(c *gin.Context) auth.Scope {
+	if v, ok := c.Get("claims"); ok {
+		if cl, ok := v.(*auth.Claims); ok {
+			return auth.ScopeFromClaims(cl)
+		}
+	}
+	return auth.Scope{}
+}
+
+func requestID(c *gin.Context) string {
+	if v, ok := c.Get("request_id"); ok {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
+// mapErr 把 store/service 错误映射为 HTTP 语义（sentinel 与 pkg/store/admin.go 对齐）。
+func mapErr(c *gin.Context, err error, op string) {
+	switch {
+	case err == nil:
+		return
+	case errors.Is(err, ErrReadOnlyStore):
+		httpx.ServiceUnavailable(c, "admin API requires AILS_USER_STORE=db (yaml seed is read-only)", nil)
+	case errors.Is(err, ErrProvisionFailed):
+		// DB 已提交、Slurm 供给失败：502 + 明确文案（重试幂等）
+		httpx.Error(c, http.StatusBadGateway, err.Error())
+	case errors.Is(err, ErrRoleNotAllowed):
+		httpx.BadRequest(c, err.Error())
+	case errors.Is(err, store.ErrNotFound):
+		httpx.NotFound(c, "not found")
+	case errors.Is(err, store.ErrTenantExists), errors.Is(err, store.ErrDuplicateUser),
+		errors.Is(err, store.ErrTenantReserved), errors.Is(err, store.ErrTenantSuspended),
+		errors.Is(err, store.ErrUIDExhausted):
+		httpx.Error(c, http.StatusConflict, err.Error())
+	case errors.Is(err, store.ErrInvalidUsername), errors.Is(err, store.ErrInvalidSlug),
+		errors.Is(err, store.ErrInvalidRole), errors.Is(err, store.ErrInvalidStatus),
+		errors.Is(err, store.ErrRoleTenantMismatch), errors.Is(err, store.ErrWeakPassword),
+		errors.Is(err, store.ErrInvalidClusterUser), errors.Is(err, store.ErrInvalidAccount),
+		errors.Is(err, store.ErrInvalidUID), errors.Is(err, store.ErrInvalidHash):
+		httpx.BadRequest(c, err.Error())
+	default:
+		httpx.Internal(c, op, err)
+	}
+}
+
+// --- 平台级 ---
+
+// ListTenants GET /api/v1/admin/tenants
+func (h *AdminHandler) ListTenants(c *gin.Context) {
+	ts, err := h.service.ListTenants(c.Request.Context())
+	if err != nil {
+		mapErr(c, err, "admin.ListTenants")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"tenants": ts})
+}
+
+// CreateTenant POST /api/v1/admin/tenants {slug,name}
+func (h *AdminHandler) CreateTenant(c *gin.Context) {
+	var req struct {
+		Slug string `json:"slug" binding:"required"`
+		Name string `json:"name"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.BadRequest(c, "slug is required")
+		return
+	}
+	actor, _ := actorAndTenant(c)
+	t, err := h.service.CreateTenant(c.Request.Context(), actor, req.Slug, req.Name, requestID(c))
+	if err != nil {
+		mapErr(c, err, "admin.CreateTenant")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"tenant": t})
+}
+
+// UpdateTenant PATCH /api/v1/admin/tenants/:slug {name?,status?}
+func (h *AdminHandler) UpdateTenant(c *gin.Context) {
+	var req struct {
+		Name   string `json:"name"`
+		Status string `json:"status"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.BadRequest(c, "invalid payload")
+		return
+	}
+	if req.Status != "" && req.Status != "active" && req.Status != "suspended" {
+		httpx.BadRequest(c, "status must be active or suspended")
+		return
+	}
+	actor, _ := actorAndTenant(c)
+	if err := h.service.UpdateTenantStatus(c.Request.Context(), actor, c.Param("slug"), req.Status, requestID(c)); err != nil {
+		mapErr(c, err, "admin.UpdateTenant")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "tenant updated"})
+}
+
+// ListTenantUsers GET /api/v1/admin/tenants/:slug/users
+func (h *AdminHandler) ListTenantUsers(c *gin.Context) {
+	us, err := h.service.ListTenantUsers(c.Request.Context(), c.Param("slug"))
+	if err != nil {
+		mapErr(c, err, "admin.ListTenantUsers")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"users": us})
+}
+
+// CreatePlatformUser POST /api/v1/admin/users {username,role,tenantSlug,password}
+func (h *AdminHandler) CreatePlatformUser(c *gin.Context) {
+	var req struct {
+		Username   string `json:"username" binding:"required"`
+		Role       string `json:"role" binding:"required"`
+		TenantSlug string `json:"tenantSlug" binding:"required"`
+		Password   string `json:"password" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.BadRequest(c, "username, role, tenantSlug, password are required")
+		return
+	}
+	actor, _ := actorAndTenant(c)
+	u, err := h.service.CreatePlatformUser(c.Request.Context(), actor, store.NewUser{
+		Username: req.Username, Password: req.Password, Role: req.Role, TenantSlug: req.TenantSlug,
+	}, requestID(c))
+	if err != nil {
+		mapErr(c, err, "admin.CreatePlatformUser")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"user": u})
+}
+
+// --- 租户级 ---
+
+// ListMyUsers GET /api/v1/tenants/me/users
+func (h *AdminHandler) ListMyUsers(c *gin.Context) {
+	_, tenant := actorAndTenant(c)
+	us, err := h.service.ListMyUsers(c.Request.Context(), tenant)
+	if err != nil {
+		mapErr(c, err, "admin.ListMyUsers")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"users": us})
+}
+
+// CreateTenantUser POST /api/v1/tenants/me/users
+func (h *AdminHandler) CreateTenantUser(c *gin.Context) {
+	var req struct {
+		Username string `json:"username" binding:"required"`
+		Password string `json:"password" binding:"required"`
+		Role     string `json:"role" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.BadRequest(c, "username, password, role are required")
+		return
+	}
+	actor, tenant := actorAndTenant(c)
+	u, err := h.service.CreateTenantUser(c.Request.Context(), actor, tenant, store.NewUser{
+		Username: req.Username, Password: req.Password, Role: req.Role,
+	}, requestID(c))
+	if err != nil {
+		mapErr(c, err, "admin.CreateTenantUser")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"user": u})
+}
+
+// UpdateMyUser PATCH /api/v1/tenants/me/users/:username {displayName?,status?}
+func (h *AdminHandler) UpdateMyUser(c *gin.Context) {
+	var req struct {
+		DisplayName string `json:"displayName"`
+		Status      string `json:"status"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.BadRequest(c, "invalid payload")
+		return
+	}
+	if req.Status != "" && req.Status != "active" && req.Status != "disabled" {
+		httpx.BadRequest(c, "status must be active or disabled")
+		return
+	}
+	actor, tenant := actorAndTenant(c)
+	if err := h.service.UpdateMyUser(c.Request.Context(), actor, tenant, c.Param("username"), req.DisplayName, req.Status, requestID(c)); err != nil {
+		mapErr(c, err, "admin.UpdateMyUser")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "user updated"})
+}
+
+// ResetMyUserPassword POST /api/v1/tenants/me/users/:username/password {newPassword}
+func (h *AdminHandler) ResetMyUserPassword(c *gin.Context) {
+	var req struct {
+		NewPassword string `json:"newPassword" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.BadRequest(c, "newPassword is required")
+		return
+	}
+	if len(req.NewPassword) < 8 {
+		httpx.BadRequest(c, "newPassword must be at least 8 characters")
+		return
+	}
+	actor, tenant := actorAndTenant(c)
+	if err := h.service.ResetMyUserPassword(c.Request.Context(), actor, tenant, c.Param("username"), req.NewPassword, requestID(c)); err != nil {
+		mapErr(c, err, "admin.ResetMyUserPassword")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "password reset; the user's sessions are revoked"})
+}

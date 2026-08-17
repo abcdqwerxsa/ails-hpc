@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"ails-hpc/pkg/auth"
+	"ails-hpc/pkg/services/admin"
 	"ails-hpc/pkg/services/billing"
 	"ails-hpc/pkg/services/cluster"
 	"ails-hpc/pkg/services/containers"
@@ -23,6 +24,7 @@ type Handlers struct {
 	Containers *containers.ContainerHandler
 	Billing    *billing.BillingHandler
 	Monitor    *monitor.MonitorHandler
+	Admin      *admin.AdminHandler // yaml 模式可为 nil（端点统一 503）
 }
 
 // NewRouter 装配整套路由：CORS、公开登录端点、JWT 保护的 /api/v1 组，
@@ -77,6 +79,21 @@ func NewRouter(h Handlers) *gin.Engine {
 		billingRead := auth.RequireRole(auth.RoleMember, auth.RoleTenantAdmin, auth.RoleOpsAdmin)
 		slurm.GET("/billing/usage", billingRead, h.Billing.GetUsage)
 		slurm.GET("/billing/export", billingRead, h.Billing.ExportReport)
+
+		// 平台管理（admin 独占；sqlite 库未启用时端点统一 503）
+		platformAdmin := api.Group("/admin", auth.RequireRole(auth.RoleSystemAdmin))
+		platformAdmin.GET("/tenants", h.Admin.ListTenants)
+		platformAdmin.POST("/tenants", h.Admin.CreateTenant)
+		platformAdmin.PATCH("/tenants/:slug", h.Admin.UpdateTenant)
+		platformAdmin.GET("/tenants/:slug/users", h.Admin.ListTenantUsers)
+		platformAdmin.POST("/users", h.Admin.CreatePlatformUser)
+
+		// 租户管理（tenant_admin；租户归属以 claims 为权威，不信任请求体）
+		tenantAdmin := api.Group("/tenants", auth.RequireRole(auth.RoleTenantAdmin))
+		tenantAdmin.GET("/me/users", h.Admin.ListMyUsers)
+		tenantAdmin.POST("/me/users", h.Admin.CreateTenantUser)
+		tenantAdmin.PATCH("/me/users/:username", h.Admin.UpdateMyUser)
+		tenantAdmin.POST("/me/users/:username/password", h.Admin.ResetMyUserPassword)
 
 		// Web-IDE 反向代理：/api/v1/ide/<session>/* → 计算节点上的 Jupyter/code-server
 		api.Any("/ide/:session/*any", memberWrite, h.Containers.ProxyIDE)
