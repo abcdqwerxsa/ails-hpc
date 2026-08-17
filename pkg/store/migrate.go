@@ -48,6 +48,21 @@ CREATE TABLE IF NOT EXISTS audit_log (
   request_id TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );`,
+	// v2(C1/C2):外键开启前的存量孤儿清洗(users.tenant_id → tenants);
+	// audit_log(actor) 查询索引;users/tenants 的 updated_at 统一触发器维护。
+	`
+DELETE FROM users WHERE tenant_id NOT IN (SELECT id FROM tenants);
+CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_log(actor, id);
+CREATE TRIGGER IF NOT EXISTS trg_users_updated_at
+  AFTER UPDATE ON users FOR EACH ROW
+  BEGIN
+    UPDATE users SET updated_at = datetime('now') WHERE id = OLD.id;
+  END;
+CREATE TRIGGER IF NOT EXISTS trg_tenants_updated_at
+  AFTER UPDATE ON tenants FOR EACH ROW
+  BEGIN
+    UPDATE tenants SET updated_at = datetime('now') WHERE id = OLD.id;
+  END;`,
 }
 
 // migrate 按序应用未执行的迁移（幂等；并发安全由 sqlite 单写者 + busy_timeout 保证）。
