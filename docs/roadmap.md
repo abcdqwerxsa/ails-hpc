@@ -19,8 +19,8 @@
 | 2.1 | 登录防爆破 | 失败计数锁定(内存+窗口)+ 失败审计 | S | **已完成**(PR #43) |
 | 2.2 | 审计查看器 | AdminStore.ListAudit + GET /admin/audit + 管理页审计表(倒序/actor 过滤) | S | **已完成**(PR #43) |
 | 2.3 | 租户限额 UI | 租户行"限额"按钮(prompt 输 GrpTRES→PATCH,服务端白名单) | S | **已完成**(PR #43) |
-| 2.4 | sqlite 备份 | `.backup` 到 /shared/backups 的 systemd timer | S | 待做 |
-| 2.5 | JWT key 持久化 | named volume 承载 jwt_hs256.key,消除重建换 key 的 token 重铸 | S | 待做 |
+| 2.4 | sqlite 备份 | ails-db-backup.timer 每日 04:17 → apiserver -backup-db(VACUUM INTO 在线快照,宿主无需 sqlite3),7 份按星期轮转 | S | **已完成**(PR #47/#48) |
+| 2.5 | JWT key 持久化 | slurm-jwt-key named volume(entrypoint 生成一次入卷+symlink 旧路径);下次集群重建生效 | S | **已完成**(PR #47) |
 
 ## 轨道 3:可观测性增强
 
