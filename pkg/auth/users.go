@@ -41,6 +41,15 @@ type User struct {
 	Status string `yaml:"status,omitempty" json:"status,omitempty"`
 	// TokenVersion 令牌版本：改密/禁用 +1 → 在途 JWT 即刻失效（中间件按请求比对 claims.Ver）。
 	TokenVersion int `yaml:"-" json:"-"`
+
+	// --- R2 角色表化（yaml/内存库为零值，语义见各字段注释） ---
+	// RoleID 实际角色 id（roles.id）；0 = 未指派（旧数据/内存库），按 Role 内置映射回退。
+	RoleID int64 `yaml:"-" json:"-"`
+	// RoleName 实际角色名（自定义角色 ≠ Role）；空 = 内置角色（RoleName == Role）。
+	RoleName string `yaml:"roleName,omitempty" json:"roleName,omitempty"`
+	// Permissions 角色权限点清单（DB 库由 roles.permissions JSON 解析）；空 = 回退
+	// BuiltinRolePermissions[Role]（内存/yaml 库与迁移期旧数据）。
+	Permissions []string `yaml:"-" json:"permissions,omitempty"`
 }
 
 // CompareHashAndPassword 是 bcrypt 校验的薄导出（pkg/store 等同面实现复用）。

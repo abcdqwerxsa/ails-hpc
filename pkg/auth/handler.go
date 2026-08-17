@@ -23,7 +23,9 @@ type LoginRequest struct {
 // UserInfo 登录响应中的用户可见信息（不含密码哈希）。
 type UserInfo struct {
 	Username    string `json:"username"`
-	Role        string `json:"role"`
+	Role        string `json:"role"` // 基角色（scope 语义）
+	RoleName    string `json:"roleName,omitempty"` // 实际角色名（自定义角色 ≠ role）
+	Permissions []string `json:"permissions,omitempty"` // 权限点清单（R4 前端能力驱动）
 	OrgSlug     string `json:"orgSlug"`
 	TenantNS    string `json:"tenantNs"`
 	ClusterUser string `json:"clusterUser"`
@@ -80,9 +82,17 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	h.Rate.RecordSuccess(req.Username, ip)
 
 	// Phase 2：整 Claims 签发——tid（租户）+ ver（令牌版本，改密/禁用即吊销在途令牌）。
+	// R2：rid/rn/perms 携带实际角色（自定义角色时代 Role=基角色仅作 scope 推导）。
+	rn := user.RoleName
+	if rn == "" || rn == user.Role {
+		rn = "" // 内置角色不重复携带（零噪音，旧客户端无感）
+	}
 	token, err := GenerateTokenClaims(Claims{
 		Username:    user.Username,
 		Role:        user.Role,
+		Rid:         user.RoleID,
+		Rn:          rn,
+		Perms:       user.Permissions,
 		OrgSlug:     user.OrgSlug,
 		TenantNS:    user.TenantNS,
 		ClusterUser: user.ClusterUser,
@@ -100,6 +110,8 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		User: UserInfo{
 			Username:    user.Username,
 			Role:        user.Role,
+			RoleName:    rn,
+			Permissions: user.Permissions,
 			OrgSlug:     user.OrgSlug,
 			TenantNS:    user.TenantNS,
 			ClusterUser: user.ClusterUser,

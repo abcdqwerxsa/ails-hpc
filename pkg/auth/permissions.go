@@ -101,25 +101,20 @@ var BuiltinRolePermissions = map[string][]string{
 	},
 }
 
-// claimPermissionResolver 把 claims 解析为权限集合。R1 默认 = 内置角色映射（零行为
-// 变化）；R2 角色表化后由 apiserver 启动时经 SetPermissionResolver 注入 DB 权威解析
-// （claims.Rid → roles.permissions JSON）。必须在服务启动前调用（并发读，无锁）。
+// claimPermissionResolver 把 claims 解析为权限集合。优先级：
+//  1. claims.Perms（登录签发/带 store 的中间件每请求按 roles 表刷新——R2 起 DB 权威）
+//  2. BuiltinRolePermissions[claims.Role]（内存/yaml 库与迁移期旧令牌的回退——零行为变化）
 var claimPermissionResolver = func(cl *Claims) map[string]bool {
 	if cl == nil {
 		return map[string]bool{}
 	}
+	if len(cl.Perms) > 0 {
+		return permSetOf(cl.Perms...)
+	}
 	return permSetOf(BuiltinRolePermissions[cl.Role]...)
 }
 
-// SetPermissionResolver 替换 claims→权限集合的解析器（R2 注入 DB 角色解析用；
-// 启动期一次性调用，运行期只读）。
-func SetPermissionResolver(fn func(cl *Claims) map[string]bool) {
-	if fn != nil {
-		claimPermissionResolver = fn
-	}
-}
-
-// PermissionsOf 返回 claims 持有者的权限集合（解析器默认内置映射，可被 DB 解析覆盖）。
+// PermissionsOf 返回 claims 持有者的权限集合。
 func PermissionsOf(cl *Claims) map[string]bool {
 	return claimPermissionResolver(cl)
 }

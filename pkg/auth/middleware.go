@@ -89,6 +89,13 @@ func authenticate(c *gin.Context, store UserStore) (*Claims, bool) {
 			httpx.Unauthorized(c, "invalid or expired token")
 			return nil, false
 		}
+		// R2 角色表化：按库内当前值刷新角色面（角色改派/角色权限调整即刻生效，无需
+		// 重登）。Role 恒为"基角色"（scope 推导）；Rn/Perms/Rid 携带实际角色信息。
+		// 内存/yaml 库这些字段为零值 → 刷新为空 → 解析器回退内置映射，行为不变。
+		claims.Role = u.Role
+		claims.Rn = u.RoleName
+		claims.Perms = u.Permissions
+		claims.Rid = u.RoleID
 	}
 	if isIDE && fromQuery {
 		http.SetCookie(c.Writer, &http.Cookie{

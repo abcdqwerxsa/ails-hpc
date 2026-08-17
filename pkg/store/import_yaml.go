@@ -51,12 +51,15 @@ func ImportYaml(st Store, yamlPath string) (int, error) {
 			return 0, fmt.Errorf("store: user %s missing role/clusterUser/account", u.Username)
 		}
 		_, err := impl.db.ExecContext(ctx, `
-			INSERT INTO users (username, password_hash, role, tenant_id, cluster_user, uid, gid, account, status)
-			SELECT ?, ?, ?, t.id, ?, ?, ?, ?, 'active'
-			FROM tenants t WHERE t.slug = ?
+			INSERT INTO users (username, password_hash, role, role_id, tenant_id, cluster_user, uid, gid, account, status)
+			SELECT ?, ?, ?, r.id, t.id, ?, ?, ?, ?, 'active'
+			FROM tenants t
+			CROSS JOIN (SELECT id FROM roles WHERE name = ? AND tenant_id IS NULL) r
+			WHERE t.slug = ?
 			ON CONFLICT(username) DO UPDATE SET
 				password_hash = excluded.password_hash,
 				role          = excluded.role,
+				role_id       = excluded.role_id,
 				tenant_id     = excluded.tenant_id,
 				cluster_user  = excluded.cluster_user,
 				uid           = excluded.uid,
@@ -64,7 +67,7 @@ func ImportYaml(st Store, yamlPath string) (int, error) {
 				account       = excluded.account,
 				status        = 'active',
 				updated_at    = datetime('now')`,
-			u.Username, u.PasswordHash, u.Role, u.ClusterUser, u.UID, u.GID, u.Account, u.TenantSlug)
+			u.Username, u.PasswordHash, u.Role, u.ClusterUser, u.UID, u.GID, u.Account, u.Role, u.TenantSlug)
 		if err != nil {
 			return n, fmt.Errorf("store: upsert user %s: %w", u.Username, err)
 		}

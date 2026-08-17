@@ -234,12 +234,14 @@ func (s *sqliteStore) CreateUser(ctx context.Context, in NewUser) (*auth.User, e
 		}
 
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO users (username, password_hash, role, tenant_id, cluster_user,
+			INSERT INTO users (username, password_hash, role, role_id, tenant_id, cluster_user,
 			                   uid, gid, account, display_name, email, status)
-			SELECT ?, ?, ?, t.id, ?, ?, ?, ?, ?, ?, 'active'
-			FROM tenants t WHERE t.slug = ?`,
+			SELECT ?, ?, ?, r.id, t.id, ?, ?, ?, ?, ?, ?, 'active'
+			FROM tenants t
+			CROSS JOIN (SELECT id FROM roles WHERE name = ? AND tenant_id IS NULL) r
+			WHERE t.slug = ?`,
 			in.Username, string(hash), in.Role, clusterUser, uid, gid, account,
-			in.DisplayName, in.Email, in.TenantSlug); err != nil {
+			in.DisplayName, in.Email, in.Role, in.TenantSlug); err != nil {
 			return fmt.Errorf("store: insert user %s: %w", in.Username, err)
 		}
 
