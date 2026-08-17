@@ -45,6 +45,8 @@ type ContainerService interface {
 	// SessionOwner 返回会话归属者（launch 时写入 meta）。归属隔离用：member 只能回收自己的会话。
 	SessionOwner(ctx context.Context, id string) (string, error)
 	RecycleContainer(ctx context.Context, id, actAs string) (*ContainerRecycleResponse, error)
+	// ExtendSession 为运行中会话延长时限（1.4；addMinutes 增量分钟，上限 720）。
+	ExtendSession(ctx context.Context, id string, addMinutes int) (*ContainerRecycleResponse, error)
 	// ProxyTarget 返回会话的反代目标 (node_ip:port)、状态、env_type，供 /ide/<session>/ 反代 handler 使用。
 	// env_type 决定反代是否剥前缀：jupyter 有 base_url 对齐（不剥），vscode 根路径启动（剥 /api/v1/ide/<sid>）。
 	ProxyTarget(ctx context.Context, sessionID string) (nodeIP string, port int, status string, envType string, err error)
@@ -66,6 +68,7 @@ type sessionMetaStore interface {
 type containerServiceImpl struct {
 	jobs    slurmJobAPI
 	meta    sessionMetaStore
+	extend  func(jobID, addMinutes int) error // 续期实现（默认 scontrol CLI；测试注入）
 	mu      sync.RWMutex
 	targets map[string]cachedTarget // RUNNING 会话反代目标缓存（热路径，避免每请求 2 次 docker exec）
 }
@@ -81,12 +84,12 @@ const proxyCacheTTL = 30 * time.Second
 
 // NewContainerService 用真实 slurmrest 客户端构造（meta 走 docker exec 读 /shared/sessions）。
 func NewContainerService(client *slurmrest.Client) ContainerService {
-	return &containerServiceImpl{jobs: client, meta: dockerSessionMetaStore{}, targets: make(map[string]cachedTarget)}
+	return &containerServiceImpl{jobs: client, meta: dockerSessionMetaStore{}, extend: slurmrest.ExtendJobTimeLimit, targets: make(map[string]cachedTarget)}
 }
 
 // NewContainerServiceWithDeps 注入依赖，供测试。
 func NewContainerServiceWithDeps(jobs slurmJobAPI, meta sessionMetaStore) ContainerService {
-	return &containerServiceImpl{jobs: jobs, meta: meta, targets: make(map[string]cachedTarget)}
+	return &containerServiceImpl{jobs: jobs, meta: meta, extend: slurmrest.ExtendJobTimeLimit, targets: make(map[string]cachedTarget)}
 }
 
 // LaunchContainer 提交一个交互式 Slurm 作业拉起 Jupyter/code-server，返回会话入口 URL。
@@ -128,7 +131,16 @@ func (s *containerServiceImpl) LaunchContainer(ctx context.Context, req *Contain
 	subReq.Job.Tasks = 1
 	subReq.Job.MinimumNodes = nodes
 	subReq.Job.CpusPerTask = cpus
-	subReq.Job.TimeLimit = ideTimeLimit
+	timeLimit := ideTimeLimit
+	// 1.4：会话时长可调（分钟；默认 2h，1..720min 上限 12h）
+	if req.TimeLimitMin > 0 {
+		if req.TimeLimitMin > 720 {
+			timeLimit = 720 * 60
+		} else {
+			timeLimit = req.TimeLimitMin * 60
+		}
+	}
+	subReq.Job.TimeLimit = timeLimit
 	subReq.Job.CurrentWorkingDirectory = "/shared"
 	// Slurm 21.08 slurmrestd 要求 environment 为非空 dict，否则拒绝提交
 	subReq.Job.Environment = map[string]string{
@@ -251,6 +263,43 @@ func (s *containerServiceImpl) RecycleContainer(ctx context.Context, id, actAs s
 		ContainerID: id,
 		Status:      "STOPPED",
 		Message:     fmt.Sprintf("Session %s recycled (job %d cancelled)", id, jobID),
+	}, nil
+}
+
+// ExtendSession 延长会话时限（scontrol TimeLimit+=；会话不存在返回 ErrContainerNotFound）。
+func (s *containerServiceImpl) ExtendSession(ctx context.Context, id string, addMinutes int) (*ContainerRecycleResponse, error) {
+	if id == "" || addMinutes <= 0 || addMinutes > 720 {
+		return nil, ErrInvalidResources
+	}
+	jobID := 0
+	if metaMap, _ := s.meta.ReadAll(); metaMap != nil {
+		if m, ok := metaMap[id]; ok {
+			jobID = m.JobID
+		}
+	}
+	if jobID == 0 {
+		if jobs, err := s.jobs.GetJobs(); err == nil {
+			for _, j := range jobs.Jobs {
+				if sid, _, ok := parseIDEJobName(j.Name); ok && sid == id {
+					jobID = j.JobID
+					break
+				}
+			}
+		}
+	}
+	if jobID == 0 {
+		return nil, ErrContainerNotFound
+	}
+	if s.extend == nil {
+		return nil, ErrContainerNotFound
+	}
+	if err := s.extend(jobID, addMinutes); err != nil {
+		return nil, fmt.Errorf("extend job %d: %w", jobID, err)
+	}
+	return &ContainerRecycleResponse{
+		ContainerID: id,
+		Status:      "EXTENDED",
+		Message:     fmt.Sprintf("Session %s extended by %d minutes (job %d)", id, addMinutes, jobID),
 	}, nil
 }
 

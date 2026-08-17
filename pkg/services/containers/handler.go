@@ -121,6 +121,40 @@ func (h *ContainerHandler) ListContainers(c *gin.Context) {
 	c.JSON(http.StatusOK, ContainerListResponse{Containers: scoped})
 }
 
+// ExtendSession POST /api/v1/slurm/containers/:id/extend {addMinutes}（1.4 续期；
+// 归属隔离同回收：member 仅本人会话）。
+func (h *ContainerHandler) ExtendSession(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		httpx.BadRequest(c, "container ID is required")
+		return
+	}
+	var req struct {
+		AddMinutes int `json:"addMinutes" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.AddMinutes <= 0 || req.AddMinutes > 720 {
+		httpx.BadRequest(c, "addMinutes must be 1..720")
+		return
+	}
+	if h.forbidIfNotSessionOwner(c, id) {
+		return
+	}
+	res, err := h.service.ExtendSession(c.Request.Context(), id, req.AddMinutes)
+	if err != nil {
+		if errors.Is(err, ErrContainerNotFound) {
+			httpx.NotFound(c, err.Error())
+			return
+		}
+		if errors.Is(err, ErrInvalidResources) {
+			httpx.BadRequest(c, err.Error())
+			return
+		}
+		httpx.Internal(c, "ExtendSession", err)
+		return
+	}
+	c.JSON(http.StatusOK, res)
+}
+
 func (h *ContainerHandler) RecycleContainer(c *gin.Context) {
 	id := c.Param("id")
 	if id == "" {

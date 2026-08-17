@@ -76,6 +76,7 @@ func NewRouter(h Handlers) *gin.Engine {
 		slurm.POST("/containers/launch", memberWrite, h.Containers.LaunchContainer)
 		slurm.GET("/containers/list", memberWrite, h.Containers.ListContainers)
 		slurm.DELETE("/containers/:id", memberWrite, h.Containers.RecycleContainer)
+		slurm.POST("/containers/:id/extend", memberWrite, h.Containers.ExtendSession)
 
 		// member(自己)/tenant_admin(租户)/ops_admin(全部)：计费读取
 		billingRead := auth.RequireRole(auth.RoleMember, auth.RoleTenantAdmin, auth.RoleOpsAdmin)

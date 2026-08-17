@@ -35,10 +35,11 @@ type SessionMeta struct {
 
 // ContainerLaunchRequest defines the request body for launching an interactive session
 type ContainerLaunchRequest struct {
-	EnvType  string `json:"env_type" binding:"required"` // jupyter | vscode
-	Nodes    int    `json:"nodes"`                       // 默认 1
-	CPUs     int    `json:"cpus"`                        // 默认 2
-	MemoryMB int    `json:"memory_mb"`                   // 默认 4096
+	EnvType      string `json:"env_type" binding:"required"` // jupyter | vscode
+	Nodes        int    `json:"nodes"`                       // 默认 1
+	CPUs         int    `json:"cpus"`                        // 默认 2
+	MemoryMB     int    `json:"memory_mb"`                   // 默认 4096
+	TimeLimitMin int    `json:"time_limit_min"`              // 会话时长（分钟，1.4；0=默认 2h，上限 12h）
 }
 
 // ContainerLaunchResponse defines the response payload for a launched session

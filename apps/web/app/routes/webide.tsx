@@ -10,6 +10,9 @@ function WebIDEPage() {
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [envType, setEnvType] = useState<'jupyter' | 'vscode'>('jupyter');
+  const [cpus, setCpus] = useState('2');
+  const [memMb, setMemMb] = useState('4096');
+  const [durationMin, setDurationMin] = useState('120');
   const [launching, setLaunching] = useState(false);
   const [acting, setActing] = useState('');
 
@@ -36,13 +39,34 @@ function WebIDEPage() {
     setError('');
     setInfo('');
     try {
-      const r = await slurm.launchContainer({ env_type: envType });
+      const r = await slurm.launchContainer({
+        env_type: envType,
+        cpus: Number(cpus) || 2,
+        memory_mb: Number(memMb) || 4096,
+        time_limit_min: Number(durationMin) || 120,
+      });
       setInfo(`已启动 ${envType} 会话（作业 #${r.allocated?.job_id ?? '-'}）。等状态变 RUNNING 后点"打开 IDE"。`);
       await refresh();
     } catch (e: any) {
       setError(`启动失败：${e?.message || e}`);
     } finally {
       setLaunching(false);
+    }
+  };
+
+  const extend = async (id: string) => {
+    const v = prompt('延长会话多少分钟？（1-720）', '60');
+    const m = Number(v);
+    if (!v || !m || m < 1 || m > 720) return;
+    setActing(id + ':extend');
+    setError(''); setInfo('');
+    try {
+      await slurm.extendSession(id, m);
+      setInfo(`会话已延长 ${m} 分钟`);
+    } catch (e: any) {
+      setError(`续期失败：${e?.message || e}`);
+    } finally {
+      setActing('');
     }
   };
 
@@ -92,6 +116,28 @@ function WebIDEPage() {
           >
             <option value="jupyter">JupyterLab</option>
             <option value="vscode">VS Code (code-server)</option>
+          </select>
+        </label>
+        <label style={{ display: 'grid', gap: '0.25rem', fontSize: '0.8rem', color: 'var(--text-muted,#94a3b8)' }}>
+          CPU
+          <input className="form-control" type="number" min="1" max="8" value={cpus}
+            onChange={(e) => setCpus(e.target.value)} style={{ width: 90 }} />
+        </label>
+        <label style={{ display: 'grid', gap: '0.25rem', fontSize: '0.8rem', color: 'var(--text-muted,#94a3b8)' }}>
+          内存 MB
+          <input className="form-control" type="number" min="512" max="5950" step="256" value={memMb}
+            onChange={(e) => setMemMb(e.target.value)} style={{ width: 110 }} />
+        </label>
+        <label style={{ display: 'grid', gap: '0.25rem', fontSize: '0.8rem', color: 'var(--text-muted,#94a3b8)' }}>
+          时长（分钟）
+          <select className="form-control" value={durationMin}
+            onChange={(e) => setDurationMin(e.target.value)} style={{ width: 110 }}>
+            <option value="30">30</option>
+            <option value="60">60</option>
+            <option value="120">120（默认）</option>
+            <option value="240">240</option>
+            <option value="480">480</option>
+            <option value="720">720（上限）</option>
           </select>
         </label>
         <button className="btn-primary" onClick={launch} disabled={launching} style={{ padding: '0.5rem 1.5rem' }}>
@@ -144,6 +190,13 @@ function WebIDEPage() {
                     style={{ padding: '0.35rem 1rem' }}
                   >
                     打开 IDE
+                  </button>
+                  <button
+                    className="neu-btn"
+                    onClick={() => extend(s.container_id)}
+                    disabled={!!acting || !running}
+                  >
+                    续期
                   </button>
                   <button
                     onClick={() => recycle(s.container_id)}

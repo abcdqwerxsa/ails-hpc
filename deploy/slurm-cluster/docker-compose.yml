@@ -61,6 +61,7 @@ services:
       - ./config/users.yaml:/etc/slurm/ails-users.yaml:ro
       - ./config/slurm-seeds.json:/etc/slurm/ails-seeds.json:ro
       - slurmctld-state:/var/spool/slurmctld
+      - slurm-jwt-key:/etc/slurm/jwt
       - shared-storage:/shared
     depends_on:
       - slurmdbd
@@ -162,4 +163,5 @@ networks:
 volumes:
   mariadb-data:
   slurmctld-state:
+  slurm-jwt-key:
   shared-storage:

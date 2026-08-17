@@ -247,3 +247,25 @@ func TestProxyTarget_UnknownSession(t *testing.T) {
 		t.Fatalf("want ErrContainerNotFound, got %v", err)
 	}
 }
+
+// TestLaunchContainer_TimeLimitAdjustable：time_limit_min 透传（默认 7200，可调，>720 封顶）。
+func TestLaunchContainer_TimeLimitAdjustable(t *testing.T) {
+	cases := []struct {
+		min, want int
+	}{
+		{0, 7200},   // 默认 2h
+		{30, 1800},  // 30 分钟
+		{800, 43200}, // 超上限 → 12h 封顶
+	}
+	for _, c := range cases {
+		jobs := &fakeJobsAPI{submitResp: &slurmrest.SlurmJobSubmitResp{JobID: 9}}
+		svc := newSvc(jobs, &fakeMeta{m: map[string]containers.SessionMeta{}})
+		if _, err := svc.LaunchContainer(context.Background(),
+			&containers.ContainerLaunchRequest{EnvType: "jupyter", TimeLimitMin: c.min}, "ailsmember", "ailsmember"); err != nil {
+			t.Fatalf("min=%d: %v", c.min, err)
+		}
+		if got := jobs.lastSubmit.Job.TimeLimit; got != c.want {
+			t.Errorf("time_limit_min=%d → TimeLimit=%d want %d", c.min, got, c.want)
+		}
+	}
+}

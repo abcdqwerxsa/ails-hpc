@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily AILES user-store backup
+
+[Timer]
+OnCalendar=*-*-* 04:17:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
