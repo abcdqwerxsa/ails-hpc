@@ -51,6 +51,11 @@ function PartitionsPage() {
         <Stat label="分区总数" value={loading ? '—' : String(parts.length)} />
         <Stat label="分区 CPU 合计" value={loading ? '—' : String(totalCpus)} />
         <Stat label="分区节点合计" value={loading ? '—' : String(totalNodes)} />
+        <Stat
+          label="分区 GPU 合计"
+          value={loading ? '—' : String(parts.reduce((s, p) => s + (p.gpus || 0), 0))}
+          color="var(--accent-violet,#A855F7)"
+        />
       </div>
 
       {loading ? (
@@ -76,6 +81,8 @@ function PartitionsPage() {
                   <th style={th}>名称</th>
                   <th style={th}>节点</th>
                   <th style={th}>总 CPU</th>
+                  <th style={th}>总内存</th>
+                  <th style={th}>GPU</th>
                   <th style={th}>总节点数</th>
                   <th style={th}>集群 CPU 占比</th>
                 </tr>
@@ -107,6 +114,18 @@ function PartitionsPage() {
                       </td>
                       <td style={{ ...td, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>
                         {p.total_cpus}
+                      </td>
+                      <td style={{ ...td, fontFamily: "'JetBrains Mono', monospace" }}>
+                        {p.total_memory_mb ? `${(p.total_memory_mb / 1024).toFixed(1)} GB` : '—'}
+                      </td>
+                      <td style={{ ...td, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>
+                        {p.gpus ? (
+                          <span style={{ color: 'var(--accent-violet,#A855F7)' }}>
+                            {p.alloc_gpus ?? 0}/{p.gpus} 卡
+                          </span>
+                        ) : (
+                          <span style={{ color: 'var(--text-muted,#94a3b8)' }}>—</span>
+                        )}
                       </td>
                       <td style={{ ...td, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>
                         {p.total_nodes}
@@ -174,7 +193,7 @@ const td = {
   color: 'var(--text-main,#f1f5f9)',
 } as const;
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
     <div
       style={{
@@ -192,7 +211,7 @@ function Stat({ label, value }: { label: string; value: string }) {
           fontSize: '1.5rem',
           fontWeight: 700,
           fontFamily: "'JetBrains Mono', monospace",
-          color: 'var(--text-main,#f1f5f9)',
+          color: color || 'var(--text-main,#f1f5f9)',
         }}
       >
         {value}

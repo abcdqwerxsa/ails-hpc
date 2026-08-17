@@ -163,6 +163,9 @@ export interface Partition {
   nodes: string;
   total_cpus: number;
   total_nodes: number;
+  total_memory_mb?: number; // 分区 TRES mem
+  gpus?: number; // 成员节点 GRES 聚合
+  alloc_gpus?: number;
 }
 export interface PartitionsResponse {
   errors?: unknown[];

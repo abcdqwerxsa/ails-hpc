@@ -109,8 +109,8 @@ func NewMockSlurmServer() *MockSlurmServer {
 		resp := map[string]interface{}{
 			"errors": []interface{}{},
 			"partitions": []map[string]interface{}{
-				{"name": "standard", "nodes": "node1,node2,node3", "total_cpus": 192, "total_nodes": 3},
-				{"name": "debug", "nodes": "node1", "total_cpus": 64, "total_nodes": 1},
+				{"name": "standard", "nodes": "node[2-3]", "total_cpus": 16, "total_nodes": 2, "tres": "cpu=16,mem=6000M,node=2,billing=16"},
+				{"name": "performance", "nodes": "node1", "total_cpus": 16, "total_nodes": 1, "tres": "cpu=16,mem=6000M,node=1,billing=16"},
 			},
 		}
 		_ = json.NewEncoder(w).Encode(resp)

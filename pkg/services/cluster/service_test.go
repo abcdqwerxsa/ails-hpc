@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"ails-hpc/pkg/services/cluster"
@@ -99,5 +100,35 @@ func TestCluster_NilClient_ReportedDown(t *testing.T) {
 	router.ServeHTTP(w2, req2)
 	if w2.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500 for nil client on partitions, got %d", w2.Code)
+	}
+}
+
+// TestExpandHostlistAndTresMem 助手单测：hostlist 展开（含范围/逗号/零填充）+ tres 内存。
+func TestExpandHostlistAndTresMem(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"node1", "node1"},
+		{"node[2-3]", "node2,node3"},
+		{"node1,node[4-5]", "node1,node4,node5"},
+		{"pfx[1-3,5]", "pfx1,pfx2,pfx3,pfx5"},
+		{"pfx[01-02]", "pfx01,pfx02"},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := strings.Join(slurmrest.ExpandHostlist(c.in), ","); got != c.want {
+			t.Errorf("ExpandHostlist(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+	mc := map[string]int{
+		"cpu=8,mem=3000M,node=2,billing=8": 3000,
+		"cpu=16,mem=6000M,node=1":          6000,
+		"cpu=4,mem=2G":                     2048,
+		"cpu=4,mem=512K":                   0, // 0.5MB 截断为 0
+		"cpu=4":                            0,
+		"":                                 0,
+	}
+	for in, want := range mc {
+		if got := slurmrest.ParseTresMemMB(in); got != want {
+			t.Errorf("ParseTresMemMB(%q) = %d, want %d", in, got, want)
+		}
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -419,14 +420,110 @@ func (c *Client) GetJobs() (*JobsResponse, error) {
 }
 
 // PartitionsResponse 定义了 /slurm/v0.0.37/partitions 的响应体解析结构
+// PartitionInfo 是 slurmrestd 分区记录的解析结构。Tres 形如 "cpu=8,mem=3000M,node=2,billing=8"
+//（内存在这里；GPU 不在分区记录里——GRES 挂在节点上，需按成员节点聚合）。
+type PartitionInfo struct {
+	Name       string `json:"name"`
+	Nodes      string `json:"nodes"`
+	TotalCPUs  int    `json:"total_cpus"`
+	TotalNodes int    `json:"total_nodes"`
+	Tres       string `json:"tres"`
+}
+
 type PartitionsResponse struct {
-	Errors []interface{} `json:"errors"`
-	Partitions []struct {
-		Name       string `json:"name"`
-		Nodes      string `json:"nodes"`
-		TotalCPUs  int    `json:"total_cpus"`
-		TotalNodes int    `json:"total_nodes"`
-	} `json:"partitions"`
+	Errors     []interface{}   `json:"errors"`
+	Partitions []PartitionInfo `json:"partitions"`
+}
+
+// ParseTresMemMB 从 TRES 串提取内存（MB）。形如 "cpu=8,mem=3000M,node=2"；
+// 后缀 K/M/G/T 分别折算；裸数字按 MB；缺失返回 0。
+func ParseTresMemMB(tres string) int {
+	for _, kv := range strings.Split(tres, ",") {
+		kv = strings.TrimSpace(kv)
+		if !strings.HasPrefix(kv, "mem=") {
+			continue
+		}
+		v := strings.TrimPrefix(kv, "mem=")
+		if v == "" {
+			return 0
+		}
+		mul := 1.0
+		switch c := v[len(v)-1]; c {
+		case 'K', 'k':
+			mul, v = 1.0/1024, v[:len(v)-1]
+		case 'M', 'm':
+			mul, v = 1, v[:len(v)-1]
+		case 'G', 'g':
+			mul, v = 1024, v[:len(v)-1]
+		case 'T', 't':
+			mul, v = 1024*1024, v[:len(v)-1]
+		}
+		n, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			return 0
+		}
+		return int(n * mul)
+	}
+	return 0
+}
+
+// ExpandHostlist 展开 Slurm hostlist 表达式为节点名列表。
+// 支持常见形态：name / name1,name2 / pfx[1-3] / pfx[1-3,5]（含零填充 pfx[01-03]）；
+// 不做全量 hostlist 语义（无 step/多重前缀），本集群命名足够。
+func ExpandHostlist(expr string) []string {
+	var out []string
+	for _, tok := range splitTopComma(expr) {
+		tok = strings.TrimSpace(tok)
+		if tok == "" {
+			continue
+		}
+		i := strings.IndexByte(tok, '[')
+		if i < 0 || !strings.HasSuffix(tok, "]") {
+			out = append(out, tok)
+			continue
+		}
+		prefix, body := tok[:i], tok[i+1:len(tok)-1]
+		for _, part := range strings.Split(body, ",") {
+			loHi := strings.SplitN(part, "-", 2)
+			lo, err := strconv.Atoi(loHi[0])
+			if err != nil {
+				out = append(out, prefix+part)
+				continue
+			}
+			hi := lo
+			if len(loHi) == 2 {
+				if hi, err = strconv.Atoi(loHi[1]); err != nil {
+					out = append(out, prefix+part)
+					continue
+				}
+			}
+			width := len(loHi[0])
+			for n := lo; n <= hi; n++ {
+				out = append(out, prefix+fmt.Sprintf("%0*d", width, n))
+			}
+		}
+	}
+	return out
+}
+
+// splitTopComma 按顶层逗号切分（括号内逗号不切）。
+func splitTopComma(s string) []string {
+	var parts []string
+	depth, start := 0, 0
+	for i, c := range s {
+		switch c {
+		case '[':
+			depth++
+		case ']':
+			depth--
+		case ',':
+			if depth == 0 {
+				parts = append(parts, s[start:i])
+				start = i + 1
+			}
+		}
+	}
+	return append(parts, s[start:])
 }
 
 // GetPartitions 获取集群分区定义与分配信息
