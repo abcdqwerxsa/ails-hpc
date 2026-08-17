@@ -2,10 +2,12 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,6 +19,7 @@ import (
 	"ails-hpc/pkg/services/jobs"
 	"ails-hpc/pkg/services/monitor"
 	"ails-hpc/pkg/services/nodes"
+	"ails-hpc/pkg/store"
 	"ails-hpc/pkg/slurmrest"
 )
 
@@ -30,7 +33,29 @@ import (
 //   - AILS_TOKEN_TTL / AILS_PORT 可选
 func main() {
 	portFlag := flag.String("port", "", "Port for API server (overrides AILS_PORT; default 8090)")
+	importUsersFlag := flag.String("import-users", "", "Import a users.yaml into the sqlite user store (AILS_DB_PATH), then exit")
 	flag.Parse()
+
+	// -import-users：一次性迁移工具（多租户 Phase 1）。不启动服务。
+	if *importUsersFlag != "" {
+		dbPath := os.Getenv("AILS_DB_PATH")
+		if dbPath == "" {
+			dbPath = "var/lib/ails/ails.db"
+		}
+		if err := os.MkdirAll(filepath.Dir(dbPath), 0o750); err != nil {
+			log.Fatalf("mkdir db dir: %v", err)
+		}
+		st, err := store.Open(dbPath)
+		if err != nil {
+			log.Fatalf("open sqlite store %s: %v", dbPath, err)
+		}
+		n, err := store.ImportYaml(st, *importUsersFlag)
+		if err != nil {
+			log.Fatalf("import: %v", err)
+		}
+		fmt.Printf("imported %d users into %s\n", n, dbPath)
+		return
+	}
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -41,9 +66,23 @@ func main() {
 	auth.SetSecret(cfg.JWTSecret)
 	auth.SetTokenTTL(cfg.TokenTTL)
 
-	userStore, err := auth.LoadUserStore(cfg.UsersFile)
-	if err != nil {
-		log.Fatalf("load users from %s: %v", cfg.UsersFile, err)
+	// 用户库双模（多租户 Phase 1）：默认 yaml；AILS_USER_STORE=db 切 sqlite（读面同走
+	// auth.UserStore，登录/租户解析对后端无感知）。
+	var userStore auth.UserStore
+	switch cfg.UserStoreKind {
+	case "db":
+		st, err := store.Open(cfg.DBPath)
+		if err != nil {
+			log.Fatalf("open sqlite user store %s: %v (did you run -import-users?)", cfg.DBPath, err)
+		}
+		defer st.Close()
+		userStore = st
+	default:
+		var err error
+		userStore, err = auth.LoadUserStore(cfg.UsersFile)
+		if err != nil {
+			log.Fatalf("load users from %s: %v", cfg.UsersFile, err)
+		}
 	}
 
 	// 共享单个 slurmrestd 客户端（懒加载 token、401/403 自动续期）

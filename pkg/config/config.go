@@ -4,6 +4,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -17,6 +18,8 @@ type Config struct {
 	SlurmRESTDURL      string        // SLURMRESTD_URL，默认 "http://192.168.20.226:6820"
 	SlurmUserName      string        // AILS_SLURM_USER，默认 "hpcuser"
 	UsersFile          string        // AILS_USERS_FILE，默认 "config/users.yaml"
+	UserStoreKind      string        // AILS_USER_STORE，"yaml"|"db"（多租户 Phase 1 双模，默认 yaml）
+	DBPath             string        // AILS_DB_PATH，sqlite 用户库路径（UserStoreKind=db 时生效）
 }
 
 // Load 从环境变量读取配置。
@@ -31,6 +34,13 @@ func Load() (*Config, error) {
 		SlurmRESTDURL:      envOr("SLURMRESTD_URL", "http://192.168.20.226:6820"),
 		SlurmUserName:      envOr("AILS_SLURM_USER", "hpcuser"),
 		UsersFile:          envOr("AILS_USERS_FILE", "config/users.yaml"),
+		UserStoreKind:      envOr("AILS_USER_STORE", "yaml"),
+		DBPath:             envOr("AILS_DB_PATH", "var/lib/ails/ails.db"),
+	}
+	switch cfg.UserStoreKind {
+	case "yaml", "db":
+	default:
+		return nil, fmt.Errorf("AILS_USER_STORE must be yaml or db, got %q", cfg.UserStoreKind)
 	}
 	if len(cfg.JWTSecret) == 0 {
 		return nil, errors.New("AILS_JWT_SECRET is required (set it to a random >=32-byte string)")
