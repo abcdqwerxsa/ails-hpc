@@ -34,8 +34,8 @@
 
 | # | 内容 | 规模 | 状态 |
 |---|---|---|---|
-| 4.1 | 作业数组/依赖(--array/--dependency 高级选项) | M | 待做 |
-| 4.2 | 预约/QOS 管理(admin 直通 sacctmgr) | M | 待做 |
+| 4.1 | 作业数组/依赖 | array_spec/dependency 走 CLI sbatch(REST 无字段,白名单防注入);表单高级选项折叠区 | M | **代码完成待验证**(分支 feat/track4-cluster,commit 3d53161f) |
+| 4.2 | 预约/QOS 管理 | 6 个 admin 端点(reservations CRUD + qos list/add + 租户绑定 QOS,scontrol/sacctmgr 直通);admin 页预约+QOS 面板 | M | **代码完成待验证**(同上) |
 | 4.3 | 多物理节点接入(provision 泛化) | L | 待做 |
 
 ## 执行顺序
