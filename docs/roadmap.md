@@ -26,9 +26,9 @@
 
 | # | 内容 | 规模 | 状态 |
 |---|---|---|---|
-| 3.1 | 节点异常告警横幅(DOWN/DRAIN + PENDING 堆积阈值,纯前端) | S | 待做 |
-| 3.2 | 监控历史落盘(环形缓冲→sqlite,重启不清零;可选) | M | 待做 |
-| 3.3 | 队列深度趋势线(监控页加 PENDING 序列) | S | 待做 |
+| 3.1 | 节点异常告警横幅 | 总览页 DOWN/DRAIN/FAIL 节点或 PENDING≥5 → rose 横幅(深链 nodes/jobs) | S | **已完成**(PR #50) |
+| 3.2 | 监控历史落盘 | 独立 monitor.db(modernc WAL)追加+重启装回窗口;开库失败静默降级内存态 | M | **已完成**(PR #50) |
+| 3.3 | 队列深度趋势线 | Snapshot/History 加 queue(PENDING 计数);监控页 autoScale 计量图 | S | **已完成**(PR #50) |
 
 ## 轨道 4:集群能力扩展(按需)
 
