@@ -36,7 +36,25 @@ func main() {
 	portFlag := flag.String("port", "", "Port for API server (overrides AILS_PORT; default 8090)")
 	importUsersFlag := flag.String("import-users", "", "Import a users.yaml into the sqlite user store (AILS_DB_PATH), then exit")
 	exportSeedsFlag := flag.String("export-seeds", "", "Export the sqlite user store as cluster seed JSON (tenants+users), then exit")
+	backupDbFlag := flag.String("backup-db", "", "Online-snapshot the sqlite user store (VACUUM INTO) to the given path, then exit")
 	flag.Parse()
+
+	// -backup-db：用户库在线快照（systemd timer 每日调用；宿主无 sqlite3 CLI）。
+	if *backupDbFlag != "" {
+		dbPath := os.Getenv("AILS_DB_PATH")
+		if dbPath == "" {
+			dbPath = "var/lib/ails/ails.db"
+		}
+		st, err := store.Open(dbPath)
+		if err != nil {
+			log.Fatalf("open sqlite store %s: %v", dbPath, err)
+		}
+		if err := store.BackupTo(st, *backupDbFlag); err != nil {
+			log.Fatalf("backup: %v", err)
+		}
+		fmt.Printf("backup written to %s\n", *backupDbFlag)
+		return
+	}
 
 	// -export-seeds：把用户库导出为集群供给种子（entrypoint 重建集群时消费；db 真相源）。
 	if *exportSeedsFlag != "" {

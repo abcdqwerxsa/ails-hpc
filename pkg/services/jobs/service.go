@@ -64,7 +64,7 @@ type CliSubmitOpts struct {
 	Gpus        int
 	Nodes       int
 	Tasks       int
-	TimeLimit   int // 秒
+	TimeLimit int // 分钟（sbatch --time 单位）
 }
 
 // defaultCliSubmit 生产实现：脚本写入 /shared/portal-jobs/<name>-<rand>.job，
@@ -79,7 +79,7 @@ func defaultCliSubmit(o CliSubmitOpts) (int, error) {
 		"-J", o.Name, "-p", o.Partition,
 		fmt.Sprintf("--mem=%d", max(o.MemoryMB, 1)),
 		fmt.Sprintf("--gres=gpu:%d", max(o.Gpus, 1)),
-		fmt.Sprintf("--time=%d", max(o.TimeLimit, 60)),
+		fmt.Sprintf("--time=%d", max(o.TimeLimit, 1)), // sbatch --time 单位=分钟（TimeLimit 本就是分钟）
 		"--chdir=/shared", "--output=/shared/jobs/%j.out",
 	}
 	if o.Nodes > 1 {
@@ -165,9 +165,10 @@ func (s *jobServiceImpl) SubmitJob(ctx context.Context, req *SubmitJobRequest, c
 		return nil, ErrInvalidResourceLimit
 	}
 
+	// 表单 时限(分钟) 直传分钟（v0.0.37 REST time_limit 单位=分钟）；默认 60。
 	timeLimit, _ := strconv.Atoi(req.TimeLimit.String())
 	if timeLimit <= 0 {
-		timeLimit = 3600
+		timeLimit = 60
 	}
 
 	nodesCount := req.Nodes
@@ -217,8 +218,7 @@ func (s *jobServiceImpl) SubmitJob(ctx context.Context, req *SubmitJobRequest, c
 		slurmReq.Job.MinimumNodes = nodesCount
 		slurmReq.Job.Tasks = req.Tasks
 		slurmReq.Job.CpusPerTask = req.CpusPerTask
-		slurmReq.Job.CurrentWorkingDirectory = req.CurrentWorkingDirectory
-		slurmReq.Job.TimeLimit = timeLimit
+		slurmReq.Job.TimeLimit = timeLimit // 分钟（v0.0.37 REST time_limit 实测单位=分钟）
 		slurmReq.Job.Environment = map[string]string{
 			"PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 		}

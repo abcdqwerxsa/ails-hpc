@@ -3,7 +3,9 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
+	"strings"
 )
 
 // Seeds 是集群侧供给种子（-export-seeds 输出 / entrypoint 读取）：
@@ -59,4 +61,14 @@ func WriteSeedsJSON(w io.Writer, st Store) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(sd)
+}
+
+// BackupTo 在线快照备份（VACUUM INTO——WAL 安全、不阻塞写）。目标目录须存在。
+func BackupTo(st Store, targetPath string) error {
+	impl, ok := st.(*sqliteStore)
+	if !ok {
+		return fmt.Errorf("store: backup requires the sqlite store")
+	}
+	_, err := impl.db.Exec(fmt.Sprintf("VACUUM INTO '%s'", strings.ReplaceAll(targetPath, "'", "''")))
+	return err
 }

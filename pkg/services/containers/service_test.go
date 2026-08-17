@@ -250,12 +250,13 @@ func TestProxyTarget_UnknownSession(t *testing.T) {
 
 // TestLaunchContainer_TimeLimitAdjustable：time_limit_min 透传（默认 7200，可调，>720 封顶）。
 func TestLaunchContainer_TimeLimitAdjustable(t *testing.T) {
+	// want 单位=分钟（v0.0.37 REST time_limit 实测为分钟；内部秒→分钟取整）
 	cases := []struct {
 		min, want int
 	}{
-		{0, 7200},   // 默认 2h
-		{30, 1800},  // 30 分钟
-		{800, 43200}, // 超上限 → 12h 封顶
+		{0, 120},   // 默认 2h
+		{30, 30},   // 30 分钟
+		{800, 720}, // 超上限 → 12h 封顶
 	}
 	for _, c := range cases {
 		jobs := &fakeJobsAPI{submitResp: &slurmrest.SlurmJobSubmitResp{JobID: 9}}
