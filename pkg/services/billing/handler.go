@@ -10,9 +10,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// TenantResolver 返回某租户的成员 clusterUser 清单（多租户 scope 用；users.yaml 时代
-// 由 main 从用户库按 orgSlug 派生，DB 时代由 store 实现）。
-type TenantResolver func(tenantSlug string) ([]string, error)
+// TenantResolver 统一复用 pkg/auth 的注入面（users.yaml 时代由 main 按 orgSlug 派生，
+// DB 时代由 store.ClusterUsersOfTenant 实现）。
+type TenantResolver = auth.TenantResolver
 
 type BillingHandler struct {
 	service  BillingService

@@ -19,10 +19,18 @@ const ideRoutePrefix = "/api/v1/ide/"
 
 type ContainerHandler struct {
 	service ContainerService
+	// tenants 租户成员解析（Phase 4）；nil = 不收紧（仅测试/旧装配）。
+	tenants auth.TenantResolver
 }
 
 func NewContainerHandler(service ContainerService) *ContainerHandler {
 	return &ContainerHandler{service: service}
+}
+
+// NewContainerHandlerScoped 注入租户成员解析（Phase 4：member 只见/只控自己的会话，
+// tenant_admin 限本租户，ops/admin 全量）。
+func NewContainerHandlerScoped(service ContainerService, tenants auth.TenantResolver) *ContainerHandler {
+	return &ContainerHandler{service: service, tenants: tenants}
 }
 
 // callerFromCtx 从 JWT claims 取 (username, role, clusterUser, account)。
@@ -39,16 +47,19 @@ func callerFromCtx(c *gin.Context) (username, role, clusterUser, account string)
 // forbidIfNotSessionOwner 归属隔离：member 只能回收自己的会话（owner==clusterUser 或遗留空 owner 放行）；
 // tenant_admin 越权。已写响应（403/404）时返回 true，调用方应 return。
 func (h *ContainerHandler) forbidIfNotSessionOwner(c *gin.Context, id string) bool {
-	_, role, clusterUser, _ := callerFromCtx(c)
-	if role != auth.RoleMember {
-		return false
-	}
 	owner, err := h.service.SessionOwner(c.Request.Context(), id)
 	if err != nil {
 		httpx.NotFound(c, "session not found")
 		return true
 	}
-	if owner != "" && owner != clusterUser {
+	// Phase 4：member 只控自己的；tenant_admin 限本租户（此前全局通配，按设计 §6 收紧）；
+	// 空属主=遗留会话，放行。
+	allow, err := auth.ScopeFromClaims(auth.ClaimsFromCtx(c)).RowFilter(h.tenants)
+	if err != nil {
+		httpx.Internal(c, "forbidIfNotSessionOwner.scope", err)
+		return true
+	}
+	if !allow(owner) {
 		httpx.Error(c, http.StatusForbidden, "forbidden: not the session owner")
 		return true
 	}
@@ -94,7 +105,20 @@ func (h *ContainerHandler) ListContainers(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, ContainerListResponse{Containers: list})
+	// Phase 4 租户隔离：member 只见自己的会话；tenant_admin 见本租户；ops/admin 全量。
+	allow, err := auth.ScopeFromClaims(auth.ClaimsFromCtx(c)).RowFilter(h.tenants)
+	if err != nil {
+		httpx.Internal(c, "ListContainers.scope", err)
+		return
+	}
+	scoped := make([]*ContainerInstance, 0, len(list))
+	for _, ct := range list {
+		if allow(ct.Owner) {
+			scoped = append(scoped, ct)
+		}
+	}
+
+	c.JSON(http.StatusOK, ContainerListResponse{Containers: scoped})
 }
 
 func (h *ContainerHandler) RecycleContainer(c *gin.Context) {

@@ -13,10 +13,18 @@ import (
 
 type JobHandler struct {
 	service JobService
+	// tenants 租户成员解析（Phase 4 租户隔离）；nil = 不收紧（仅测试/旧装配）。
+	tenants auth.TenantResolver
 }
 
 func NewJobHandler(service JobService) *JobHandler {
 	return &JobHandler{service: service}
+}
+
+// NewJobHandlerScoped 注入租户成员解析（Phase 4：member 只见/只控自己的作业，
+// tenant_admin 限本租户，ops/admin 全量）。
+func NewJobHandlerScoped(service JobService, tenants auth.TenantResolver) *JobHandler {
+	return &JobHandler{service: service, tenants: tenants}
 }
 
 // callerFromCtx 从 JWT claims 取 (username, role, clusterUser, account)。
@@ -34,18 +42,29 @@ func callerFromCtx(c *gin.Context) (username, role, clusterUser, account string)
 // tenant_admin 越权放行。已写入响应（403/404）时返回 true，调用方应 return。
 func (h *JobHandler) forbidIfNotOwner(c *gin.Context, jobID int) bool {
 	_, role, clusterUser, _ := callerFromCtx(c)
-	if role != auth.RoleMember {
-		return false // 非 member（tenant_admin 等）越权放行
-	}
 	owner, err := h.service.JobOwner(c.Request.Context(), jobID)
 	if err != nil {
-		httpx.NotFound(c, "job not found")
+		// 作业不存在 → 404；其余（slurmrestd 不可达等）如实 500，不把后端故障伪装成"没有此作业"
+		if errors.Is(err, ErrJobNotFound) {
+			httpx.NotFound(c, "job not found")
+		} else {
+			httpx.Internal(c, "JobOwner", err)
+		}
 		return true
 	}
-	if owner != "" && owner != clusterUser {
+	// Phase 4：member 只控自己的；tenant_admin 限本租户（此前为全局通配，按设计 §6 收紧）；
+	// 空属主=遗留作业，全员放行。ops/admin 不经本路由（角色矩阵无控制权）。
+	allow, err := auth.ScopeFromClaims(auth.ClaimsFromCtx(c)).RowFilter(h.tenants)
+	if err != nil {
+		httpx.Internal(c, "forbidIfNotOwner.scope", err)
+		return true
+	}
+	if !allow(owner) {
 		httpx.Error(c, http.StatusForbidden, "forbidden: not the job owner")
 		return true
 	}
+	_ = role
+	_ = clusterUser
 	return false
 }
 
@@ -94,9 +113,23 @@ func (h *JobHandler) ListJobs(c *gin.Context) {
 		return
 	}
 
+	// Phase 4 租户隔离：member 只见自己的作业；tenant_admin 见本租户；ops/admin 全量。
+	// owner 为空的行（遗留/squeue 兜底）对所有人可见（迁移期兼容）。
+	allow, err := auth.ScopeFromClaims(auth.ClaimsFromCtx(c)).RowFilter(h.tenants)
+	if err != nil {
+		httpx.Internal(c, "ListJobs.scope", err)
+		return
+	}
+	scoped := make([]JobSummary, 0, len(jobsList))
+	for _, j := range jobsList {
+		if allow(j.Owner) {
+			scoped = append(scoped, j)
+		}
+	}
+
 	c.JSON(http.StatusOK, JobListResponse{
 		Code: 200,
-		Jobs: jobsList,
+		Jobs: scoped,
 	})
 }
 

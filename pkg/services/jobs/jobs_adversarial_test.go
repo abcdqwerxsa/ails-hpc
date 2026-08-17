@@ -164,32 +164,20 @@ func TestAdversarial_NonExistentJob(t *testing.T) {
 
 	nonExistentID := 99999
 
-	t.Run("Cancel Non-Existent Job", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("POST", fmt.Sprintf("/api/v1/slurm/jobs/%d/cancel", nonExistentID), nil)
-		router.ServeHTTP(w, req)
-		if w.Code != http.StatusInternalServerError {
-			t.Errorf("Expected 500 InternalServerError when backend returns 404, got %d", w.Code)
-		}
-	})
-
-	t.Run("Hold Non-Existent Job", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("POST", fmt.Sprintf("/api/v1/slurm/jobs/%d/hold", nonExistentID), nil)
-		router.ServeHTTP(w, req)
-		if w.Code != http.StatusInternalServerError {
-			t.Errorf("Expected 500 InternalServerError when backend returns 404, got %d", w.Code)
-		}
-	})
-
-	t.Run("Requeue Non-Existent Job", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("POST", fmt.Sprintf("/api/v1/slurm/jobs/%d/requeue", nonExistentID), nil)
-		router.ServeHTTP(w, req)
-		if w.Code != http.StatusInternalServerError {
-			t.Errorf("Expected 500 InternalServerError when backend returns 404, got %d", w.Code)
-		}
-	})
+	// Phase 4 起 forbidIfNotOwner 先做 JobOwner 预检：不存在的作业 → 404（此前 500）。
+	notFound := func(name, path string) {
+		t.Run(name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest("POST", fmt.Sprintf(path, nonExistentID), nil)
+			router.ServeHTTP(w, req)
+			if w.Code != http.StatusNotFound {
+				t.Errorf("Expected 404 for non-existent job, got %d", w.Code)
+			}
+		})
+	}
+	notFound("Cancel Non-Existent Job", "/api/v1/slurm/jobs/%d/cancel")
+	notFound("Hold Non-Existent Job", "/api/v1/slurm/jobs/%d/hold")
+	notFound("Requeue Non-Existent Job", "/api/v1/slurm/jobs/%d/requeue")
 }
 
 // TestAdversarial_BackendFailure tests resilience when SlurmRESTd is unreachable
