@@ -194,6 +194,7 @@ func (s *containerServiceImpl) ListActiveContainers(ctx context.Context) ([]*Con
 			WebURL:    webURLFor(sid),
 			JobID:     j.JobID,
 			Node:      firstNonEmpty(m.Node, j.Nodes),
+			Owner:     m.Owner,
 			Nodes:     m.Nodes,
 			CPUs:      m.CPUs,
 			MemoryMB:  m.MemoryMB,

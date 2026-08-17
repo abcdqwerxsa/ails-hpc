@@ -77,14 +77,27 @@ func setupTestRouter(t *testing.T) (*gin.Engine, *common.MockSlurmServer) {
 		{Username: "member", PasswordHash: hashPw("member123"), Role: auth.RoleMember, OrgSlug: "hpc-lab", TenantNS: "default", ClusterUser: "ailsmember", Account: "ailsmember"},
 		{Username: "ops", PasswordHash: hashPw("ops123"), Role: auth.RoleOpsAdmin, OrgSlug: "hpc-lab", TenantNS: "default", ClusterUser: "ailsops", Account: "ailsops"},
 		{Username: "member2", PasswordHash: hashPw("member2123"), Role: auth.RoleMember, OrgSlug: "hpc-lab", TenantNS: "default", ClusterUser: "member2", Account: "member2"},
+		{Username: "biomember", PasswordHash: hashPw("biomember1"), Role: auth.RoleMember, OrgSlug: "bio-lab", TenantNS: "default", ClusterUser: "ailsmember2", Account: "ailsmember2"},
 	})
+
+	tenantMembers := func(st auth.UserStore) auth.TenantResolver {
+		return func(tenant string) ([]string, error) {
+			var members []string
+			for _, u := range st.ListUsers() {
+				if u.OrgSlug == tenant {
+					members = append(members, u.ClusterUser)
+				}
+			}
+			return members, nil
+		}
+	}
 
 	h := Handlers{
 		Auth:       auth.NewAuthHandler(store),
 		Cluster:    cluster.NewClusterHandler(cluster.NewClusterService(slurmClient)),
 		Nodes:      nodes.NewNodeHandler(nodes.NewNodeServiceWithApplier(slurmClient, func(string, string, string) error { return nil })),
-		Jobs:       jobs.NewJobHandler(jobs.NewJobService(slurmClient)),
-		Containers: containers.NewContainerHandler(containers.NewContainerService(slurmClient)),
+		Jobs:       jobs.NewJobHandlerScoped(jobs.NewJobService(slurmClient), tenantMembers(store)),
+		Containers: containers.NewContainerHandlerScoped(containers.NewContainerService(slurmClient), tenantMembers(store)),
 				Billing: billing.NewBillingHandlerWithScope(billingService, func(tenant string) ([]string, error) {
 			var members []string
 			for _, u := range store.ListUsers() {
@@ -108,18 +121,19 @@ func tokenFor(t *testing.T, role string) string {
 	if role == "" {
 		return ""
 	}
-	// WithStore 中间件做活体校验（用户须在 store 中）——用户名映射真实账号，
-	// clusterUser 保持角色名（作业归属断言依赖它与 mock 记录一致）。
-	user := map[string]string{
-		auth.RoleSystemAdmin:  "admin",
-		auth.RoleTenantAdmin:  "tenantadmin",
-		auth.RoleMember:       "member",
-		auth.RoleOpsAdmin:     "ops",
-	}[role]
-	if user == "" {
-		user = role
+	// WithStore 活体校验要求用户在 store 中；clusterUser 一并对齐 store 的 ails* 命名，
+	// 使租户成员解析（按 orgSlug 派生 clusterUser 清单）能命中提交者身份。
+	userOf := map[string][2]string{
+		auth.RoleSystemAdmin:  {"admin", "ailsadmin"},
+		auth.RoleTenantAdmin:  {"tenantadmin", "ailstadmin"},
+		auth.RoleMember:       {"member", "ailsmember"},
+		auth.RoleOpsAdmin:     {"ops", "ailsops"},
 	}
-	tok, err := auth.GenerateToken(user, role, "hpc-lab", "default", role, role)
+	pair, ok := userOf[role]
+	if !ok {
+		pair = [2]string{role, role}
+	}
+	tok, err := auth.GenerateToken(pair[0], role, "hpc-lab", "default", pair[1], pair[1])
 	if err != nil {
 		t.Fatalf("mint token for %s: %v", role, err)
 	}
@@ -209,8 +223,8 @@ func TestRouter_PerUserSubmitIdentity(t *testing.T) {
 	for _, j := range list.Jobs {
 		if j.Name == "idtest" {
 			found = true
-			if j.Owner != "member" {
-				t.Errorf("job owner=%q want \"member\" (per-user clusterUser; was root before L1 isolation)", j.Owner)
+			if j.Owner != "ailsmember" {
+				t.Errorf("job owner=%q want \"ailsmember\" (per-user clusterUser; was root before L1 isolation)", j.Owner)
 			}
 		}
 	}
@@ -247,8 +261,8 @@ func TestRouter_L4ControlAuthz(t *testing.T) {
 	if c := cancel(id, memberTok); c != http.StatusOK {
 		t.Fatalf("member cancel own: want 200 got %d", c)
 	}
-	if got := mock.LastControlUser(); got != "member" {
-		t.Errorf("control acting user = %q, want \"member\" (per-user token)", got)
+	if got := mock.LastControlUser(); got != "ailsmember" {
+		t.Errorf("control acting user = %q, want \"ailsmember\" (per-user token)", got)
 	}
 
 	// tenant_admin 越权取消 → 走 root
@@ -349,6 +363,77 @@ func TestRouter_PasswordChange(t *testing.T) {
 	}
 	if c, b := doAuth(r, http.MethodPost, "/api/v1/auth/login", `{"username":"member","password":"changed99"}`, ""); c != http.StatusOK {
 		t.Fatalf("new password login: want 200 got %d body=%s", c, b)
+	}
+}
+
+
+// TestRouter_TenantScoping 多租户 Phase 4：作业/会话列表与控制按租户收口。
+//   - 跨租户 member 的作业：本租户 member 不可控（403）、tenant_admin 不可控（403）
+//   - tenant_admin 可控本租户 member 的作业（200）
+//   - 列表可见性：member 只见自己；tenant_admin 见本租户；ops 全量
+func TestRouter_TenantScoping(t *testing.T) {
+	r, _ := setupTestRouter(t)
+	// 跨租户 member：bio-lab 租户（store 无此租户成员清单 → 解析为空）
+	bioTok, _ := auth.GenerateToken("biomember", auth.RoleMember, "bio-lab", "default", "ailsmember2", "ailsmember2")
+	hpTok := tokenFor(t, auth.RoleMember)   // clusterUser=ailsmember @ hpc-lab
+	taTok := tokenFor(t, auth.RoleTenantAdmin)
+	opsTok := tokenFor(t, auth.RoleOpsAdmin)
+
+	subNamed := func(tok, name string) int {
+		code, body := doAuth(r, http.MethodPost, "/api/v1/slurm/jobs/submit",
+			fmt.Sprintf(`{"name":%q,"script":"echo hi"}`, name), tok)
+		if code != http.StatusOK {
+			t.Fatalf("submit: %d %s", code, body)
+		}
+		var resp struct{ JobID int `json:"job_id"` }
+		_ = json.Unmarshal([]byte(body), &resp)
+		return resp.JobID
+	}
+	sub := func(tok string) int { return subNamed(tok, "sc") }
+	cancel := func(id int, tok string) int {
+		c, _ := doAuth(r, http.MethodPost, fmt.Sprintf("/api/v1/slurm/jobs/%d/cancel", id), "", tok)
+		return c
+	}
+	names := func(tok string) map[string]bool {
+		_, body := doAuth(r, http.MethodGet, "/api/v1/slurm/jobs", "", tok)
+		var l jobs.JobListResponse
+		_ = json.Unmarshal([]byte(body), &l)
+		out := map[string]bool{}
+		for _, j := range l.Jobs {
+			out[j.Name] = true
+		}
+		return out
+	}
+
+	bioJob := subNamed(bioTok, "sc-bio") // bio-lab 的作业（owner=ailsmember2）
+	hpJob := subNamed(hpTok, "sc-hp")   // hpc-lab member 的作业（owner=ailsmember）
+
+	// 1) hpc-lab member 不能控 bio 的作业
+	if c := cancel(bioJob, hpTok); c != http.StatusForbidden {
+		t.Errorf("cross-tenant member cancel: want 403 got %d", c)
+	}
+	// 2) hpc-lab tenant_admin 不能控 bio 的作业（此前全局通配！）
+	if c := cancel(bioJob, taTok); c != http.StatusForbidden {
+		t.Errorf("cross-tenant tenant_admin cancel: want 403 got %d", c)
+	}
+	// 3) tenant_admin 可控本租户 member 的作业
+	if c := cancel(hpJob, taTok); c != http.StatusOK {
+		t.Errorf("own-tenant tenant_admin cancel: want 200 got %d", c)
+	}
+
+	// 4) 列表可见性（作业名可区分：sc-bio=bio 租户，sc-hp/sc=hpc-lab）
+	sub(hpTok)
+	hpView := names(hpTok)
+	if !hpView["sc"] || !hpView["sc-hp"] || hpView["sc-bio"] {
+		t.Errorf("member must see exactly own jobs, saw %v", hpView)
+	}
+	bioView := names(bioTok)
+	if !bioView["sc-bio"] || bioView["sc"] || bioView["sc-hp"] {
+		t.Errorf("cross-tenant member must see only own job, saw %v", bioView)
+	}
+	opsView := names(opsTok)
+	if !opsView["sc"] || !opsView["sc-hp"] || !opsView["sc-bio"] {
+		t.Errorf("ops must see all jobs, saw %v", opsView)
 	}
 }
 

@@ -11,6 +11,7 @@ type ContainerInstance struct {
 	WebURL    string    `json:"web_url"`       // /api/v1/ide/<session>/
 	JobID     int       `json:"job_id"`
 	Node      string    `json:"node,omitempty"`
+	Owner     string    `json:"owner,omitempty"` // 会话属主 clusterUser（Phase 4 列表租户过滤）
 	Nodes     int       `json:"nodes"`
 	CPUs      int       `json:"cpus"`
 	MemoryMB  int       `json:"memory_mb"`
