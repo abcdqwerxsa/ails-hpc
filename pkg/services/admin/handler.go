@@ -3,6 +3,7 @@ package admin
 import (
 	"errors"
 	"net/http"
+	"regexp"
 
 	"ails-hpc/pkg/auth"
 	"ails-hpc/pkg/httpx"
@@ -110,8 +111,10 @@ func (h *AdminHandler) CreateTenant(c *gin.Context) {
 // UpdateTenant PATCH /api/v1/admin/tenants/:slug {name?,status?}
 func (h *AdminHandler) UpdateTenant(c *gin.Context) {
 	var req struct {
-		Name   string `json:"name"`
-		Status string `json:"status"`
+		Name       string `json:"name"`
+		Status     string `json:"status"`
+		GrpTRES    string `json:"grpTRES"`
+		Fairshare  string `json:"fairshare"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		httpx.BadRequest(c, "invalid payload")
@@ -121,8 +124,15 @@ func (h *AdminHandler) UpdateTenant(c *gin.Context) {
 		httpx.BadRequest(c, "status must be active or suspended")
 		return
 	}
+	// 限额值白名单（防注入 sacctmgr）：TRES 值字符集 / Fairshare 数字
+	for _, v := range []string{req.GrpTRES, req.Fairshare} {
+		if v != "" && !limitRE.MatchString(v) {
+			httpx.BadRequest(c, "grpTRES/fairshare contains illegal characters")
+			return
+		}
+	}
 	actor, _ := actorAndTenant(c)
-	if err := h.service.UpdateTenantStatus(c.Request.Context(), actor, c.Param("slug"), req.Status, requestID(c)); err != nil {
+	if err := h.service.UpdateTenant(c.Request.Context(), actor, c.Param("slug"), req.Status, req.GrpTRES, req.Fairshare, requestID(c)); err != nil {
 		mapErr(c, err, "admin.UpdateTenant")
 		return
 	}
@@ -239,3 +249,6 @@ func (h *AdminHandler) ResetMyUserPassword(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "password reset; the user's sessions are revoked"})
 }
+
+// limitRE 限额值白名单：TRES（cpu=4,mem=2g,gres/gpu=1 逗号分隔）或 Fairshare 数字。
+var limitRE = regexp.MustCompile(`^[0-9A-Za-z/=,:+. _-]{1,64}$`)

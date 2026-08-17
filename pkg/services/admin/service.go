@@ -28,32 +28,68 @@ var (
 	ErrRoleNotAllowed = errors.New("admin: tenant admins may only create member or tenant_admin users")
 )
 
-// Provisioner 在 Slurm 侧为用户建 account+association（默认 sacctmgr via docker exec；
-// 测试注入假实现）。
-type Provisioner func(clusterUser, account string) error
+// SlurmProvisioner 是 Slurm 侧供给面（默认 sacctmgr via docker exec；测试注入假实现）。
+type SlurmProvisioner interface {
+	// ProvisionAccount 建账号（租户父账号 / 用户叶子账号；幂等）。
+	ProvisionAccount(account, parentAccount string) error
+	// ProvisionUser 建用户叶子账号（parent=租户父账号）+ association。
+	ProvisionUser(clusterUser, account, parentAccount string) error
+	// SetAccountLimits 设置账号级限额（如 "GrpTRES=cpu=4" / "Fairshare=10"；幂等）。
+	SetAccountLimits(account, setting string) error
+}
 
-// DefaultProvisioner 经 slurmctld 容器执行 sacctmgr（幂等：重复 add 容错）。
-func DefaultProvisioner(clusterUser, account string) error {
-	if _, err := slurmrest.RunInSlurmctld("sh", "-c",
-		fmt.Sprintf("sacctmgr -i add account %s || true; sacctmgr -i add user %s account=%s || true",
-			account, clusterUser, account)); err != nil {
-		return err
+// sacctmgrProvisioner 是默认实现：经 slurmctld 容器执行 sacctmgr（重复 add 容错）。
+type sacctmgrProvisioner struct{}
+
+// DefaultProvisioner 生产供给实现。
+var DefaultProvisioner SlurmProvisioner = sacctmgrProvisioner{}
+
+func (sacctmgrProvisioner) ProvisionAccount(account, parentAccount string) error {
+	add := fmt.Sprintf("sacctmgr -i add account %s", account)
+	if parentAccount != "" {
+		add += fmt.Sprintf(" parent=%s", parentAccount)
 	}
-	return nil
+	_, err := slurmrest.RunInSlurmctld("sh", "-c", add+" || true")
+	return err
+}
+
+func (sacctmgrProvisioner) ProvisionUser(clusterUser, account, parentAccount string) error {
+	_, err := slurmrest.RunInSlurmctld("sh", "-c",
+		fmt.Sprintf("sacctmgr -i add account %s parent=%s || true; sacctmgr -i add user %s account=%s || true",
+			account, parentAccount, clusterUser, account))
+	return err
+}
+
+func (sacctmgrProvisioner) SetAccountLimits(account, setting string) error {
+	_, err := slurmrest.RunInSlurmctld("sh", "-c",
+		fmt.Sprintf("sacctmgr -i modify account %s set %s", account, setting))
+	return err
 }
 
 // Service 是管理域用例层。
 type Service struct {
 	st        store.AdminStore
-	provision Provisioner
+	provision SlurmProvisioner
 }
 
 // NewService 构造管理服务。st 为 nil（yaml 模式）时所有方法返回 ErrReadOnlyStore。
-func NewService(st store.AdminStore, p Provisioner) *Service {
+func NewService(st store.AdminStore, p SlurmProvisioner) *Service {
 	if p == nil {
 		p = DefaultProvisioner
 	}
 	return &Service{st: st, provision: p}
+}
+
+// provisionUser 供给用户叶子账号（parent=租户父账号）+ association。
+func (s *Service) provisionUser(ctx context.Context, u *auth.User) error {
+	t, err := s.st.TenantBySlug(ctx, u.TenantSlug)
+	if err != nil {
+		return fmt.Errorf("%w: resolve tenant %s: %v", ErrProvisionFailed, u.TenantSlug, err)
+	}
+	if err := s.provision.ProvisionUser(u.ClusterUser, u.Account, t.ParentAccount); err != nil {
+		return fmt.Errorf("%w: %v", ErrProvisionFailed, err)
+	}
+	return nil
 }
 
 func (s *Service) ensure() error {
@@ -82,19 +118,42 @@ func (s *Service) CreateTenant(ctx context.Context, actor, slug, name, rid strin
 	if err != nil {
 		return nil, err
 	}
+	// Phase 5：租户=Slurm 父账号（fairshare/GrpTRES 层级载体）；建租户即建父账号。
+	if err := s.provision.ProvisionAccount(t.ParentAccount, ""); err != nil {
+		return t, fmt.Errorf("%w: tenant account provisioning: %v", ErrProvisionFailed, err)
+	}
 	_ = s.st.WriteAudit(ctx, actor, "tenant.create", "tenant:"+slug, rid, "{}")
 	return t, nil
 }
 
-// UpdateTenantStatus 更新租户状态（active|suspended）。
-func (s *Service) UpdateTenantStatus(ctx context.Context, actor, slug, status, rid string) error {
+// UpdateTenant 更新租户（状态与/或 Slurm 限额——GrpTRES/Fairshare 落在父账号上）。
+// grpTRES/fairshare 为空串表示不变更。
+func (s *Service) UpdateTenant(ctx context.Context, actor, slug, status, grpTRES, fairshare, rid string) error {
 	if err := s.ensure(); err != nil {
 		return err
 	}
-	if err := s.st.SetTenantStatus(ctx, slug, status); err != nil {
+	t, err := s.st.TenantBySlug(ctx, slug)
+	if err != nil {
 		return err
 	}
-	_ = s.st.WriteAudit(ctx, actor, "tenant.status", "tenant:"+slug, rid, `{"status":"`+status+`"}`)
+	if status != "" {
+		if err := s.st.SetTenantStatus(ctx, slug, status); err != nil {
+			return err
+		}
+	}
+	// 限额变更：逐条 set（幂等；Slurm 语法由调用方保证——handler 只做字符集白名单）
+	for _, kv := range []struct{ setting, val string }{
+		{"GrpTRES", grpTRES}, {"Fairshare", fairshare},
+	} {
+		if kv.val == "" {
+			continue
+		}
+		if err := s.provision.SetAccountLimits(t.ParentAccount, kv.setting+"="+kv.val); err != nil {
+			return fmt.Errorf("%w: set %s on %s: %v", ErrProvisionFailed, kv.setting, t.ParentAccount, err)
+		}
+	}
+	_ = s.st.WriteAudit(ctx, actor, "tenant.update", "tenant:"+slug, rid,
+		`{"status":"`+status+`","grpTRES":"`+grpTRES+`","fairshare":"`+fairshare+`"}`)
 	return nil
 }
 
@@ -116,8 +175,8 @@ func (s *Service) CreatePlatformUser(ctx context.Context, actor string, nu store
 	if err != nil {
 		return nil, err
 	}
-	if err := s.provision(u.ClusterUser, u.Account); err != nil {
-		return u, fmt.Errorf("%w: %v", ErrProvisionFailed, err)
+	if err := s.provisionUser(ctx, u); err != nil {
+		return u, err
 	}
 	_ = s.st.WriteAudit(ctx, actor, "user.create", "user:"+u.Username, rid, `{"role":"`+u.Role+`","tenant":"`+u.TenantSlug+`"}`)
 	return u, nil
@@ -146,8 +205,8 @@ func (s *Service) CreateTenantUser(ctx context.Context, actor, tenantSlug string
 	if err != nil {
 		return nil, err
 	}
-	if err := s.provision(u.ClusterUser, u.Account); err != nil {
-		return u, fmt.Errorf("%w: %v", ErrProvisionFailed, err)
+	if err := s.provisionUser(ctx, u); err != nil {
+		return u, err
 	}
 	_ = s.st.WriteAudit(ctx, actor, "user.create", "user:"+u.Username, rid, `{"tenant":"`+tenantSlug+`"}`)
 	return u, nil

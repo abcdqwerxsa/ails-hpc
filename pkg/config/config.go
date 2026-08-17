@@ -34,7 +34,7 @@ func Load() (*Config, error) {
 		SlurmRESTDURL:      envOr("SLURMRESTD_URL", "http://192.168.20.226:6820"),
 		SlurmUserName:      envOr("AILS_SLURM_USER", "hpcuser"),
 		UsersFile:          envOr("AILS_USERS_FILE", "config/users.yaml"),
-		UserStoreKind:      envOr("AILS_USER_STORE", "yaml"),
+		UserStoreKind:      envOr("AILS_USER_STORE", "db"),
 		DBPath:             envOr("AILS_DB_PATH", "var/lib/ails/ails.db"),
 	}
 	switch cfg.UserStoreKind {

@@ -59,6 +59,7 @@ services:
       - ./config/slurmdbd.conf:/etc/slurm/slurmdbd.conf.template:ro
       - ./config/entrypoint.sh:/entrypoint.sh:ro
       - ./config/users.yaml:/etc/slurm/ails-users.yaml:ro
+      - ./config/slurm-seeds.json:/etc/slurm/ails-seeds.json:ro
       - slurmctld-state:/var/spool/slurmctld
       - shared-storage:/shared
     depends_on:
@@ -92,6 +93,7 @@ services:
       - ./config/entrypoint.sh:/entrypoint.sh:ro
       - ./config/gres.conf:/etc/slurm/gres.conf:ro
       - ./config/users.yaml:/etc/slurm/ails-users.yaml:ro
+      - ./config/slurm-seeds.json:/etc/slurm/ails-seeds.json:ro
       - shared-storage:/shared
     depends_on:
       - slurmctld
@@ -118,6 +120,7 @@ services:
       - ./config/slurm.conf:/etc/slurm/slurm.conf:ro
       - ./config/entrypoint.sh:/entrypoint.sh:ro
       - ./config/users.yaml:/etc/slurm/ails-users.yaml:ro
+      - ./config/slurm-seeds.json:/etc/slurm/ails-seeds.json:ro
       - shared-storage:/shared
     depends_on:
       - slurmctld
@@ -144,6 +147,7 @@ services:
       - ./config/slurm.conf:/etc/slurm/slurm.conf:ro
       - ./config/entrypoint.sh:/entrypoint.sh:ro
       - ./config/users.yaml:/etc/slurm/ails-users.yaml:ro
+      - ./config/slurm-seeds.json:/etc/slurm/ails-seeds.json:ro
       - shared-storage:/shared
     depends_on:
       - slurmctld
