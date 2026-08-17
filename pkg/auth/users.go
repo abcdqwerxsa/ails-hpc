@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"golang.org/x/crypto/bcrypt"
@@ -13,6 +14,10 @@ import (
 // ErrInvalidCredentials 登录失败（用户不存在或密码错误）。
 // 两种情况返回同一错误，避免用户名枚举。
 var ErrInvalidCredentials = errors.New("invalid username or password")
+
+// ErrUserStoreReadOnly 用户库只读（文件系统不可写/内存种子库）：写操作被整体拒绝，
+// 内存状态不发生变化（全有或全无——绝不出现"密码看似改失败实则已改"的分裂态）。
+var ErrUserStoreReadOnly = errors.New("user store is read-only")
 
 // User 表示一个可登录账号。PasswordHash 为 bcrypt 哈希；Role 为权威角色。
 // JSON tag 对 password_hash 标 `-`，确保哈希永不序列化进响应。
@@ -109,8 +114,13 @@ func LoadUserStore(path string) (UserStore, error) {
 	if err := yaml.Unmarshal(data, &uf); err != nil {
 		return nil, err
 	}
+	// 绝对路径：SetPassword 的 tmp+rename 必须与原文件同目录同文件系统，且不随 cwd 漂移。
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
 	st := NewUserStoreFromList(uf.Users).(*userStoreImpl)
-	st.path = path
+	st.path = abs
 	return st, nil
 }
 
@@ -121,12 +131,17 @@ func (s *userStoreImpl) SetPassword(username, bcryptHash string) error {
 	if !ok {
 		return ErrInvalidCredentials
 	}
+	// 全有或全无：文件库先把新哈希落盘（tmp+rename 原子替换），成功后才更新内存。
+	// 落盘失败（如 systemd ProtectSystem 只读）→ 内存不变，调用方拿到明确的只读错误，
+	// 绝不出现"接口报错但密码其实已变"的分裂态。
+	if s.path != "" {
+		if err := rewriteYamlPassword(s.path, username, bcryptHash); err != nil {
+			return fmt.Errorf("%w: %v", ErrUserStoreReadOnly, err)
+		}
+	}
 	u.PasswordHash = bcryptHash
 	u.TokenVersion++
-	if s.path == "" {
-		return nil // 纯内存库（测试）
-	}
-	return rewriteYamlPassword(s.path, username, bcryptHash)
+	return nil
 }
 
 // UserVersion 返回用户当前 TokenVersion。
