@@ -1,6 +1,7 @@
 package auth_test
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -215,5 +216,43 @@ users:
 	st2, _ := auth.LoadUserStore(p)
 	if u, ok := st2.Lookup("member"); !ok || u.PasswordHash != "NEWHASH" {
 		t.Errorf("reload: hash=%q ok=%v", u.PasswordHash, ok)
+	}
+}
+
+// TestSetPassword_ReadOnlyAtomic 只读文件系统（模拟 systemd ProtectSystem）：
+// SetPassword 必须整体拒绝（ErrUserStoreReadOnly），且内存状态不变——绝不出现
+// "报错但密码其实已变"的分裂态。
+func TestSetPassword_ReadOnlyAtomic(t *testing.T) {
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "ro")
+	if err := os.Mkdir(sub, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(sub, 0o755) }) // TempDir 清理需要
+	p := filepath.Join(sub, "users.yaml")
+	hash, _ := auth.BcryptGenerateFromPassword("member123")
+	yaml := "users:\n  - username: member\n    password_hash: \"" + hash + "\"\n    role: member\n    orgSlug: hpc-lab\n    clusterUser: ailsmember\n    uid: 2003\n    gid: 2000\n    account: ailsmember\n"
+	if err := os.WriteFile(p, []byte(yaml), 0o644); err != nil {
+		t.Skipf("cannot set up read-only dir: %v", err)
+	}
+	_ = os.Chmod(p, 0o444)
+	st, err := auth.LoadUserStore(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newHash, _ := auth.BcryptGenerateFromPassword("newpass99")
+	err = st.SetPassword("member", newHash)
+	if !errors.Is(err, auth.ErrUserStoreReadOnly) {
+		t.Fatalf("want ErrUserStoreReadOnly, got %v", err)
+	}
+	// 内存未变：旧密码仍有效、新密码仍无效、版本未动
+	if _, err := st.Verify("member", "member123"); err != nil {
+		t.Errorf("memory must be unchanged (old pw valid): %v", err)
+	}
+	if _, err := st.Verify("member", "newpass99"); err == nil {
+		t.Error("new password must NOT be active after rejected write")
+	}
+	if ver, _ := st.UserVersion("member"); ver != 0 {
+		t.Errorf("token_version must stay 0, got %d", ver)
 	}
 }

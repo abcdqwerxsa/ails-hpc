@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"net/http"
 
 	"ails-hpc/pkg/httpx"
@@ -123,6 +124,12 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 		return
 	}
 	if err := h.store.SetPassword(username, string(hash)); err != nil {
+		if errors.Is(err, ErrUserStoreReadOnly) {
+			// yaml 文件库落在只读文件系统（systemd ProtectSystem）等：明确拒绝，
+			// 密码未变化；DB 用户库（AILS_USER_STORE=db）可写。
+			httpx.ServiceUnavailable(c, "password change is not supported by the active (read-only) user store; AILS_USER_STORE=db required", nil)
+			return
+		}
 		httpx.Internal(c, "ChangePassword.SetPassword", err)
 		return
 	}

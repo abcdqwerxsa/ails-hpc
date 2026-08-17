@@ -29,10 +29,13 @@ EnvironmentFile=/opt/slurm-cluster/.env
 ExecStart=/opt/slurm-cluster/bin/apiserver -port 8090
 Restart=on-failure
 RestartSec=2
-# 硬化：apiserver 不写磁盘（slog→stdout→journald，仅读 .env + users.yaml），故 strict 无需 ReadWritePaths；
+# 硬化：apiserver 原则上不写磁盘（slog→stdout→journald，仅读 .env + users.yaml）。
+# 唯一可写目录 = sqlite 用户库（多租户 Phase 2 起：改密/禁用写 var/lib/ails/ails.db；
+# yaml 种子文件保持只读——改密在 yaml 模式下会被明确拒绝而非半途失败）。
 # 保留对外网络以连 slurmrestd（不加 PrivateNetwork）。
 NoNewPrivileges=true
 ProtectSystem=strict
+ReadWritePaths=/opt/slurm-cluster/var/lib/ails
 ProtectHome=true
 PrivateTmp=true
 
