@@ -42,3 +42,40 @@ func TestJobDetail_NotFound(t *testing.T) {
 		t.Errorf("want ErrJobNotFound, got %v", err)
 	}
 }
+
+func TestHistory_ParsesFiltersDesc(t *testing.T) {
+	out := "70|older|ailsmember|ailsmember|standard|COMPLETED|10|0:0|s1|st1|e1\n" +
+		"70.batch|batch||ailsmember||COMPLETED|10|0:0|s|st|e\n" +
+		"71|newer|ailsmember|ailsmember|performance|FAILED|5|1:0|s2|st2|e2\n" +
+		"72|other|ailsother|ailsother|standard|COMPLETED|3|0:0|s3|st3|e3\n"
+	s := &jobServiceImpl{
+		localJobs: map[int]*JobSummary{},
+		sacctRun:  func(args ...string) ([]byte, error) { return []byte(out), nil },
+	}
+	// 全量：倒序（71 在 70 前），步骤行忽略
+	es, err := s.History(context.Background(), HistoryQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(es) != 3 || es[0].JobID != 72 || es[1].JobID != 71 || es[2].JobID != 70 {
+		t.Fatalf("order/rows = %+v", es)
+	}
+	if es[1].State != "FAILED" || es[1].ElapsedSec != 5 || es[1].ExitCode != "1:0" || es[1].Owner != "ailsmember" {
+		t.Errorf("row71 = %+v", es[1])
+	}
+	// 按用户过滤
+	es, _ = s.History(context.Background(), HistoryQuery{User: "ailsmember"})
+	if len(es) != 2 {
+		t.Fatalf("user filter = %d rows", len(es))
+	}
+	// 按状态过滤
+	es, _ = s.History(context.Background(), HistoryQuery{State: "failed"})
+	if len(es) != 1 || es[0].JobID != 71 {
+		t.Fatalf("state filter = %+v", es)
+	}
+	// limit
+	es, _ = s.History(context.Background(), HistoryQuery{Limit: 1})
+	if len(es) != 1 {
+		t.Fatalf("limit = %d", len(es))
+	}
+}

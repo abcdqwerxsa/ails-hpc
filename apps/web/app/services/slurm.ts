@@ -106,6 +106,22 @@ export interface JobDetail {
   submit?: string;
   stdout_tail?: string;
 }
+export interface HistoryEntry {
+  job_id: number;
+  name: string;
+  owner?: string;
+  account?: string;
+  partition?: string;
+  state: string;
+  elapsed_sec?: number;
+  exit_code?: string;
+  submit?: string;
+  start?: string;
+  end?: string;
+}
+export interface HistoryResponse {
+  history: HistoryEntry[];
+}
 export interface JobListResponse {
   code?: number;
   jobs: JobSummary[];
@@ -341,6 +357,13 @@ export const slurm = {
   getJobs: () => apiFetch<JobListResponse>("/slurm/jobs"),
   getJobDetail: (jobId: number) =>
     apiFetch<JobDetail>(`/slurm/jobs/${jobId}/detail`),
+  getJobHistory: (state?: string, limit?: number) => {
+    const q = new URLSearchParams();
+    if (state) q.set("state", state);
+    if (limit) q.set("limit", String(limit));
+    const s = q.toString();
+    return apiFetch<HistoryResponse>(`/slurm/jobs/history${s ? "?" + s : ""}`);
+  },
   submitJob: (payload: SubmitJobRequest) =>
     apiFetch<SubmitJobResponse>("/slurm/jobs/submit", {
       method: "POST",
