@@ -4,7 +4,8 @@ After=ails-apiserver.service
 
 [Service]
 Type=oneshot
-# sqlite3 .backup 在线快照（WAL 安全）；保留 7 份轮转
-ExecStart=/bin/sh -c 'sqlite3 /opt/slurm-cluster/var/lib/ails/ails.db ".backup /opt/slurm-cluster/var/lib/ails/backups/ails-$(date +%%u).db"'
+# 经 apiserver 二进制的 VACUUM INTO 在线快照（宿主无需 sqlite3 CLI）；7 份按星期轮转
+ExecStart=/bin/sh -c '/opt/slurm-cluster/bin/apiserver -backup-db /opt/slurm-cluster/var/lib/ails/backups/ails-$(date +%%u).db'
+WorkingDirectory=/opt/slurm-cluster
 User=ails
 Group=ails

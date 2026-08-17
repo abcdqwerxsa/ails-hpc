@@ -140,7 +140,8 @@ func (s *containerServiceImpl) LaunchContainer(ctx context.Context, req *Contain
 			timeLimit = req.TimeLimitMin * 60
 		}
 	}
-	subReq.Job.TimeLimit = timeLimit
+	// v0.0.37 REST time_limit 单位是**分钟**（实测）；内部秒 → 分钟向上取整。
+	subReq.Job.TimeLimit = (timeLimit + 59) / 60
 	subReq.Job.CurrentWorkingDirectory = "/shared"
 	// Slurm 21.08 slurmrestd 要求 environment 为非空 dict，否则拒绝提交
 	subReq.Job.Environment = map[string]string{
