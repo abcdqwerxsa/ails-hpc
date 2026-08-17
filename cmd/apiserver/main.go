@@ -142,7 +142,8 @@ func main() {
 		Jobs:       jobs.NewJobHandlerScoped(jobs.NewJobService(slurmClient), tenantResolver),
 		Containers: containers.NewContainerHandlerScoped(containers.NewContainerService(slurmClient), tenantResolver),
 		Billing:    billing.NewBillingHandlerWithScope(billingService, tenantResolver),
-		Monitor:    monitor.NewMonitorHandler(monitor.NewMonitorService(slurmClient)),
+		Monitor: monitor.NewMonitorHandler(
+			monitor.NewMonitorServicePersistent(slurmClient, filepath.Join(filepath.Dir(cfg.DBPath), "monitor.db"))),
 		Admin:      admin.NewAdminHandler(admin.NewService(adminStore, admin.DefaultProvisioner)),
 	}
 

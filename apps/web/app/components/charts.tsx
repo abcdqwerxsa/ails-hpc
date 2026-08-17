@@ -63,7 +63,7 @@ export function Donut({ pct, color, label, sub }: { pct: number; color: string; 
 }
 
 // LineChart 多序列折线图：序列为 0-100 百分比，旧→新。
-export function LineChart({ series, height = 200 }: { series: LineSeries[]; height?: number }) {
+export function LineChart({ series, height = 200, autoScale = false }: { series: LineSeries[]; height?: number; autoScale?: boolean }) {
   const w = 640;
   const h = height;
   const padL = 28;
@@ -72,8 +72,17 @@ export function LineChart({ series, height = 200 }: { series: LineSeries[]; heig
   const padB = 18;
   const maxPts = series.reduce((m, s) => Math.max(m, s.data.length), 1);
   const x = (i: number, n: number) => (n <= 1 ? padL : padL + (i / (n - 1)) * (w - padL - padR));
-  const y = (v: number) => padT + (1 - Math.max(0, Math.min(100, v)) / 100) * (h - padT - padB);
-  const grid = [0, 25, 50, 75, 100];
+  // autoScale：计数序列（如队列深度）按数据最大值取整量程；否则固定 0-100（百分比）。
+  let yMax = 100;
+  if (autoScale) {
+    let m = 10;
+    for (const sr of series) for (const v of sr.data) if (v > m) m = v;
+    yMax = Math.ceil(m / 10) * 10;
+  }
+  const y = (v: number) => padT + (1 - Math.max(0, Math.min(yMax, v)) / yMax) * (h - padT - padB);
+  const grid = autoScale
+    ? Array.from({ length: 5 }, (_, i) => Math.round((yMax / 4) * i))
+    : [0, 25, 50, 75, 100];
   const empty = maxPts < 2; // 至少 2 个采样点才能画出线段
   return (
     <svg width="100%" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" role="img" aria-label="资源分配趋势图" style={{ display: 'block' }}>

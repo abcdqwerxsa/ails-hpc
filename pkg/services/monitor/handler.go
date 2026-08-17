@@ -26,10 +26,11 @@ func (h *MonitorHandler) GetSnapshot(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, SnapshotResponse{
-		CPU:  snap.CPU,
-		Mem:  snap.Mem,
-		GPU:  snap.GPU,
-		Disk: snap.Disk,
+		CPU:   snap.CPU,
+		Mem:   snap.Mem,
+		GPU:   snap.GPU,
+		Disk:  snap.Disk,
+		Queue: snap.Queue,
 	})
 }
 

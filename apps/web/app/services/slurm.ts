@@ -219,6 +219,7 @@ export interface MonitorSnapshot {
   mem: MonitorResource;
   gpu: MonitorResource;
   disk: MonitorDisk;
+  queue?: number; // PENDING 作业数
 }
 
 // 监控趋势持久化历史（服务端累积，0-100 百分比，旧→新，≤360 点）
@@ -228,6 +229,7 @@ export interface MonitorHistory {
   mem: number[];
   gpu: number[];
   disk: number[];
+  queue?: number[]; // PENDING 计数（非百分比）
 }
 
 // 计费（阶段 4）
