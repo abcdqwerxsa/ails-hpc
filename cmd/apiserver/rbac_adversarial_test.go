@@ -62,6 +62,7 @@ func setupRBACStack(t *testing.T) (*gin.Engine, store.AdminStore) {
 		{Username: "alice", Password: "alice12345", Role: auth.RoleMember, TenantSlug: "hpc-lab"},
 		{Username: "bob", Password: "bob1234567", Role: auth.RoleMember, TenantSlug: "hpc-lab"},
 		{Username: "biomember", Password: "biomember12", Role: auth.RoleMember, TenantSlug: "bio-lab"},
+		{Username: "puser", Password: "puser123456", Role: auth.RoleOpsAdmin, TenantSlug: "system"},
 	} {
 		if _, err := st.CreateUser(ctx, u); err != nil {
 			t.Fatalf("seed %s: %v", u.Username, err)
