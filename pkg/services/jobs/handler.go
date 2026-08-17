@@ -133,6 +133,36 @@ func (h *JobHandler) ListJobs(c *gin.Context) {
 	})
 }
 
+// GetJobDetail GET /api/v1/slurm/jobs/:id/detail —— sacct 生命期数据 + 输出尾部。
+// 租户隔离同列表：member 仅本人，tenant_admin 本租户（owner 取自 sacct User），ops/admin 全量。
+func (h *JobHandler) GetJobDetail(c *gin.Context) {
+	jobID, err := strconv.Atoi(c.Param("id"))
+	if err != nil || jobID <= 0 {
+		httpx.BadRequest(c, "Invalid Job ID")
+		return
+	}
+	d, err := h.service.JobDetail(c.Request.Context(), jobID)
+	if err != nil {
+		if errors.Is(err, ErrJobNotFound) {
+			httpx.NotFound(c, "job not found")
+		} else {
+			httpx.Internal(c, "JobDetail", err)
+		}
+		return
+	}
+	allow, err := auth.ScopeFromClaims(auth.ClaimsFromCtx(c)).RowFilter(h.tenants)
+	if err != nil {
+		httpx.Internal(c, "GetJobDetail.scope", err)
+		return
+	}
+	if !allow(d.Owner) {
+		// 他人作业：404（与跨租户用户管理一致，防枚举）
+		httpx.NotFound(c, "job not found")
+		return
+	}
+	c.JSON(http.StatusOK, d)
+}
+
 func (h *JobHandler) CancelJob(c *gin.Context) {
 	idStr := c.Param("id")
 	jobID, err := strconv.Atoi(idStr)

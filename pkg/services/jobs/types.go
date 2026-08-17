@@ -75,6 +75,23 @@ type JobControlResponse struct {
 	Status  string `json:"status,omitempty"`
 }
 
+// JobDetail 作业详情（GET /jobs/:id/detail）：sacct 生命期数据 + 输出尾部。
+type JobDetail struct {
+	JobID      int    `json:"job_id"`
+	Name       string `json:"name"`
+	Owner      string `json:"owner"` // clusterUser（sacct User）
+	Account    string `json:"account"`
+	Partition  string `json:"partition"`
+	State      string `json:"state"`
+	ElapsedSec int    `json:"elapsed_sec"`
+	ExitCode   string `json:"exit_code"` // "0:0" 形态
+	Start      string `json:"start"`
+	End        string `json:"end"`
+	Submit     string `json:"submit"`
+	// StdoutTail 输出文件尾部（/shared/jobs/<id>.out tail 200 行；空=尚无输出）。
+	StdoutTail string `json:"stdout_tail"`
+}
+
 // JobSummary 单个作业概览
 type JobSummary struct {
 	JobID      int    `json:"job_id"`

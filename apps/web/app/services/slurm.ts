@@ -92,6 +92,20 @@ export interface JobSummary {
   submit_time: number;
   owner?: string; // 提交者 clusterUser（slurm account 回填）
 }
+export interface JobDetail {
+  job_id: number;
+  name: string;
+  owner?: string;
+  account?: string;
+  partition?: string;
+  state: string;
+  elapsed_sec?: number;
+  exit_code?: string;
+  start?: string;
+  end?: string;
+  submit?: string;
+  stdout_tail?: string;
+}
 export interface JobListResponse {
   code?: number;
   jobs: JobSummary[];
@@ -314,6 +328,8 @@ export const slurm = {
 
   // 作业（阶段 2）
   getJobs: () => apiFetch<JobListResponse>("/slurm/jobs"),
+  getJobDetail: (jobId: number) =>
+    apiFetch<JobDetail>(`/slurm/jobs/${jobId}/detail`),
   submitJob: (payload: SubmitJobRequest) =>
     apiFetch<SubmitJobResponse>("/slurm/jobs/submit", {
       method: "POST",

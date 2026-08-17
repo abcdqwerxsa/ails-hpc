@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
-import { slurm, type JobSummary, type Partition } from '../services/slurm';
+import { slurm, type JobDetail, type JobSummary, type Partition } from '../services/slurm';
 
 export const Route = createFileRoute('/jobs')({ component: JobsPage });
 
@@ -42,6 +42,9 @@ function JobsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [acting, setActing] = useState('');
   const [filter, setFilter] = useState('ALL');
+  const [detail, setDetail] = useState<JobDetail | null>(null);
+  const [detailErr, setDetailErr] = useState('');
+  const [detailLoading, setDetailLoading] = useState(false);
   const [partitions, setPartitions] = useState<Partition[]>([]);
 
   // 分区列表（一次拉取，供提交表单下拉；standard=E核默认 / performance=P核，见 slurm.conf）
@@ -113,6 +116,19 @@ function JobsPage() {
       setError(`作业 #${id} ${kind} 失败：${e?.message || e}`);
     } finally {
       setActing('');
+    }
+  };
+
+  const openDetail = async (id: number) => {
+    setDetailLoading(true);
+    setDetailErr('');
+    setDetail(null);
+    try {
+      setDetail(await slurm.getJobDetail(id));
+    } catch (e: any) {
+      setDetailErr(e?.message || '加载详情失败');
+    } finally {
+      setDetailLoading(false);
     }
   };
 
@@ -265,6 +281,7 @@ function JobsPage() {
                   <td style={td}>{j.time_limit || '-'}</td>
                   <td style={td}>{j.submit_time ? new Date(j.submit_time * 1000).toLocaleString() : '-'}</td>
                   <td style={{ ...td, display: 'flex', gap: '0.4rem' }}>
+                    <MiniBtn onClick={() => openDetail(j.job_id)}>详情</MiniBtn>
                     {/* 只禁用正在操作的这一行（acting = jobId+kind），其他行不受影响 */}
                     <MiniBtn disabled={acting.startsWith(String(j.job_id))} onClick={() => act(j.job_id, 'cancel')}>取消</MiniBtn>
                     <MiniBtn disabled={acting.startsWith(String(j.job_id))} onClick={() => act(j.job_id, 'hold')}>挂起</MiniBtn>
