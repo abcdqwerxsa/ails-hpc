@@ -131,6 +131,8 @@ export interface SubmitJobRequest {
   partition: string;
   memory_mb?: number; // 显式内存 MB（缺省=350MB/核）
   gpus?: number; // GPU 卡数（仅 performance 分区，1.1）
+  array_spec?: string; // 作业数组，如 "1-4"（4.1）
+  dependency?: string; // 依赖，如 "afterok:123"（4.1）
   nodes?: number;
   tasks?: number;
   cpus?: number;
@@ -300,6 +302,22 @@ export interface CreateAdminUserRequest {
   tenantSlug: string;
   password: string;
 }
+export interface Reservation {
+  name: string;
+  start_time?: string;
+  end_time?: string;
+  duration?: string;
+  nodes?: string;
+  users?: string;
+  state?: string;
+}
+export interface QOSInfo {
+  name: string;
+  priority?: string;
+  grp_tres?: string;
+  max_tres?: string;
+  max_wall?: string;
+}
 export interface AuditEntry {
   id: number;
   actor: string;
@@ -422,6 +440,25 @@ export const slurm = {
     apiFetch<TenantInfo>("/admin/tenants", {
       method: "POST",
       body: JSON.stringify({ slug, name }),
+    }),
+  listReservations: () => apiFetch<{ reservations: Reservation[] }>("/admin/reservations"),
+  createReservation: (p: { name: string; durationMinutes: number; startTime?: string; nodes?: string; users?: string; partition?: string }) =>
+    apiFetch<{ reservation: Reservation }>("/admin/reservations", {
+      method: "POST",
+      body: JSON.stringify(p),
+    }),
+  deleteReservation: (name: string) =>
+    apiFetch<{ message: string }>(`/admin/reservations/${encodeURIComponent(name)}`, { method: "DELETE" }),
+  listQOS: () => apiFetch<{ qos: QOSInfo[] }>("/admin/qos"),
+  createQOS: (name: string, grpTRES?: string) =>
+    apiFetch<{ qos: QOSInfo }>("/admin/qos", {
+      method: "POST",
+      body: JSON.stringify({ name, grpTRES }),
+    }),
+  setTenantQOS: (slug: string, name: string) =>
+    apiFetch<{ message: string }>(`/admin/tenants/${encodeURIComponent(slug)}/qos`, {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
     }),
   listAudit: (actor?: string, action?: string, limit?: number) => {
     const q = new URLSearchParams();

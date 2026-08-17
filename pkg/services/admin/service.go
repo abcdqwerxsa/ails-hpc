@@ -26,6 +26,8 @@ var (
 	ErrProvisionFailed = errors.New("admin: user created but Slurm provisioning failed (retry is safe)")
 	// ErrRoleNotAllowed 租户级建用户只允许 member/tenant_admin（平台角色由 /admin/users 建）。
 	ErrRoleNotAllowed = errors.New("admin: tenant admins may only create member or tenant_admin users")
+	// ErrReservationNotFound 预约不存在。
+	ErrReservationNotFound = errors.New("admin: reservation not found")
 )
 
 // SlurmProvisioner 是 Slurm 侧供给面（默认 sacctmgr via docker exec；测试注入假实现）。
@@ -70,6 +72,7 @@ func (sacctmgrProvisioner) SetAccountLimits(account, setting string) error {
 type Service struct {
 	st        store.AdminStore
 	provision SlurmProvisioner
+	runner    clusterRunner // 集群管理命令（4.2 预约/QOS）；nil=默认 slurmctld CLI
 }
 
 // NewService 构造管理服务。st 为 nil（yaml 模式）时所有方法返回 ErrReadOnlyStore。

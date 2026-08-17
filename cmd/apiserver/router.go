@@ -91,6 +91,13 @@ func NewRouter(h Handlers) *gin.Engine {
 		platformAdmin.GET("/tenants/:slug/users", h.Admin.ListTenantUsers)
 		platformAdmin.POST("/users", h.Admin.CreatePlatformUser)
 		platformAdmin.GET("/audit", h.Admin.ListAudit)
+		// 4.2 预约 / QOS 管理（admin 直通 scontrol/sacctmgr）
+		platformAdmin.GET("/reservations", h.Admin.ListReservations)
+		platformAdmin.POST("/reservations", h.Admin.CreateReservation)
+		platformAdmin.DELETE("/reservations/:name", h.Admin.DeleteReservation)
+		platformAdmin.GET("/qos", h.Admin.ListQOS)
+		platformAdmin.POST("/qos", h.Admin.CreateQOS)
+		platformAdmin.PATCH("/tenants/:slug/qos", h.Admin.SetTenantQOS)
 
 		// 租户管理（tenant_admin；租户归属以 claims 为权威，不信任请求体）
 		tenantAdmin := api.Group("/tenants", auth.RequireRole(auth.RoleTenantAdmin))

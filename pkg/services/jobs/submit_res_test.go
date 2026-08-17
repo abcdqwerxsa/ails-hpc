@@ -174,3 +174,50 @@ func TestHistoryHandler_Scoping(t *testing.T) {
 		t.Errorf("tenant default view: %d %s", w.Code, w.Body.String())
 	}
 }
+
+// TestSubmit_ArrayDependencyViaCLI：数组/依赖走 CLI 且参数透传；非法语法 400。
+func TestSubmit_ArrayDependencyViaCLI(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var got jobs.CliSubmitOpts
+	api := &fakeAPI{}
+	svc := jobs.NewJobServiceWithDeps(api, func(o jobs.CliSubmitOpts) (int, error) {
+		got = o
+		return 999, nil
+	})
+	h := jobs.NewJobHandler(svc)
+	r := gin.New()
+	r.POST("/submit", h.SubmitJob)
+
+	// 数组 + 依赖 → CLI,字段透传
+	w := httptest.NewRecorder()
+	body, _ := json.Marshal(map[string]any{"name": "arr", "script": "x", "array_spec": "1-4", "dependency": "afterok:123"})
+	req, _ := http.NewRequest("POST", "/submit", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("array submit: %d %s", w.Code, w.Body.String())
+	}
+	if got.ArraySpec != "1-4" || got.Dependency != "afterok:123" || api.calls != 0 {
+		t.Errorf("opts = %+v apiCalls=%d", got, api.calls)
+	}
+
+	// 非法数组语法（注入尝试）→ 400
+	w = httptest.NewRecorder()
+	body, _ = json.Marshal(map[string]any{"name": "bad", "script": "x", "array_spec": "1;rm -rf /"})
+	req, _ = http.NewRequest("POST", "/submit", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("injection spec: want 400 got %d", w.Code)
+	}
+
+	// 非法依赖语法 → 400
+	w = httptest.NewRecorder()
+	body, _ = json.Marshal(map[string]any{"name": "bad2", "script": "x", "dependency": "afterok:1 && cat /etc/passwd"})
+	req, _ = http.NewRequest("POST", "/submit", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("injection dep: want 400 got %d", w.Code)
+	}
+}
