@@ -200,6 +200,9 @@ func TestSubmit_ArrayDependencyViaCLI(t *testing.T) {
 	if got.ArraySpec != "1-4" || got.Dependency != "afterok:123" || api.calls != 0 {
 		t.Errorf("opts = %+v apiCalls=%d", got, api.calls)
 	}
+	if got.Gpus != 0 || got.MemoryMB != 0 {
+		t.Errorf("array job must not force gpu/mem: %+v", got)
+	}
 
 	// 非法数组语法（注入尝试）→ 400
 	w = httptest.NewRecorder()

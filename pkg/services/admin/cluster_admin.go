@@ -60,22 +60,27 @@ func (s *Service) CreateReservation(ctx context.Context, name, startTime string,
 	if startTime == "" {
 		startTime = time.Now().Add(time.Minute).Format("2006-01-02T15:04")
 	}
-	args := []string{"scontrol", "create", "reservation",
-		"reservationname=" + name,
-		"starttime=" + startTime,
-		fmt.Sprintf("duration=%d", durationMin),
-	}
+	// scontrol 要求 nodes= / nodecnt= / corecnt= 至少其一：未指定时默认 nodecnt=1。
+	spec := []string{"reservationname=" + name, "starttime=" + startTime,
+		fmt.Sprintf("duration=%d", durationMin)}
 	if nodes != "" {
-		args = append(args, "nodes="+nodes)
+		spec = append(spec, "nodes="+nodes)
+	} else {
+		spec = append(spec, "nodecnt=1")
 	}
 	if partition != "" {
-		args = append(args, "partition="+partition)
+		spec = append(spec, "partition="+partition)
 	}
 	if users != "" {
-		args = append(args, "users="+users)
+		spec = append(spec, "users="+users)
 	}
-	if _, err := s.runCluster(args...); err != nil {
-		return nil, fmt.Errorf("scontrol create reservation: %w", err)
+	quoted := make([]string, len(spec))
+	for i, kv := range spec {
+		quoted[i] = "'" + kv + "'"
+	}
+	// 经 sh -c 2>&1：scontrol 的报错走 stderr，docker exec 默认丢弃——包进来给调用方。
+	if out, err := s.runCluster("sh", "-c", "scontrol create reservation "+strings.Join(quoted, " ")+" 2>&1"); err != nil || strings.Contains(strings.ToUpper(string(out)), "ERROR") {
+		return nil, fmt.Errorf("scontrol create reservation: %s", strings.TrimSpace(string(out)))
 	}
 	res, _ := s.findReservation(ctx, name)
 	return res, nil
@@ -86,8 +91,8 @@ func (s *Service) DeleteReservation(ctx context.Context, name string) error {
 	if !nameRE.MatchString(name) {
 		return fmt.Errorf("invalid reservation name")
 	}
-	if _, err := s.runCluster("scontrol", "delete", "reservation="+name); err != nil {
-		return fmt.Errorf("scontrol delete reservation: %w", err)
+	if out, err := s.runCluster("sh", "-c", "scontrol delete reservation="+name+" 2>&1"); err != nil || strings.Contains(strings.ToUpper(string(out)), "ERROR") {
+		return fmt.Errorf("scontrol delete reservation: %s", strings.TrimSpace(string(out)))
 	}
 	return nil
 }
