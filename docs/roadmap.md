@@ -9,7 +9,7 @@
 |---|---|---|---|---|
 | 1.1 | 表单补内存/GPU 申请 | 内存走 REST `memory_per_node`;GPU 在 slurm 21.08 REST 无提交字段(实测 `tres_per_node` 未知键、`gres` 被静默丢弃、`#SBATCH` 指令不解析)——走 `sudo -u <clusterUser> sbatch` CLI 路径(身份/记账实证无损)。GPU>0 强制 performance 分区 | M | **已完成**(PR #39+配置:REST 内存/GPU 走 sudo-sbatch CLI、GPU 记账 TRES 补 gres/gpu) |
 | 1.2 | 作业输出管理 | 双路径统一 `output=/shared/jobs/%j.out`(stdout/stderr 合流,%j 实测展开)+cwd=/shared;entrypoint 备 1777 目录;详情端点+弹窗(sacct 生命期+tail-200,租户隔离,跨属主 404) | M | **已完成**(PR #41) |
-| 1.3 | 作业历史页 | sacct 历史列表(倒序/按用户与状态过滤,复用 `Scope.RowFilter` 租户隔离);补齐"提交→运行→历史"生命周期 | M | 待做 |
+| 1.3 | 作业历史页 | GET /jobs/history(sacct -P 倒序,状态/用户过滤);租户隔离=RowFilter 在 handler 信任边界后过滤;前端 /history 页 | M | **已完成**(PR #45) |
 | 1.4 | IDE 会话资源可调+时长续期 | 现固定 2CPU/4GB/2h | S | 待做 |
 
 ## 轨道 2:安全与运维加固
