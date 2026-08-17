@@ -90,29 +90,16 @@ func main() {
 	auth.SetSecret(cfg.JWTSecret)
 	auth.SetTokenTTL(cfg.TokenTTL)
 
-	// 用户库双模（多租户 Phase 1）：默认 yaml；AILS_USER_STORE=db 切 sqlite（读面同走
-	// auth.UserStore，登录/租户解析对后端无感知）。
-	var userStore auth.UserStore
-	var adminStore store.AdminStore // db 模式才可写（管理 API）；yaml=只读种子
-	switch cfg.UserStoreKind {
-	case "db":
-		st, err := store.Open(cfg.DBPath)
-		if err != nil {
-			log.Fatalf("open sqlite user store %s: %v (did you run -import-users?)", cfg.DBPath, err)
-		}
-		defer st.Close()
-		userStore = st
-		if as, ok := st.(store.AdminStore); ok {
-			adminStore = as
-		} else {
-			log.Fatalf("sqlite store does not implement AdminStore (internal error)")
-		}
-	default:
-		var err error
-		userStore, err = auth.LoadUserStore(cfg.UsersFile)
-		if err != nil {
-			log.Fatalf("load users from %s: %v", cfg.UsersFile, err)
-		}
+	// 用户库 = sqlite（Phase 6 起 db 唯一；users.yaml 仅作 -import-users 导入源）。
+	st, err := store.Open(cfg.DBPath)
+	if err != nil {
+		log.Fatalf("open sqlite user store %s: %v (fresh install? seed it: apiserver -import-users config/users.yaml)", cfg.DBPath, err)
+	}
+	defer st.Close()
+	userStore := auth.UserStore(st)
+	adminStore, ok := st.(store.AdminStore)
+	if !ok {
+		log.Fatalf("sqlite store does not implement AdminStore (internal error)")
 	}
 
 	// 共享单个 slurmrestd 客户端（懒加载 token、401/403 自动续期）

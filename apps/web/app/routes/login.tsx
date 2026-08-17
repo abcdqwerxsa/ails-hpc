@@ -10,7 +10,6 @@ function LoginPage() {
   const navigate = useNavigate();
   const [username, setUsername] = useState('admin');
   const [password, setPassword] = useState('admin123');
-  const [orgSlug, setOrgSlug] = useState('hpc-lab');
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -20,7 +19,7 @@ function LoginPage() {
     setErrorMsg('');
 
     try {
-      const data = await slurm.login(username, password, orgSlug);
+      const data = await slurm.login(username, password);
       localStorage.setItem('ails_token', data.token);
       localStorage.setItem(
         'ails_user',
@@ -79,19 +78,6 @@ function LoginPage() {
               onChange={(e) => setPassword(e.target.value)}
               required
             />
-          </div>
-
-          <div className="form-group">
-            <label>所属多租户组织 (Tenant Organization)</label>
-            <select
-              className="form-control"
-              value={orgSlug}
-              onChange={(e) => setOrgSlug(e.target.value)}
-            >
-              <option value="hpc-lab">高性能计算实验室 (hpc-lab)</option>
-              <option value="ai-group">大模型分布式训练组 (ai-group)</option>
-              <option value="bio-lab">生物基因计算课题组 (bio-lab)</option>
-            </select>
           </div>
 
           <button
