@@ -3,6 +3,7 @@ package jobs
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -13,6 +14,12 @@ import (
 )
 
 var globalJobIDCounter int64 = 1000
+
+// sbatch --array / --dependency 值白名单（4.1：防参数注入）。
+var (
+	sbatchSpecRE = regexp.MustCompile(`^[0-9][0-9,\-%:]*$`)
+	sbatchDepRE  = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_:?*().,\-]*$`)
+)
 
 type JobService interface {
 	SubmitJob(ctx context.Context, req *SubmitJobRequest, clusterUser, account string) (*SubmitJobResponse, error)
@@ -65,6 +72,8 @@ type CliSubmitOpts struct {
 	Nodes       int
 	Tasks       int
 	TimeLimit int // 分钟（sbatch --time 单位）
+	ArraySpec  string // sbatch --array（4.1；空=不用）
+	Dependency string // sbatch --dependency（4.1；空=不用）
 }
 
 // defaultCliSubmit 生产实现：脚本写入 /shared/portal-jobs/<name>-<rand>.job，
@@ -81,6 +90,12 @@ func defaultCliSubmit(o CliSubmitOpts) (int, error) {
 		fmt.Sprintf("--gres=gpu:%d", max(o.Gpus, 1)),
 		fmt.Sprintf("--time=%d", max(o.TimeLimit, 1)), // sbatch --time 单位=分钟（TimeLimit 本就是分钟）
 		"--chdir=/shared", "--output=/shared/jobs/%j.out",
+	}
+	if o.ArraySpec != "" {
+		args = append(args, "--array="+o.ArraySpec)
+	}
+	if o.Dependency != "" {
+		args = append(args, "--dependency="+o.Dependency)
 	}
 	if o.Nodes > 1 {
 		args = append(args, fmt.Sprintf("--nodes=%d", o.Nodes))
@@ -164,6 +179,13 @@ func (s *jobServiceImpl) SubmitJob(ctx context.Context, req *SubmitJobRequest, c
 	if req.Gpus < 0 || req.Gpus > 8 {
 		return nil, ErrInvalidResourceLimit
 	}
+	// 4.1：数组/依赖语法白名单（防注入 sbatch 参数）
+	if req.ArraySpec != "" && !sbatchSpecRE.MatchString(req.ArraySpec) {
+		return nil, ErrInvalidSpec
+	}
+	if req.Dependency != "" && !sbatchDepRE.MatchString(req.Dependency) {
+		return nil, ErrInvalidSpec
+	}
 
 	// 表单 时限(分钟) 直传分钟（v0.0.37 REST time_limit 单位=分钟）；默认 60。
 	timeLimit, _ := strconv.Atoi(req.TimeLimit.String())
@@ -193,15 +215,17 @@ func (s *jobServiceImpl) SubmitJob(ctx context.Context, req *SubmitJobRequest, c
 	if req.Gpus > 0 && partition != "performance" {
 		return nil, ErrGPUPartition
 	}
+	useCLI := req.Gpus > 0 || req.ArraySpec != "" || req.Dependency != ""
 
 	var jobID int
 	// GPU 作业：slurm 21.08 REST 无 gres 提交字段（实测 tres_per_node 未知键、gres 被静默
 	// 丢弃、#SBATCH 指令不解析）→ CLI 路径 sudo -u <clusterUser> sbatch（身份/记账同口径）。
-	if req.Gpus > 0 && s.cliSubmit != nil {
+	if useCLI && s.cliSubmit != nil {
 		id, err := s.cliSubmit(CliSubmitOpts{
 			ClusterUser: clusterUser, Name: name, Partition: partition,
 			Script: req.Script, MemoryMB: req.MemoryMB, Gpus: req.Gpus,
 			Nodes: nodesCount, Tasks: req.Tasks, TimeLimit: timeLimit,
+			ArraySpec: req.ArraySpec, Dependency: req.Dependency,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("gpu job submit: %w", err)

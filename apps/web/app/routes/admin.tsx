@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
-import { slurm, type AdminUser, type AuditEntry, type TenantInfo } from '../services/slurm';
+import { slurm, type AdminUser, type AuditEntry, type QOSInfo, type Reservation, type TenantInfo } from '../services/slurm';
 
 export const Route = createFileRoute('/admin')({ component: AdminPage });
 
@@ -363,6 +363,70 @@ function PlatformAdminPanel() {
   };
 
   const [audit, setAudit] = useState<AuditEntry[]>([]);
+  const [reservations, setReservations] = useState<Reservation[]>([]);
+  const [resvForm, setResvForm] = useState({ name: '', durationMinutes: '30', users: '' });
+  const [qosList, setQosList] = useState<QOSInfo[]>([]);
+  const [qosForm, setQosForm] = useState({ name: '', grpTRES: '' });
+  const [qosBindTenant, setQosBindTenant] = useState('hpc-lab');
+  const [qosBindName, setQosBindName] = useState('');
+  const loadResv = async () => {
+    try {
+      const r = await slurm.listReservations();
+      setReservations(r.reservations || []);
+    } catch (e: any) {
+      setError(`预约读取失败：${e?.message || e}`);
+    }
+  };
+  const loadQos = async () => {
+    try {
+      const r = await slurm.listQOS();
+      setQosList(r.qos || []);
+      if (r.qos?.length && !qosBindName) setQosBindName(r.qos[0].name);
+    } catch (e: any) {
+      setError(`QOS 读取失败：${e?.message || e}`);
+    }
+  };
+  const submitResv = async () => {
+    setError(''); setInfo('');
+    try {
+      await slurm.createReservation({ name: resvForm.name.trim(), durationMinutes: Number(resvForm.durationMinutes) || 30, users: resvForm.users.trim() || undefined });
+      setInfo(`预约 ${resvForm.name.trim()} 已创建`);
+      setResvForm({ name: '', durationMinutes: '30', users: '' });
+      await loadResv();
+    } catch (e: any) {
+      setError(`创建预约失败：${e?.message || e}`);
+    }
+  };
+  const delResv = async (name: string) => {
+    setError(''); setInfo('');
+    try {
+      await slurm.deleteReservation(name);
+      setInfo(`预约 ${name} 已删除`);
+      await loadResv();
+    } catch (e: any) {
+      setError(`删除预约失败：${e?.message || e}`);
+    }
+  };
+  const submitQos = async () => {
+    setError(''); setInfo('');
+    try {
+      await slurm.createQOS(qosForm.name.trim(), qosForm.grpTRES.trim() || undefined);
+      setInfo(`QOS ${qosForm.name.trim()} 已创建`);
+      setQosForm({ name: '', grpTRES: '' });
+      await loadQos();
+    } catch (e: any) {
+      setError(`创建 QOS 失败：${e?.message || e}`);
+    }
+  };
+  const bindQos = async () => {
+    setError(''); setInfo('');
+    try {
+      await slurm.setTenantQOS(qosBindTenant, qosBindName);
+      setInfo(`租户 ${qosBindTenant} 已绑定 QOS ${qosBindName}`);
+    } catch (e: any) {
+      setError(`绑定失败：${e?.message || e}`);
+    }
+  };
   const [auditFilter, setAuditFilter] = useState('');
   const loadAudit = async () => {
     try {
@@ -374,6 +438,8 @@ function PlatformAdminPanel() {
   };
   useEffect(() => {
     loadAudit();
+    loadResv();
+    loadQos();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

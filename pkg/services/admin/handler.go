@@ -186,6 +186,93 @@ func (h *AdminHandler) CreatePlatformUser(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"user": u})
 }
 
+// --- 4.2 预约 / QOS ---
+
+// ListReservations GET /api/v1/admin/reservations
+func (h *AdminHandler) ListReservations(c *gin.Context) {
+	rs, err := h.service.ListReservations(c.Request.Context())
+	if err != nil {
+		httpx.Internal(c, "admin.ListReservations", err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"reservations": rs})
+}
+
+// CreateReservation POST /api/v1/admin/reservations {name,startTime,durationMinutes,nodes,users,partition}
+func (h *AdminHandler) CreateReservation(c *gin.Context) {
+	var req struct {
+		Name           string `json:"name" binding:"required"`
+		StartTime      string `json:"startTime"` // 空=now+1min；YYYY-MM-DDTHH:MM
+		DurationMinutes int   `json:"durationMinutes" binding:"required"`
+		Nodes          string `json:"nodes"`
+		Users          string `json:"users"`
+		Partition      string `json:"partition"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.BadRequest(c, "name and durationMinutes are required")
+		return
+	}
+	r, err := h.service.CreateReservation(c.Request.Context(), req.Name, req.StartTime, req.DurationMinutes, req.Nodes, req.Users, req.Partition)
+	if err != nil {
+		httpx.BadRequest(c, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"reservation": r})
+}
+
+// DeleteReservation DELETE /api/v1/admin/reservations/:name
+func (h *AdminHandler) DeleteReservation(c *gin.Context) {
+	if err := h.service.DeleteReservation(c.Request.Context(), c.Param("name")); err != nil {
+		httpx.Internal(c, "admin.DeleteReservation", err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "reservation deleted"})
+}
+
+// ListQOS GET /api/v1/admin/qos
+func (h *AdminHandler) ListQOS(c *gin.Context) {
+	qs, err := h.service.ListQOS(c.Request.Context())
+	if err != nil {
+		httpx.Internal(c, "admin.ListQOS", err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"qos": qs})
+}
+
+// CreateQOS POST /api/v1/admin/qos {name,grpTRES?}
+func (h *AdminHandler) CreateQOS(c *gin.Context) {
+	var req struct {
+		Name    string `json:"name" binding:"required"`
+		GrpTRES string `json:"grpTRES"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.BadRequest(c, "name is required")
+		return
+	}
+	q, err := h.service.CreateQOS(c.Request.Context(), req.Name, req.GrpTRES)
+	if err != nil {
+		httpx.BadRequest(c, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"qos": q})
+}
+
+// SetTenantQOS PATCH /api/v1/admin/tenants/:slug/qos {name}
+func (h *AdminHandler) SetTenantQOS(c *gin.Context) {
+	var req struct {
+		Name string `json:"name" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.BadRequest(c, "name is required")
+		return
+	}
+	if err := h.service.SetTenantQOS(c.Request.Context(), c.Param("slug"), req.Name); err != nil {
+		httpx.BadRequest(c, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "tenant qos updated"})
+}
+
 // ListAudit GET /api/v1/admin/audit?actor=&action=&limit=（平台审计查看器，admin 独占）。
 func (h *AdminHandler) ListAudit(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.Query("limit"))

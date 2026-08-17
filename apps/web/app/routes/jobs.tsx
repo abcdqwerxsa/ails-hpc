@@ -46,6 +46,9 @@ function JobsPage() {
   const [detailErr, setDetailErr] = useState('');
   const [detailLoading, setDetailLoading] = useState(false);
   const [partitions, setPartitions] = useState<Partition[]>([]);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [arraySpec, setArraySpec] = useState('');
+  const [dependency, setDependency] = useState('');
 
   // 分区列表（一次拉取，供提交表单下拉；standard=E核默认 / performance=P核，见 slurm.conf）
   useEffect(() => {
@@ -88,6 +91,8 @@ function JobsPage() {
         partition: form.partition.trim() || 'standard',
         memory_mb: Number(form.memory_mb) > 0 ? Number(form.memory_mb) : undefined,
         gpus: Number(form.gpus) > 0 ? Number(form.gpus) : undefined,
+        array_spec: arraySpec.trim() || undefined,
+        dependency: dependency.trim() || undefined,
         nodes: Number(form.nodes) || 1,
         tasks: Number(form.tasks) || 1,
         time_limit: String(form.time_limit || '60'),
@@ -198,6 +203,23 @@ function JobsPage() {
             </select>
           </Field>
         </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <button type="button" className="neu-btn" onClick={() => setShowAdvanced(!showAdvanced)}>
+            {showAdvanced ? '收起高级选项' : '高级选项（数组/依赖）'}
+          </button>
+          {arraySpec.trim() && <span style={{ fontSize: '0.78rem', color: 'var(--accent-primary)' }}>数组 {arraySpec.trim()}</span>}
+          {dependency.trim() && <span style={{ fontSize: '0.78rem', color: 'var(--accent-amber,#f59e0b)' }}>依赖 {dependency.trim()}</span>}
+        </div>
+        {showAdvanced && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(180px,1fr))', gap: '0.75rem' }}>
+            <Field label="作业数组（可选）">
+              <input className="form-control" value={arraySpec} onChange={(e) => setArraySpec(e.target.value)} placeholder="如 1-4 或 1-10%2" />
+            </Field>
+            <Field label="依赖（可选）">
+              <input className="form-control" value={dependency} onChange={(e) => setDependency(e.target.value)} placeholder="如 afterok:123" />
+            </Field>
+          </div>
+        )}
         <Field label="脚本">
           <textarea
             className="form-control"
