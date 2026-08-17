@@ -95,7 +95,7 @@ func (h *JobHandler) SubmitJob(c *gin.Context) {
 	_, _, clusterUser, account := callerFromCtx(c)
 	resp, err := h.service.SubmitJob(c.Request.Context(), &req, clusterUser, account)
 	if err != nil {
-		if errors.Is(err, ErrInvalidResourceLimit) || errors.Is(err, ErrNegativeResources) {
+		if errors.Is(err, ErrInvalidResourceLimit) || errors.Is(err, ErrNegativeResources) || errors.Is(err, ErrGPUPartition) {
 			httpx.BadRequest(c, err.Error())
 			return
 		}

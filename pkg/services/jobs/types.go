@@ -9,6 +9,8 @@ import (
 var (
 	ErrInvalidResourceLimit = errors.New("Resource request exceeds maximum cluster limit")
 	ErrNegativeResources    = errors.New("Resource limits must be non-negative")
+	// ErrGPUPartition GPU 作业必须提交到 performance 分区（唯一 GPU 节点 node1 所在）。
+	ErrGPUPartition = errors.New("GPU jobs require the performance partition")
 	ErrJobNotFound          = errors.New("Job not found")
 	ErrCannotHoldCancelled  = errors.New("Cannot hold cancelled job")
 )
@@ -36,6 +38,11 @@ func (f FlexTimeLimit) String() string {
 
 // SubmitJobRequest 统一的作业提交 HTTP 请求体
 type SubmitJobRequest struct {
+	// MemoryMB 显式内存申请（MB，0=缺省 DefMemPerCPU 350/核；上限=节点 RealMemory）。
+	MemoryMB int `json:"memory_mb"`
+	// Gpus 申请 GPU 卡数（0=不申请）。GPU 仅在 performance 分区（node1）；>0 时分区
+	// 必须 performance。slurm 21.08 REST 无 gres 提交字段（实测），走 CLI sbatch。
+	Gpus int `json:"gpus"`
 	Name                    string        `json:"name"`
 	Partition               string        `json:"partition"`
 	Nodes                   int           `json:"nodes"`

@@ -99,6 +99,8 @@ export interface JobListResponse {
 export interface SubmitJobRequest {
   name: string;
   partition: string;
+  memory_mb?: number; // 显式内存 MB（缺省=350MB/核）
+  gpus?: number; // GPU 卡数（仅 performance 分区，1.1）
   nodes?: number;
   tasks?: number;
   cpus?: number;

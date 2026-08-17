@@ -16,6 +16,8 @@ function jobStateColor(s: string): string {
 const emptyForm = {
   name: '',
   partition: 'standard',
+  memory_mb: '',
+  gpus: '0',
   nodes: '1',
   tasks: '1',
   time_limit: '60',
@@ -81,6 +83,8 @@ function JobsPage() {
       const r = await slurm.submitJob({
         name: form.name.trim(),
         partition: form.partition.trim() || 'standard',
+        memory_mb: Number(form.memory_mb) > 0 ? Number(form.memory_mb) : undefined,
+        gpus: Number(form.gpus) > 0 ? Number(form.gpus) : undefined,
         nodes: Number(form.nodes) || 1,
         tasks: Number(form.tasks) || 1,
         time_limit: String(form.time_limit || '60'),
@@ -134,7 +138,9 @@ function JobsPage() {
             <select
               className="form-control"
               value={form.partition}
-              onChange={(e: ChangeEvent<HTMLSelectElement>) => setForm({ ...form, partition: e.target.value })}
+              onChange={(e: ChangeEvent<HTMLSelectElement>) =>
+                setForm({ ...form, partition: e.target.value, gpus: e.target.value === 'performance' ? form.gpus : '0' })
+              }
             >
               {(partitions.length > 0 ? partitions.map((p) => p.name) : ['standard']).map((name) => (
                 <option key={name} value={name}>
@@ -147,6 +153,34 @@ function JobsPage() {
           <Field label="节点数"><input className="form-control" type="number" min="1" value={form.nodes} onChange={field('nodes')} /></Field>
           <Field label="任务数"><input className="form-control" type="number" min="1" value={form.tasks} onChange={field('tasks')} /></Field>
           <Field label="时限(分钟)"><input className="form-control" value={form.time_limit} onChange={field('time_limit')} /></Field>
+          <Field label="内存 MB（可选）">
+            <input
+              className="form-control"
+              type="number"
+              min="0"
+              max="6000"
+              value={form.memory_mb}
+              onChange={field('memory_mb')}
+              placeholder="默认 350/核"
+            />
+          </Field>
+          <Field label="GPU 卡数">
+            <select
+              className="form-control"
+              value={form.gpus}
+              onChange={(e: ChangeEvent<HTMLSelectElement>) =>
+                setForm({
+                  ...form,
+                  gpus: e.target.value,
+                  // GPU 只在 performance 分区：选了 GPU 自动切分区；取消 GPU 不回切（尊重用户选择）
+                  partition: Number(e.target.value) > 0 ? 'performance' : form.partition,
+                })
+              }
+            >
+              <option value="0">0（不申请）</option>
+              <option value="1">1 卡（P 核分区）</option>
+            </select>
+          </Field>
         </div>
         <Field label="脚本">
           <textarea
