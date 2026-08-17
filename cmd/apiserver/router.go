@@ -25,6 +25,8 @@ type Handlers struct {
 	Billing    *billing.BillingHandler
 	Monitor    *monitor.MonitorHandler
 	Admin      *admin.AdminHandler // yaml 模式可为 nil（端点统一 503）
+	// Audit 是 /slurm/** 变更操作的审计出口（A2；nil=不落，测试装配用）。
+	Audit auditSink
 }
 
 // NewRouter 装配整套路由：CORS、公开登录端点、JWT 保护的 /api/v1 组，
@@ -49,6 +51,8 @@ func NewRouter(h Handlers) *gin.Engine {
 	api := r.Group("/api/v1")
 	// Phase 2：带用户库实校——禁用/改密即刻吊销在途令牌（claims.Ver 比对）。
 	api.Use(auth.JWTAuthMiddlewareWithStore(h.Auth.Store()))
+	// A2：作业提交/控制、IDE 会话操作落 audit_log（变更面审计补齐；登录审计在 handler）。
+	api.Use(slurmAuditMiddleware(h.Audit))
 	{
 		// 自助改密（任何已认证角色；成功后本人令牌全部失效）
 		api.POST("/auth/password", h.Auth.ChangePassword)

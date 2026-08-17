@@ -77,14 +77,18 @@ func setupRBACStack(t *testing.T) (*gin.Engine, store.AdminStore) {
 		return st.ClusterUsersOfTenant(ctx, tenant)
 	}
 
+	authHandler := auth.NewAuthHandler(st)
+	authHandler.SetAuditSink(st) // A2：登录审计出口（生产同装配）
+
 	h := Handlers{
-		Auth:       auth.NewAuthHandler(st),
+		Auth:       authHandler,
 		Cluster:    cluster.NewClusterHandler(cluster.NewClusterService(slurmClient)),
 		Nodes:      nodes.NewNodeHandler(nodes.NewNodeServiceWithApplier(slurmClient, func(string, string, string) error { return nil })),
 		Jobs:       jobs.NewJobHandlerScoped(jobs.NewJobService(slurmClient), tenantMembers),
 		Containers: containers.NewContainerHandlerScoped(containers.NewContainerService(slurmClient), tenantMembers),
 		Billing:    billing.NewBillingHandlerWithScope(billingService, tenantMembers),
 		Admin:      admin.NewAdminHandler(admin.NewService(st, noopProvisioner{})),
+		Audit:      st, // A2：/slurm/** 变更操作审计出口
 	}
 	return NewRouter(h), st
 }

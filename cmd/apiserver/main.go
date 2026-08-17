@@ -135,8 +135,11 @@ func main() {
 		return members, nil
 	}
 
+	authHandler := auth.NewAuthHandler(userStore)
+	authHandler.SetAuditSink(adminStore) // A2：登录成功/失败、改密入库
+
 	handlers := Handlers{
-		Auth:       auth.NewAuthHandler(userStore),
+		Auth:       authHandler,
 		Cluster:    cluster.NewClusterHandler(cluster.NewClusterService(slurmClient)),
 		Nodes:      nodes.NewNodeHandler(nodes.NewNodeService(slurmClient)),
 		Jobs:       jobs.NewJobHandlerScoped(jobs.NewJobService(slurmClient), tenantResolver),
@@ -145,6 +148,7 @@ func main() {
 		Monitor: monitor.NewMonitorHandler(
 			monitor.NewMonitorServicePersistent(slurmClient, filepath.Join(filepath.Dir(cfg.DBPath), "monitor.db"))),
 		Admin:      admin.NewAdminHandler(admin.NewService(adminStore, admin.DefaultProvisioner)),
+		Audit:      adminStore, // A2：/slurm/** 变更操作审计出口
 	}
 
 	r := NewRouter(handlers)

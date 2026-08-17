@@ -1,7 +1,9 @@
 package auth
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -39,15 +41,37 @@ type LoginResponse struct {
 	User  UserInfo `json:"user"`
 }
 
+// AuditSink 是认证域的审计出口（A2：登录成功/失败、改密入库）。
+// 生产装配为 sqlite AdminStore（store.WriteAudit 同面）；nil=不落审计（测试）。
+type AuditSink interface {
+	WriteAudit(ctx context.Context, actor, action, target, requestID, detail string) error
+}
+
 // AuthHandler 负责登录与令牌签发。Rate(2.1 登录防爆破)可为 nil=不限速（测试）。
 type AuthHandler struct {
 	store UserStore
 	Rate  *RateLimiter
+	audit AuditSink
 }
 
 // NewAuthHandler 构造登录处理器（带默认限速器）。
 func NewAuthHandler(store UserStore) *AuthHandler {
 	return &AuthHandler{store: store, Rate: NewRateLimiter()}
+}
+
+// SetAuditSink 注入审计出口（main 装配时调用；写失败只记日志不影响主流程）。
+func (h *AuthHandler) SetAuditSink(s AuditSink) { h.audit = s }
+
+// writeAudit 尽力写入（失败只记日志不影响响应；request_id 从 gin 上下文取）。
+func (h *AuthHandler) writeAudit(c *gin.Context, actor, action, target, detail string) {
+	if h.audit == nil {
+		return
+	}
+	rid, _ := c.Get("request_id")
+	ridStr, _ := rid.(string)
+	if err := h.audit.WriteAudit(c.Request.Context(), actor, action, target, ridStr, detail); err != nil {
+		log.Printf("AUDIT write failed action=%s actor=%s err=%v", action, actor, err)
+	}
 }
 
 // NewAuthHandlerNoRate 构造不限速的登录处理器（测试用）。
@@ -67,6 +91,8 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	if ok, wait := h.Rate.Allow(req.Username, ip); !ok {
 		// 锁定中：不比对密码（防在线穷举），文案与普通失败一致（防枚举/不泄露锁定态）
 		log.Printf("AUDIT login.locked username=%s ip=%s wait=%s", req.Username, ip, wait.Truncate(time.Second))
+		h.writeAudit(c, req.Username, "auth.login.locked", "user:"+req.Username,
+			fmt.Sprintf(`{"ip":%q}`, ip))
 		httpx.Unauthorized(c, "invalid username or password")
 		return
 	}
@@ -75,11 +101,15 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	if err != nil {
 		locked := h.Rate.RecordFailure(req.Username, ip)
 		log.Printf("AUDIT login.fail username=%s ip=%s locked=%v", req.Username, ip, locked)
+		h.writeAudit(c, req.Username, "auth.login.fail", "user:"+req.Username,
+			fmt.Sprintf(`{"ip":%q,"locked":%v}`, ip, locked))
 		// 用户不存在/密码错同一文案，避免用户名枚举
 		httpx.Unauthorized(c, "invalid username or password")
 		return
 	}
 	h.Rate.RecordSuccess(req.Username, ip)
+	h.writeAudit(c, user.Username, "auth.login", "user:"+user.Username,
+		fmt.Sprintf(`{"ip":%q,"auth_source":%q,"role":%q}`, ip, "local", user.Role))
 
 	// Phase 2：整 Claims 签发——tid（租户）+ ver（令牌版本，改密/禁用即吊销在途令牌）。
 	// R2：rid/rn/perms 携带实际角色（自定义角色时代 Role=基角色仅作 scope 推导）。
@@ -164,6 +194,7 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 		httpx.Internal(c, "ChangePassword.SetPassword", err)
 		return
 	}
+	h.writeAudit(c, username, "auth.password.change", "user:"+username, `{}`)
 	c.JSON(http.StatusOK, gin.H{"message": "password updated; please log in again"})
 }
 

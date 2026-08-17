@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"time"
 
@@ -59,4 +62,52 @@ func newRequestID() string {
 	var b [8]byte
 	_, _ = rand.Read(b[:])
 	return hex.EncodeToString(b[:])
+}
+
+// auditSink 是审计写入面（生产 = sqlite AdminStore.WriteAudit 同面）。
+type auditSink interface {
+	WriteAudit(ctx context.Context, actor, action, target, requestID, detail string) error
+}
+
+// slurmAuditActions 路由模式 → 审计动作名（A2：作业提交/控制、IDE 会话操作入库；
+// 管理面变更已由 service 层逐操作落审计，此处补齐 /slurm/** 的用户侧变更）。
+var slurmAuditActions = map[string]string{
+	"/api/v1/slurm/nodes/:name/state":     "nodes.state",
+	"/api/v1/slurm/jobs/submit":           "jobs.submit",
+	"/api/v1/slurm/jobs/:id/cancel":       "jobs.cancel",
+	"/api/v1/slurm/jobs/:id/hold":         "jobs.hold",
+	"/api/v1/slurm/jobs/:id/requeue":      "jobs.requeue",
+	"/api/v1/slurm/containers/launch":     "ide.launch",
+	"/api/v1/slurm/containers/:id":        "ide.recycle",
+	"/api/v1/slurm/containers/:id/extend": "ide.extend",
+}
+
+// slurmAuditMiddleware 把 /slurm/** 的变更操作（非 GET）落 audit_log。
+// sink 为 nil（测试装配）时 no-op；写失败只记日志不影响响应。
+func slurmAuditMiddleware(sink auditSink) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Next()
+		if sink == nil || c.Request.Method == http.MethodGet || c.Request.Method == http.MethodOptions {
+			return
+		}
+		action, ok := slurmAuditActions[c.FullPath()]
+		if !ok {
+			return
+		}
+		actor := ""
+		if cl := auth.ClaimsFromCtx(c); cl != nil {
+			actor = cl.Username
+		}
+		target := c.Request.URL.Path
+		if v := c.Param("id"); v != "" {
+			target = v
+		} else if v := c.Param("name"); v != "" {
+			target = v
+		}
+		detail := fmt.Sprintf(`{"status":%d,"ip":%q}`, c.Writer.Status(), c.ClientIP())
+		rid := c.GetString("request_id")
+		if err := sink.WriteAudit(c.Request.Context(), actor, action, target, rid, detail); err != nil {
+			slog.Warn("audit write failed", "action", action, "actor", actor, "err", err)
+		}
+	}
 }
