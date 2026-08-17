@@ -190,8 +190,8 @@ func (h *AuthHandler) Me(c *gin.Context) {
 		return
 	}
 	roleName := cl.Rn
-	if roleName == "" {
-		roleName = cl.Role // 内置角色：实际角色名 = 基角色名
+	if roleName == cl.Role {
+		roleName = "" // 内置角色不重复携带（与 Login 的 rn 归一化一致）
 	}
 	c.JSON(http.StatusOK, LoginResponse{
 		Token: "",
