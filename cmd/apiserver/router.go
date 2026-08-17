@@ -88,6 +88,7 @@ func NewRouter(h Handlers) *gin.Engine {
 		platformAdmin.PATCH("/tenants/:slug", h.Admin.UpdateTenant)
 		platformAdmin.GET("/tenants/:slug/users", h.Admin.ListTenantUsers)
 		platformAdmin.POST("/users", h.Admin.CreatePlatformUser)
+		platformAdmin.GET("/audit", h.Admin.ListAudit)
 
 		// 租户管理（tenant_admin；租户归属以 claims 为权威，不信任请求体）
 		tenantAdmin := api.Group("/tenants", auth.RequireRole(auth.RoleTenantAdmin))

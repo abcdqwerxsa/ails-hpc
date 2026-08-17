@@ -66,4 +66,6 @@ type AdminStore interface {
 	NextUID(ctx context.Context) (int, error)
 	// WriteAudit 落一条审计记录（actor/action/target/request_id/detail）。
 	WriteAudit(ctx context.Context, actor, action, target, requestID, detail string) error
+	// ListAudit 审计日志读取（时间倒序；actor/action 过滤可选；limit 1..500 默认 100）。
+	ListAudit(ctx context.Context, actor, action string, limit int) ([]AuditEntry, error)
 }

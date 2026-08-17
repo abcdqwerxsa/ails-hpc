@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
-import { slurm, type AdminUser, type TenantInfo } from '../services/slurm';
+import { slurm, type AdminUser, type AuditEntry, type TenantInfo } from '../services/slurm';
 
 export const Route = createFileRoute('/admin')({ component: AdminPage });
 
@@ -330,6 +330,22 @@ function PlatformAdminPanel() {
     }
   };
 
+  const setLimit = async (t: TenantInfo) => {
+    const cur = prompt(`设置租户 ${t.slug} 的 GrpTRES 限额（Slurm 语法，如 cpu=4,mem=8G；留空取消）`, '');
+    if (!cur || !cur.trim()) return;
+    setActing(`tenant:${t.slug}`);
+    setError('');
+    setInfo('');
+    try {
+      await slurm.updateTenant(t.slug, { grpTRES: cur.trim() });
+      setInfo(`租户 ${t.slug} 限额已设为 ${cur.trim()}（Slurm 生效）`);
+    } catch (e: any) {
+      setError(`限额设置失败：${e?.message || e}`);
+    } finally {
+      setActing('');
+    }
+  };
+
   const toggleTenant = async (t: TenantInfo) => {
     const next = (t.status || '').toLowerCase() === 'active' ? 'suspended' : 'active';
     setActing(`tenant:${t.slug}`);
@@ -345,6 +361,21 @@ function PlatformAdminPanel() {
       setActing('');
     }
   };
+
+  const [audit, setAudit] = useState<AuditEntry[]>([]);
+  const [auditFilter, setAuditFilter] = useState('');
+  const loadAudit = async () => {
+    try {
+      const r = await slurm.listAudit(auditFilter.trim() || undefined, undefined, 100);
+      setAudit(r.entries || []);
+    } catch (e: any) {
+      setError(`审计读取失败：${e?.message || e}`);
+    }
+  };
+  useEffect(() => {
+    loadAudit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div>
@@ -416,9 +447,14 @@ function PlatformAdminPanel() {
                       <td style={td}><StatusBadge status={t.status} /></td>
                       <td style={{ ...td, ...num }}>{t.userCount}</td>
                       <td style={td}>
-                        <MiniBtn disabled={acting === `tenant:${t.slug}`} onClick={() => toggleTenant(t)}>
-                          {active ? '停用' : '启用'}
-                        </MiniBtn>
+                        <div style={{ display: 'flex', gap: '0.4rem' }}>
+                          <MiniBtn disabled={acting === `tenant:${t.slug}`} onClick={() => toggleTenant(t)}>
+                            {active ? '停用' : '启用'}
+                          </MiniBtn>
+                          <MiniBtn disabled={acting === `tenant:${t.slug}`} onClick={() => setLimit(t)}>
+                            限额
+                          </MiniBtn>
+                        </div>
                       </td>
                     </tr>
                   );

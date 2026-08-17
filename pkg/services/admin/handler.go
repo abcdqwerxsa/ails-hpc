@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"regexp"
+	"strconv"
 
 	"ails-hpc/pkg/auth"
 	"ails-hpc/pkg/httpx"
@@ -183,6 +184,17 @@ func (h *AdminHandler) CreatePlatformUser(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"user": u})
+}
+
+// ListAudit GET /api/v1/admin/audit?actor=&action=&limit=（平台审计查看器，admin 独占）。
+func (h *AdminHandler) ListAudit(c *gin.Context) {
+	limit, _ := strconv.Atoi(c.Query("limit"))
+	entries, err := h.service.ListAudit(c.Request.Context(), c.Query("actor"), c.Query("action"), limit)
+	if err != nil {
+		mapErr(c, err, "admin.ListAudit")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"entries": entries})
 }
 
 // --- 租户级 ---
