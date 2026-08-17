@@ -28,27 +28,30 @@ type Disk struct {
 	Percent int `json:"percent"` // 0-100
 }
 
-// Snapshot 是监控页一次采样的资源聚合快照（CPU/内存/GPU/磁盘）。
+// Snapshot 是监控页一次采样的资源聚合快照（CPU/内存/GPU/磁盘/队列深度）。
 type Snapshot struct {
-	CPU  Resource `json:"cpu"`
-	Mem  Resource `json:"mem"`
-	GPU  Resource `json:"gpu"`
-	Disk Disk     `json:"disk"`
+	CPU   Resource `json:"cpu"`
+	Mem   Resource `json:"mem"`
+	GPU   Resource `json:"gpu"`
+	Disk  Disk     `json:"disk"`
+	Queue int      `json:"queue"` // PENDING 作业数（队列深度，3.3）
 }
 
-// MonitorHistory 是监控趋势历史（oldest→newest，最多 360 个采样点，进程内存态）。
+// MonitorHistory 是监控趋势历史（oldest→newest，最多 360 个采样点；持久化时跨重启保留）。
 type MonitorHistory struct {
 	Timestamps []int64 `json:"timestamps"` // unix 秒
 	CPU        []int   `json:"cpu"`        // 0-100
 	Mem        []int   `json:"mem"`
 	GPU        []int   `json:"gpu"`
 	Disk       []int   `json:"disk"`
+	Queue      []int   `json:"queue"` // PENDING 作业数（计数，非百分比）
 }
 
 // SnapshotResponse 是 GET /api/v1/slurm/monitor/snapshot 的响应体。
 type SnapshotResponse struct {
-	CPU  Resource `json:"cpu"`
-	Mem  Resource `json:"mem"`
-	GPU  Resource `json:"gpu"`
-	Disk Disk     `json:"disk"`
+	CPU   Resource `json:"cpu"`
+	Mem   Resource `json:"mem"`
+	GPU   Resource `json:"gpu"`
+	Disk  Disk     `json:"disk"`
+	Queue int      `json:"queue"`
 }

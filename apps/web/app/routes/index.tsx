@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from '@tanstack/react-router';
+import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { useEffect, useState, type ReactNode } from 'react';
 import { slurm, type JobSummary, type NodeStateInfo, type Partition } from '../services/slurm';
 
@@ -70,6 +70,27 @@ function OverviewPage() {
       <h2 style={{ marginTop: 0, marginBottom: '1.5rem' }}>集群总览</h2>
 
       {error && <Notice color="#f59e0b" bg="rgba(245,158,11,.12)">{error}</Notice>}
+
+      {/* 3.1 节点异常告警：DOWN/DRAIN 节点或 PENDING 堆积（阈值 5）*/}
+      {(() => {
+        const badNodes = nodes.filter((n) => {
+          const st = (n.state || '').toUpperCase();
+          return st.includes('DOWN') || st.includes('DRAIN') || st.includes('FAIL');
+        });
+        const alerts: string[] = [];
+        if (badNodes.length > 0) {
+          alerts.push(`节点异常：${badNodes.map((n) => `${n.name}(${n.state})`).join('、')}`);
+        }
+        if (pending >= 5) {
+          alerts.push(`排队堆积：${pending} 个 PENDING 作业`);
+        }
+        if (alerts.length === 0) return null;
+        return (
+          <Notice color="#f43f5e" bg="rgba(244,63,94,.12)">
+            ⚠ {alerts.join('；')} —— <Link to="/nodes" style={{ color: 'inherit', fontWeight: 700 }}>查看节点</Link> / <Link to="/jobs" style={{ color: 'inherit', fontWeight: 700 }}>查看队列</Link>
+          </Notice>
+        );
+      })()}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(180px,1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
         <Stat label="集群状态" value={status} color={status === 'UP' ? '#10b981' : status === 'DEGRADED' ? '#f59e0b' : '#888'} />

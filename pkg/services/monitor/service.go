@@ -39,16 +39,19 @@ type Service interface {
 	History() MonitorHistory
 }
 
-// sample 是一个历史采样点：unix 时间戳 + 四类资源的百分比。
+// sample 是一个历史采样点：unix 时间戳 + 四类资源百分比 + 队列深度。
 type sample struct {
 	ts         int64
 	cpu, mem   int
 	gpu, diskP int
+	queue      int // PENDING 作业数（计数）
 }
 
 type serviceImpl struct {
-	nodes nodeProvider
-	disk  diskProvider
+	nodes   nodeProvider
+	disk    diskProvider
+	pending func() int     // 队列深度来源（nil=恒 0；生产=REST jobs 计数）
+	persist persistence    // 采样持久化（nil=纯内存；生产=sqlite monitor.db）
 
 	// mu 保护 samples（采样 goroutine 写、History 读）。
 	mu         sync.Mutex
@@ -61,16 +64,58 @@ type serviceImpl struct {
 	stopped bool
 }
 
-// NewMonitorService 用真实 slurmrestd 客户端构造：节点走 nodes 服务，磁盘走 df /shared。
-// 生产构造：自动启动后台采样（5s 间隔，360 点滚动历史）。
+// NewMonitorService 用真实 slurmrestd 客户端构造：节点走 nodes 服务，磁盘走 df /shared，
+// 队列深度走 REST jobs 计数。自动启动后台采样（5s 间隔，360 点滚动历史）。
 func NewMonitorService(client *slurmrest.Client) Service {
+	return newMonitorService(client, "")
+}
+
+// NewMonitorServicePersistent 同上，但采样落 sqlite（monitorPath，如 var/lib/ails/monitor.db），
+// 重启后装回最近窗口（3.2）。库打开失败降级为纯内存（监控不因持久化故障不可用）。
+func NewMonitorServicePersistent(client *slurmrest.Client, monitorPath string) Service {
+	return newMonitorService(client, monitorPath)
+}
+
+func newMonitorService(client *slurmrest.Client, monitorPath string) Service {
 	s := &serviceImpl{
 		nodes:      nodes.NewNodeService(client),
 		disk:       querySharedDisk,
+		pending:    realPendingCount(client),
 		historyCap: defaultHistoryCap,
+	}
+	if monitorPath != "" {
+		if p, err := openPersistence(monitorPath); err == nil {
+			s.persist = p
+			if loaded := p.Load(); len(loaded) > 0 {
+				if len(loaded) > s.historyCap {
+					loaded = loaded[len(loaded)-s.historyCap:]
+				}
+				s.samples = loaded
+			}
+		}
 	}
 	s.StartSampler(defaultSampleInterval)
 	return s
+}
+
+// realPendingCount 经 slurmrestd 统计 PENDING 作业数（失败返回 0，不阻塞采样）。
+func realPendingCount(client *slurmrest.Client) func() int {
+	return func() int {
+		if client == nil {
+			return 0
+		}
+		resp, err := client.GetJobs()
+		if err != nil || resp == nil {
+			return 0
+		}
+		n := 0
+		for _, j := range resp.Jobs {
+			if j.JobState == "PENDING" {
+				n++
+			}
+		}
+		return n
+	}
 }
 
 // NewMonitorServiceWithDeps 注入节点来源与磁盘查询（测试用）。不自动启动采样，
@@ -135,12 +180,20 @@ func (s *serviceImpl) recordSample() {
 	if err != nil {
 		return
 	}
+	if s.pending != nil {
+		snap.Queue = s.pending()
+	}
 	sm := sample{
 		ts:    time.Now().Unix(),
 		cpu:   snap.CPU.Pct(),
 		mem:   snap.Mem.Pct(),
 		gpu:   snap.GPU.Pct(),
 		diskP: snap.Disk.Percent,
+		queue: snap.Queue,
+	}
+	if s.persist != nil {
+		s.persist.Append(sm)
+		s.persist.Prune(s.historyCap * 2) // 库留 2 倍冗余
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -165,6 +218,7 @@ func (s *serviceImpl) History() MonitorHistory {
 		Mem:        make([]int, 0, n),
 		GPU:        make([]int, 0, n),
 		Disk:       make([]int, 0, n),
+		Queue:      make([]int, 0, n),
 	}
 	for _, sm := range s.samples {
 		h.Timestamps = append(h.Timestamps, sm.ts)
@@ -172,6 +226,7 @@ func (s *serviceImpl) History() MonitorHistory {
 		h.Mem = append(h.Mem, sm.mem)
 		h.GPU = append(h.GPU, sm.gpu)
 		h.Disk = append(h.Disk, sm.diskP)
+		h.Queue = append(h.Queue, sm.queue)
 	}
 	return h
 }

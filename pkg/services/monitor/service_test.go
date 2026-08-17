@@ -195,3 +195,43 @@ func TestHistory_ReturnsCopy(t *testing.T) {
 		t.Fatalf("History must return a copy; internal state mutated: %+v", h2)
 	}
 }
+
+// TestSampler_RecordsQueue：注入 pending 提供者 → 采样记录队列深度。
+func TestSampler_RecordsQueue(t *testing.T) {
+	svc := NewMonitorServiceWithDeps(fakeNodes{}, func() (int, int, int) { return 0, 0, 0 }).(*serviceImpl)
+	svc.pending = func() int { return 7 }
+	svc.StartSampler(2 * time.Millisecond)
+	t.Cleanup(svc.StopSampler)
+	waitFor(t, 2*time.Second, func() bool { return len(svc.History().Queue) >= 1 })
+	if got := svc.History().Queue[0]; got != 7 {
+		t.Errorf("queue sample = %d, want 7", got)
+	}
+}
+
+// TestPersistence_SqliteRoundtrip：采样落 sqlite → 新实例从库装回窗口（重启不清零）。
+func TestPersistence_SqliteRoundtrip(t *testing.T) {
+	path := t.TempDir() + "/monitor.db"
+
+	p1, err := openPersistence(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	for i, ts := range []int64{100, 101, 102} {
+		p1.Append(sample{ts: ts, cpu: i * 10, mem: 5, gpu: 0, diskP: 9, queue: i})
+	}
+	p1.Prune(2) // 只留最近 2 条（101,102）
+	_ = p1.Close()
+
+	p2, err := openPersistence(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer p2.Close()
+	loaded := p2.Load()
+	if len(loaded) != 2 || loaded[0].ts != 101 || loaded[1].ts != 102 {
+		t.Fatalf("loaded = %+v, want ts 101,102", loaded)
+	}
+	if loaded[1].queue != 2 || loaded[1].cpu != 20 { // ts=102 是第 3 条（i=2）
+		t.Errorf("fields = %+v", loaded[1])
+	}
+}

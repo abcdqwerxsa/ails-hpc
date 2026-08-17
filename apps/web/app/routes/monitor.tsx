@@ -27,8 +27,9 @@ interface Hist {
   mem: number[];
   gpu: number[];
   disk: number[];
+  queue: number[];
 }
-const emptyHist = (): Hist => ({ cpu: [], mem: [], gpu: [], disk: [] });
+const emptyHist = (): Hist => ({ cpu: [], mem: [], gpu: [], disk: [], queue: [] });
 
 function MonitorPage() {
   const [snap, setSnap] = useState<MonitorSnapshot | null>(null);
@@ -45,7 +46,7 @@ function MonitorPage() {
         if (seeded.current) return;
         seeded.current = true;
         const last = (a?: number[]) => (a || []).slice(-WIN);
-        setHist({ cpu: last(h.cpu), mem: last(h.mem), gpu: last(h.gpu), disk: last(h.disk) });
+        setHist({ cpu: last(h.cpu), mem: last(h.mem), gpu: last(h.gpu), disk: last(h.disk), queue: last(h.queue) });
       })
       .catch(() => {
         /* 后端未部署 /slurm/monitor/history：保持现状（可能已有实时采样点） */
@@ -67,6 +68,7 @@ function MonitorPage() {
           mem: cap(prev.mem, pct(s.mem.alloc, s.mem.total)),
           gpu: cap(prev.gpu, pct(s.gpu.alloc, s.gpu.total)),
           disk: cap(prev.disk, s.disk.percent),
+          queue: cap(prev.queue, s.queue ?? 0),
         }));
       } catch (e: any) {
         setErr(e?.message || '监控数据加载失败');
@@ -114,6 +116,10 @@ function MonitorPage() {
       <Section title="资源分配趋势（近 5 分钟）">
         <LineChart series={series} />
         <ChartLegend series={series} />
+      </Section>
+
+      <Section title="队列深度（PENDING 作业数）">
+        <LineChart autoScale series={[{ label: '排队作业', color: 'var(--accent-amber,#F59E0B)', data: hist.queue }]} height={120} />
       </Section>
 
       <Section title="当前分配率">
