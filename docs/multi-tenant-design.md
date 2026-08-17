@@ -1,6 +1,13 @@
 # AILS HPC 真·多租户 — 实施设计
 
-状态:设计完成,待分期实施(Phase 0 优先——它修一个现存授权漏洞)。
+状态:**已全部实施完毕(Phase 0-6,2026-08-14~17,PR #27~#35)**,生产运行中。
+- 实施差异:Phase 2 生产验证揪出"改密分裂态"(已改全有或全无,#30);
+  Phase 5 限额执法需 `AccountingStorageEnforce=associations,limits` 且
+  limits 标志由 ctld 启动时读取(改后需重启 ctld,#35);
+  Claims 的 orgSlug/tenantNs **保留未删**(迁就 24h 在途令牌,零成本容忍)。
+- 全新装机 bootstrap:sqlite 库为唯一运行库——先写一个含初始 admin 的
+  users.yaml → `apiserver -import-users config/users.yaml` → 用该 admin 登录
+  → 其余租户/用户全部走管理 API(建租户自动建 Slurm 父账号)。
 范围:租户为一等实体、sqlite 用户库、租户级读隔离、租户级 Slurm fairshare、users.yaml 零停机迁移。LDAP/SSO 暂出范围但留好接口缝。
 
 > ⚠️ **Phase 0 的动因(现存漏洞)**:`pkg/services/billing/handler.go` 的 `GetUsage` 接受任意

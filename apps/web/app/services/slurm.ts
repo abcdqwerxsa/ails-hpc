@@ -278,10 +278,11 @@ export type NodeStateOp = "DRAIN" | "RESUME" | "IDLE";
 
 // --- Slurm API ---
 export const slurm = {
-  login: (username: string, password: string, orgSlug: string) =>
+  // orgSlug 已退役（多租户 Phase 6：租户归属由用户库决定，登录不再传递）
+  login: (username: string, password: string) =>
     apiFetch<LoginResponse>("/auth/login", {
       method: "POST",
-      body: JSON.stringify({ username, password, orgSlug }),
+      body: JSON.stringify({ username, password }),
     }),
 
   // 自助改密（成功后本人 token 全部失效，前端应跳回登录页）
