@@ -19,6 +19,8 @@ type JobService interface {
 	ListJobs(ctx context.Context) ([]JobSummary, error)
 	// JobDetail 返回单个作业的生命期详情（sacct）+ 输出尾部（/shared/jobs/<id>.out）。
 	JobDetail(ctx context.Context, jobID int) (*JobDetail, error)
+	// History 历史作业列表（sacct 主记录，倒序；1.3）。
+	History(ctx context.Context, q HistoryQuery) ([]HistoryEntry, error)
 	// JobOwner 返回作业的归属者（submit 时写入的 slurm account，即 clusterUser）。
 	// 用于归属隔离：member 只能控制自己的作业。空 owner 视为遗留作业（放行）。
 	JobOwner(ctx context.Context, jobID int) (string, error)

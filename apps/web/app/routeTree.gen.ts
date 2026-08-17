@@ -13,6 +13,7 @@ import { Route as MonitorImport } from './routes/monitor'
 import { Route as BillingImport } from './routes/billing'
 import { Route as AdminImport } from './routes/admin'
 import { Route as WebIDEImport } from './routes/webide'
+import { Route as HistoryImport } from './routes/history'
 import { Route as JobsImport } from './routes/jobs'
 import { Route as NodesImport } from './routes/nodes'
 import { Route as LoginImport } from './routes/login'
@@ -22,6 +23,7 @@ const PartitionsRoute = PartitionsImport.update({ id: '/partitions', path: '/par
 const MonitorRoute = MonitorImport.update({ id: '/monitor', path: '/monitor', getParentRoute: () => rootRoute } as any)
 const BillingRoute = BillingImport.update({ id: '/billing', path: '/billing', getParentRoute: () => rootRoute } as any)
 const AdminRoute = AdminImport.update({ id: '/admin', path: '/admin', getParentRoute: () => rootRoute } as any)
+const HistoryRoute = HistoryImport.update({ id: '/history', path: '/history', getParentRoute: () => rootRoute } as any)
 const WebIDERoute = WebIDEImport.update({ id: '/webide', path: '/webide', getParentRoute: () => rootRoute } as any)
 const JobsRoute = JobsImport.update({ id: '/jobs', path: '/jobs', getParentRoute: () => rootRoute } as any)
 const NodesRoute = NodesImport.update({ id: '/nodes', path: '/nodes', getParentRoute: () => rootRoute } as any)
@@ -35,6 +37,7 @@ declare module '@tanstack/react-router' {
     '/nodes': { id: '/nodes'; path: '/nodes'; fullPath: '/nodes'; preLoaderRoute: typeof NodesImport; parentRoute: typeof rootRoute }
     '/jobs': { id: '/jobs'; path: '/jobs'; fullPath: '/jobs'; preLoaderRoute: typeof JobsImport; parentRoute: typeof rootRoute }
     '/webide': { id: '/webide'; path: '/webide'; fullPath: '/webide'; preLoaderRoute: typeof WebIDEImport; parentRoute: typeof rootRoute }
+    '/history': { id: '/history'; path: '/history'; fullPath: '/history'; preLoaderRoute: typeof HistoryImport; parentRoute: typeof rootRoute }
     '/monitor': { id: '/monitor'; path: '/monitor'; fullPath: '/monitor'; preLoaderRoute: typeof MonitorImport; parentRoute: typeof rootRoute }
     '/billing': { id: '/billing'; path: '/billing'; fullPath: '/billing'; preLoaderRoute: typeof BillingImport; parentRoute: typeof rootRoute }
     '/admin': { id: '/admin'; path: '/admin'; fullPath: '/admin'; preLoaderRoute: typeof AdminImport; parentRoute: typeof rootRoute }
@@ -48,6 +51,7 @@ export const routeTree = rootRoute.addChildren([
   NodesRoute,
   JobsRoute,
   WebIDERoute,
+  HistoryRoute,
   MonitorRoute,
   BillingRoute,
   AdminRoute,

@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"ails-hpc/pkg/auth"
 	"ails-hpc/pkg/services/jobs"
 	"ails-hpc/pkg/slurmrest"
 
@@ -105,5 +107,70 @@ func TestSubmit_GPUPartitionGuard(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("gpu on standard: want 400 got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+// stubHistorySvc：仅实现 History，其余 panic（handler 隔离测试只需要这条路径）。
+type stubHistorySvc struct {
+	rows []jobs.HistoryEntry
+	gotQ jobs.HistoryQuery
+}
+
+func (s *stubHistorySvc) SubmitJob(ctx context.Context, r *jobs.SubmitJobRequest, cu, acc string) (*jobs.SubmitJobResponse, error) {
+	return nil, nil
+}
+func (s *stubHistorySvc) ListJobs(ctx context.Context) ([]jobs.JobSummary, error) { return nil, nil }
+func (s *stubHistorySvc) JobDetail(ctx context.Context, id int) (*jobs.JobDetail, error) { return nil, nil }
+func (s *stubHistorySvc) JobOwner(ctx context.Context, id int) (string, error) { return "", nil }
+func (s *stubHistorySvc) CancelJob(ctx context.Context, id int, a string) (*jobs.JobControlResponse, error) {
+	return nil, nil
+}
+func (s *stubHistorySvc) HoldJob(ctx context.Context, id int, a string) (*jobs.JobControlResponse, error) {
+	return nil, nil
+}
+func (s *stubHistorySvc) RequeueJob(ctx context.Context, id int, a string) (*jobs.JobControlResponse, error) {
+	return nil, nil
+}
+func (s *stubHistorySvc) History(ctx context.Context, q jobs.HistoryQuery) ([]jobs.HistoryEntry, error) {
+	s.gotQ = q
+	return s.rows, nil
+}
+
+// TestHistoryHandler_Scoping：member 的 ?user= 被强制为本人；tenant_admin 缺省视图
+// 按租户成员后过滤；tenant_admin ?user= 跨租户 403。
+func TestHistoryHandler_Scoping(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	members := func(string) ([]string, error) { return []string{"ailsmember", "ailstadmin"}, nil }
+	stub := &stubHistorySvc{rows: []jobs.HistoryEntry{
+		{JobID: 1, Owner: "ailsmember"}, {JobID: 2, Owner: "ailsother"},
+	}}
+	h := jobs.NewJobHandlerScoped(stub, members)
+	r := gin.New()
+	with := func(username, role, cu, tid string) []gin.HandlerFunc {
+		return []gin.HandlerFunc{func(c *gin.Context) {
+			c.Set("claims", &auth.Claims{Username: username, Role: role, ClusterUser: cu, OrgSlug: tid, TID: tid})
+			c.Next()
+		}, auth.RequireRole(role)}
+	}
+	r.GET("/api/v1/slurm/jobs/history", with("member", auth.RoleMember, "ailsmember", "hpc-lab")[0], with("member", auth.RoleMember, "ailsmember", "hpc-lab")[1], h.ListHistory)
+	r.GET("/as-tenant", with("tenantadmin", auth.RoleTenantAdmin, "ailstadmin", "hpc-lab")[0], with("tenantadmin", auth.RoleTenantAdmin, "ailstadmin", "hpc-lab")[1], h.ListHistory)
+
+	// member：?user= 他人被强制为本人，只回本人行
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/slurm/jobs/history?user=ailsother", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"owner":"ailsmember"`) || strings.Contains(w.Body.String(), "ailsother") {
+		t.Errorf("member: %d %s", w.Code, w.Body.String())
+	}
+	if stub.gotQ.User != "ailsmember" {
+		t.Errorf("forced user = %q", stub.gotQ.User)
+	}
+
+	// tenant_admin 缺省：租户后过滤（ailsother 被滤掉）
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/as-tenant", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != 200 || strings.Contains(w.Body.String(), "ailsother") {
+		t.Errorf("tenant default view: %d %s", w.Code, w.Body.String())
 	}
 }

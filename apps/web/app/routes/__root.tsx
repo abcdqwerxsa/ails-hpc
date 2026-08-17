@@ -77,6 +77,11 @@ function RootLayout() {
               </Link>
             </li>
             <li className="nav-item">
+              <Link to="/history" activeProps={{ className: 'active' }}>
+                作业历史
+              </Link>
+            </li>
+            <li className="nav-item">
               <Link to="/webide" activeProps={{ className: 'active' }}>
                 Web-IDE
               </Link>

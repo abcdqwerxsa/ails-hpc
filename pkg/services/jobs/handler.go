@@ -163,6 +163,58 @@ func (h *JobHandler) GetJobDetail(c *gin.Context) {
 	c.JSON(http.StatusOK, d)
 }
 
+// ListHistory GET /api/v1/slurm/jobs/history?user=&state=&limit=（1.3 历史页）。
+// 租户隔离与列表同源：member 仅本人（?user= 被强制为本人），tenant_admin 本租户，
+// ops/admin 全量（可 ?user= 过滤）。
+func (h *JobHandler) ListHistory(c *gin.Context) {
+	sc := auth.ScopeFromClaims(auth.ClaimsFromCtx(c))
+	q := HistoryQuery{
+		User:  c.Query("user"),
+		State: c.Query("state"),
+	}
+	// member：无视 ?user=，强制本人
+	if sc.Mode == auth.ScopeSelf {
+		q.User = sc.ClusterUser
+	} else if sc.Mode == auth.ScopeTenant && h.tenants != nil && q.User != "" {
+		// tenant_admin 指定 ?user= 时必须属本租户
+		members, err := h.tenants(sc.TenantSlug)
+		if err != nil {
+			httpx.Internal(c, "ListHistory.tenants", err)
+			return
+		}
+		ok := false
+		for _, m := range members {
+			if m == q.User {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			httpx.Error(c, http.StatusForbidden, "forbidden: user is outside your tenant")
+			return
+		}
+	}
+	entries, err := h.service.History(c.Request.Context(), q)
+	if err != nil {
+		httpx.Internal(c, "History", err)
+		return
+	}
+	// 统一后过滤（与列表同谓词）：member=本人；tenant_admin 缺省=本租户成员；
+	// ops/admin=全量。service 层的 User 过滤是 sacct 侧优化,信任边界在这里。
+	allow, err := sc.RowFilter(h.tenants)
+	if err != nil {
+		httpx.Internal(c, "ListHistory.scope", err)
+		return
+	}
+	scoped := make([]HistoryEntry, 0, len(entries))
+	for _, e := range entries {
+		if allow(e.Owner) {
+			scoped = append(scoped, e)
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"history": scoped})
+}
+
 func (h *JobHandler) CancelJob(c *gin.Context) {
 	idStr := c.Param("id")
 	jobID, err := strconv.Atoi(idStr)
