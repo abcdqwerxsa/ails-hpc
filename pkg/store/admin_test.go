@@ -520,3 +520,14 @@ func TestCreateUserSuspendedTenant(t *testing.T) {
 		t.Errorf("create after resume: %v", err)
 	}
 }
+
+// TestForeignKeyBlocksOrphanUser：C1 外键执行——绕过应用层直插孤儿 tenant_id 必须失败。
+func TestForeignKeyBlocksOrphanUser(t *testing.T) {
+	st := newTestStore(t)
+	impl := st.(*sqliteStore)
+	_, err := impl.db.Exec(`INSERT INTO users (username, password_hash, role, tenant_id, cluster_user, uid, gid, account)
+		VALUES ('orphan', 'x', 'member', 99999, 'orphan_cu', 2999, 2000, 'orphan_cu')`)
+	if err == nil {
+		t.Fatal("FK not enforced: orphan tenant_id insert must fail")
+	}
+}

@@ -21,7 +21,8 @@ var _ Store = (*sqliteStore)(nil)
 // Open 打开（必要时创建）sqlite 用户库并补齐迁移。DSN 采用 WAL + busy_timeout
 // （设计 §2.1：单写者场景下足够的并发配置）。
 func Open(path string) (Store, error) {
-	dsn := fmt.Sprintf("file:%s?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)", path)
+	// C1:外键执行(sqlite 默认关闭——REFERENCES 声明此前只是文档)。
+	dsn := fmt.Sprintf("file:%s?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)", path)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("store: open %s: %w", path, err)
