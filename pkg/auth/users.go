@@ -50,6 +50,11 @@ type User struct {
 	// Permissions 角色权限点清单（DB 库由 roles.permissions JSON 解析）；空 = 回退
 	// BuiltinRolePermissions[Role]（内存/yaml 库与迁移期旧数据）。
 	Permissions []string `yaml:"-" json:"permissions,omitempty"`
+
+	// AuthSource 凭证来源（local|ldap|oidc）；OIDC 账号无本地密码（哈希为随机值）。
+	AuthSource string `yaml:"-" json:"authSource,omitempty"`
+	// OIDCSub SSO 身份标识（IdP sub claim）；S4 绑定/解绑与 S1 回落查找用。
+	OIDCSub string `yaml:"-" json:"-"`
 }
 
 // CompareHashAndPassword 是 bcrypt 校验的薄导出（pkg/store 等同面实现复用）。

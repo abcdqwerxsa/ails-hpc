@@ -82,4 +82,14 @@ type AdminStore interface {
 	DeleteRole(ctx context.Context, roleID int64) error
 	// SetUserRole 改派用户角色（角色-租户归属校验；改派即刻生效）。
 	SetUserRole(ctx context.Context, username string, roleID int64) error
+
+	// --- OIDC 账号关联（S1/S4；service 层补 Slurm 供给与审计） ---
+	// UserByOIDCSub 按绑定的 SSO 身份查用户。
+	UserByOIDCSub(sub string) (*auth.User, bool)
+	// LinkOIDC 绑定 sub 到本地账号（auth_source 保持 local——并行登录）。
+	LinkOIDC(username, sub string) error
+	// UnlinkOIDC 解绑（auth_source=oidc 账号拒绝——无本地密码会自锁）。
+	UnlinkOIDC(username string) error
+	// ProvisionOIDCUser JIT 开户（S2 映射；随机本地密码 + 角色/租户归属校验）。
+	ProvisionOIDCUser(username, email, displayName, roleName, tenantSlug, sub string) (*auth.User, error)
 }

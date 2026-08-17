@@ -93,6 +93,11 @@ func NotFound(c *gin.Context, msg string, extras ...Extra) {
 }
 
 // ServiceUnavailable responds 503.
+// BadGateway 上游依赖（slurmrestd/OIDC IdP）不可达（S1 起）。
+func BadGateway(c *gin.Context, msg string, extras ...Extra) {
+	Error(c, http.StatusBadGateway, msg, extras...)
+}
+
 func ServiceUnavailable(c *gin.Context, msg string, extras ...Extra) {
 	render(c, http.StatusServiceUnavailable, msg, extras)
 }

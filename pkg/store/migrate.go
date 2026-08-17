@@ -72,6 +72,46 @@ CREATE TRIGGER IF NOT EXISTS trg_tenants_updated_at
   END;`,
 		// v3(R2 角色表化):roles 表 + 四内置角色 seed 为系统角色 + users.role_id 回填。
 		rolesMigration(),
+		// v4(S1 OIDC):users.oidc_sub(部分唯一索引) + auth_source CHECK 扩到
+		// ('local','ldap','oidc')。sqlite 不能改列约束 → 标准重建表（保 id/时间戳）。
+		`
+ALTER TABLE users ADD COLUMN oidc_sub TEXT;
+CREATE TABLE users_v4 (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  username      TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  role          TEXT NOT NULL CHECK (role IN ('admin','ops_admin','tenant_admin','member')),
+  role_id       INTEGER REFERENCES roles(id),
+  tenant_id     INTEGER NOT NULL REFERENCES tenants(id),
+  cluster_user  TEXT NOT NULL UNIQUE,
+  uid           INTEGER NOT NULL UNIQUE,
+  gid           INTEGER NOT NULL DEFAULT 2000,
+  account       TEXT NOT NULL UNIQUE,
+  display_name  TEXT NOT NULL DEFAULT '',
+  email         TEXT NOT NULL DEFAULT '',
+  auth_source   TEXT NOT NULL DEFAULT 'local' CHECK (auth_source IN ('local','ldap','oidc')),
+  oidc_sub      TEXT,
+  status        TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','disabled')),
+  token_version INTEGER NOT NULL DEFAULT 0,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+INSERT INTO users_v4 (id, username, password_hash, role, role_id, tenant_id, cluster_user,
+                      uid, gid, account, display_name, email, auth_source, oidc_sub,
+                      status, token_version, created_at, updated_at)
+SELECT id, username, password_hash, role, role_id, tenant_id, cluster_user,
+       uid, gid, account, display_name, email, auth_source, oidc_sub,
+       status, token_version, created_at, updated_at
+FROM users;
+DROP TABLE users;
+ALTER TABLE users_v4 RENAME TO users;
+CREATE INDEX IF NOT EXISTS idx_users_tenant ON users(tenant_id, status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_oidc_sub ON users(oidc_sub) WHERE oidc_sub IS NOT NULL;
+CREATE TRIGGER IF NOT EXISTS trg_users_updated_at
+  AFTER UPDATE ON users FOR EACH ROW
+  BEGIN
+    UPDATE users SET updated_at = datetime('now') WHERE id = OLD.id;
+  END;`,
 	}
 }
 

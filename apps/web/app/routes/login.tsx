@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { useState } from 'react';
-import { slurm } from '../services/slurm';
+import { useEffect, useState } from 'react';
+import { slurm, oidc, oidcLoginURL } from '../services/slurm';
 
 export const Route = createFileRoute('/login')({
   component: LoginPage,
@@ -12,6 +12,12 @@ function LoginPage() {
   const [password, setPassword] = useState('admin123');
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [ssoEnabled, setSsoEnabled] = useState(false);
+
+  useEffect(() => {
+    // S3：有 OIDC 配置才显示 SSO 按钮（公开配置端点告知）
+    oidc.config().then((c) => setSsoEnabled(!!c.enabled)).catch(() => setSsoEnabled(false));
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -90,9 +96,26 @@ function LoginPage() {
             style={{ width: '100%', padding: '0.75rem', marginTop: '1rem' }}
             disabled={loading}
           >
-            {loading ? '正在进行 SSO 身份验证...' : '一键 SSO 验证登录'}
+            {loading ? '正在验证...' : '账号密码登录'}
           </button>
         </form>
+
+        {ssoEnabled && (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', margin: '1.25rem 0', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+              <span style={{ flex: 1, height: 1, background: 'var(--border-color,#2a2f3a)' }} />
+              或
+              <span style={{ flex: 1, height: 1, background: 'var(--border-color,#2a2f3a)' }} />
+            </div>
+            <a
+              href={oidcLoginURL()}
+              className="btn-primary"
+              style={{ display: 'block', width: '100%', padding: '0.75rem', textAlign: 'center', textDecoration: 'none', boxSizing: 'border-box' }}
+            >
+              使用企业 SSO 登录
+            </a>
+          </>
+        )}
       </div>
     </div>
   );

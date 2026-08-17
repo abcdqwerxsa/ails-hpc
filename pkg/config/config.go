@@ -3,10 +3,14 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"time"
+
+	"ails-hpc/pkg/auth"
 )
 
 // Config 持有进程启动所需的全部运行时参数。
@@ -19,6 +23,13 @@ type Config struct {
 	UsersFile          string        // AILS_USERS_FILE，默认 "config/users.yaml"
 	UserStoreKind      string        // AILS_USER_STORE，"yaml"|"db"（多租户 Phase 1 双模，默认 yaml）
 	DBPath             string        // AILS_DB_PATH，sqlite 用户库路径（UserStoreKind=db 时生效）
+
+	// OIDC SSO（S1/S2；Issuer 空 = 功能整体禁用，本地密码登录不受影响）
+	OIDC auth.OIDCConfig
+	// OIDCMapping claim→角色/租户映射（S2）
+	OIDCMapping auth.OIDCMappingConfig
+	// OIDCPortalURL 回跳前端基址（默认 /portal/）
+	OIDCPortalURL string
 }
 
 // Load 从环境变量读取配置。
@@ -35,11 +46,71 @@ func Load() (*Config, error) {
 		UsersFile:          envOr("AILS_USERS_FILE", "config/users.yaml"),
 
 		DBPath:             envOr("AILS_DB_PATH", "var/lib/ails/ails.db"),
+
+		OIDC: auth.OIDCConfig{
+			Issuer:       envOr("AILS_OIDC_ISSUER", ""),
+			ClientID:     envOr("AILS_OIDC_CLIENT_ID", ""),
+			ClientSecret: os.Getenv("AILS_OIDC_CLIENT_SECRET"),
+			RedirectURL:  envOr("AILS_OIDC_REDIRECT", ""),
+		},
+		OIDCPortalURL: envOr("AILS_OIDC_PORTAL_URL", "/portal/"),
 	}
+
+	if err := parseOIDCMapping(cfg); err != nil {
+		return nil, err
+	}
+
 	if len(cfg.JWTSecret) == 0 {
 		return nil, errors.New("AILS_JWT_SECRET is required (set it to a random >=32-byte string)")
 	}
 	return cfg, nil
+}
+
+// parseOIDCMapping 解析 S2 映射 env：
+//
+//	AILS_OIDC_ROLES_CLAIM   解析角色/组的 claim 名（默认 "roles"）
+//	AILS_OIDC_TENANT_CLAIM  解析租户的 claim 名（默认同 roles claim）
+//	AILS_OIDC_ROLE_MAP      JSON：claim 值 → 角色名（如 {"hpc-admin":"admin","dev":"dev"}）
+//	AILS_OIDC_TENANT_MAP    JSON：claim 值 → 租户 slug（如 {"lab-a":"hpc-lab"}）
+//	AILS_OIDC_UNMAPPED      deny（默认，未命中映射即拒绝）| default（用 DEFAULT_* 兜底）
+//	AILS_OIDC_DEFAULT_ROLE  default 策略角色（默认 member）
+//	AILS_OIDC_DEFAULT_TENANT default 策略租户 slug（空 = JIT 不可用）
+func parseOIDCMapping(cfg *Config) error {
+	m := auth.OIDCMappingConfig{
+		RolesClaim:     envOr("AILS_OIDC_ROLES_CLAIM", "roles"),
+		TenantClaim:    envOr("AILS_OIDC_TENANT_CLAIM", ""),
+		UnmappedPolicy: envOr("AILS_OIDC_UNMAPPED", "deny"),
+		DefaultRole:    envOr("AILS_OIDC_DEFAULT_ROLE", auth.RoleMember),
+		DefaultTenant:  envOr("AILS_OIDC_DEFAULT_TENANT", ""),
+	}
+	var err error
+	if m.RoleMap, err = parseJSONMap("AILS_OIDC_ROLE_MAP"); err != nil {
+		return err
+	}
+	if m.TenantMap, err = parseJSONMap("AILS_OIDC_TENANT_MAP"); err != nil {
+		return err
+	}
+	if m.UnmappedPolicy != "deny" && m.UnmappedPolicy != "default" {
+		return fmt.Errorf("AILS_OIDC_UNMAPPED must be deny|default, got %q", m.UnmappedPolicy)
+	}
+	if m.TenantClaim == "" {
+		m.TenantClaim = m.RolesClaim
+	}
+	cfg.OIDCMapping = m
+	return nil
+}
+
+// parseJSONMap 解析 env 里的 JSON 字符串映射（空 → nil）。
+func parseJSONMap(key string) (map[string]string, error) {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return nil, nil
+	}
+	out := map[string]string{}
+	if err := json.Unmarshal([]byte(v), &out); err != nil {
+		return nil, fmt.Errorf("%s: invalid JSON map: %w", key, err)
+	}
+	return out, nil
 }
 
 func envOr(key, def string) string {

@@ -138,8 +138,20 @@ func main() {
 	authHandler := auth.NewAuthHandler(userStore)
 	authHandler.SetAuditSink(adminStore) // A2：登录成功/失败、改密入库
 
+	// OIDC SSO（S1/S2；未配置时端点自报 enabled=false，本地密码登录不受影响）。
+	adminService := admin.NewService(adminStore, admin.DefaultProvisioner)
+	oidcHandler := auth.NewOIDCHandler(userStore, adminService, cfg.OIDCMapping)
+	oidcHandler.SetAuditSink(adminStore)
+	oidcHandler.PortalURL = cfg.OIDCPortalURL
+	if cfg.OIDC.Enabled() {
+		auth.SetOIDCClient(auth.NewOIDCClient(cfg.OIDC))
+		log.Printf("OIDC SSO enabled: issuer=%s redirect=%s unmapped=%s",
+			cfg.OIDC.Issuer, cfg.OIDC.RedirectURL, cfg.OIDCMapping.UnmappedPolicy)
+	}
+
 	handlers := Handlers{
 		Auth:       authHandler,
+		OIDC:       oidcHandler,
 		Cluster:    cluster.NewClusterHandler(cluster.NewClusterService(slurmClient)),
 		Nodes:      nodes.NewNodeHandler(nodes.NewNodeService(slurmClient)),
 		Jobs:       jobs.NewJobHandlerScoped(jobs.NewJobService(slurmClient), tenantResolver),
@@ -147,7 +159,7 @@ func main() {
 		Billing:    billing.NewBillingHandlerWithScope(billingService, tenantResolver),
 		Monitor: monitor.NewMonitorHandler(
 			monitor.NewMonitorServicePersistent(slurmClient, filepath.Join(filepath.Dir(cfg.DBPath), "monitor.db"))),
-		Admin:      admin.NewAdminHandler(admin.NewService(adminStore, admin.DefaultProvisioner)),
+		Admin:      admin.NewAdminHandler(adminService),
 		Audit:      adminStore, // A2：/slurm/** 变更操作审计出口
 	}
 

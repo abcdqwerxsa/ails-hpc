@@ -53,7 +53,8 @@ func (s *sqliteStore) Close() error { return s.db.Close() }
 const userSelect = `
 SELECT u.username, u.password_hash, u.role, t.slug,
        u.cluster_user, u.uid, u.gid, u.account, u.status, u.token_version,
-       u.role_id, COALESCE(r.name, u.role), r.permissions
+       u.role_id, COALESCE(r.name, u.role), r.permissions,
+       u.auth_source, COALESCE(u.oidc_sub, '')
 FROM users u JOIN tenants t ON t.id = u.tenant_id
 LEFT JOIN roles r ON r.id = u.role_id`
 
@@ -64,12 +65,15 @@ func scanUser(row interface{ Scan(...any) error }) (*auth.User, error) {
 	var permsJSON sql.NullString
 	if err := row.Scan(&u.Username, &u.PasswordHash, &u.Role, &u.TenantSlug,
 		&u.ClusterUser, &u.UID, &u.GID, &u.Account, &u.Status, &u.TokenVersion,
-		&roleID, &roleName, &permsJSON); err != nil {
+		&roleID, &roleName, &permsJSON, &u.AuthSource, &u.OIDCSub); err != nil {
 		return nil, err
 	}
 	u.OrgSlug = u.TenantSlug // 兼容：迁移期租户标识 = orgSlug
 	if u.Status == "" {
 		u.Status = "active"
+	}
+	if u.AuthSource == "" {
+		u.AuthSource = "local"
 	}
 	u.RoleID = roleID.Int64
 	if roleID.Valid && roleName != "" && roleName != u.Role {
@@ -146,6 +150,15 @@ func (s *sqliteStore) UserVersion(username string) (int, bool) {
 		return 0, false
 	}
 	return ver, true
+}
+
+// UserByOIDCSub 按绑定的 SSO 身份查用户（S1 回落路径；auth.OIDCProvisioner 面）。
+func (s *sqliteStore) UserByOIDCSub(sub string) (*auth.User, bool) {
+	u, err := scanUser(s.db.QueryRow(userSelect+` WHERE u.oidc_sub = ?`, sub))
+	if err != nil {
+		return nil, false
+	}
+	return u, true
 }
 
 // Tenants 列出全部租户。

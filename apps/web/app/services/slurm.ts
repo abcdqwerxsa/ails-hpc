@@ -362,6 +362,38 @@ export interface UpdateRoleRequest {
   permissions?: string[];
 }
 
+// --- OIDC SSO（S1/S3/S4） ---
+export interface OidcConfig {
+  enabled: boolean;
+  issuer?: string;
+}
+export interface OidcLinkResponse {
+  token: string;
+  username: string;
+  roleName?: string;
+}
+
+export const oidc = {
+  // 公开配置端点：有 OIDC 配置才显示 SSO 按钮（无需鉴权）
+  config: () => apiFetch<OidcConfig>("/auth/oidc/config"),
+
+  // 撞名确认（回调 status=link 后，用户输本地密码完成关联并领取门户 token）
+  confirmLink: (payload: { linkToken: string; username: string; password: string }) =>
+    apiFetch<OidcLinkResponse>("/auth/oidc/link", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  // 已登录账号解绑 SSO 身份
+  unlink: () => apiFetch<{ message: string }>("/auth/oidc/unlink", { method: "POST" }),
+};
+
+// oidcLoginURL 发起 SSO 登录的完整地址（302 到 IdP；dev 走生产 apiserver，prod 同源）。
+export function oidcLoginURL(bind = false): string {
+  const base = import.meta.env.DEV ? "http://192.168.20.226:8090/api/v1" : "/api/v1";
+  return `${base}/auth/oidc/${bind ? "bind" : "login"}`;
+}
+
 // ideFullURL 把后端返回的相对 web_url(/api/v1/ide/<sid>/) 拼成完整 URL 并附 ?token=<JWT>。
 // 浏览器导航/iframe 无法带 Authorization 头，/ide/ 反代接受 ?token= 兜底（见 auth 中间件）。
 export function ideFullURL(webUrl: string): string {

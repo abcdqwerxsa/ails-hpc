@@ -18,6 +18,7 @@ import (
 // Handlers 聚合所有领域 HTTP 处理器，供 NewRouter 装配路由。
 type Handlers struct {
 	Auth       *auth.AuthHandler
+	OIDC       *auth.OIDCHandler // 未配置 OIDC 时也要构造（端点自查 enabled）
 	Cluster    *cluster.ClusterHandler
 	Nodes      *nodes.NodeHandler
 	Jobs       *jobs.JobHandler
@@ -45,6 +46,11 @@ func NewRouter(h Handlers) *gin.Engine {
 
 	// 公开路由：登录 + liveness/readiness 探针。其余 /api/v1/** 一律需 Bearer JWT。
 	r.POST("/api/v1/auth/login", h.Auth.Login)
+	// OIDC SSO（S1/S3；未配置时 /config 返回 enabled=false，其余端点 400）
+	r.GET("/api/v1/auth/oidc/config", h.OIDC.Config)
+	r.GET("/api/v1/auth/oidc/login", h.OIDC.Login)
+	r.GET("/api/v1/auth/oidc/callback", h.OIDC.Callback)
+	r.POST("/api/v1/auth/oidc/link", h.OIDC.Link)
 	r.GET("/healthz", healthHandler)   // 免鉴权 liveness：进程在跑即可
 	r.GET("/readyz", h.Cluster.Readyz) // 免鉴权 readiness：探 slurmrestd 可达性
 
@@ -58,6 +64,9 @@ func NewRouter(h Handlers) *gin.Engine {
 		api.POST("/auth/password", h.Auth.ChangePassword)
 		// 权限自描述（R4 前端能力驱动：角色 + 权限点清单 + 集群身份）
 		api.GET("/auth/me", h.Auth.Me)
+		// OIDC 账号关联（S4；需登录）
+		api.GET("/auth/oidc/bind", h.OIDC.BindLogin)
+		api.POST("/auth/oidc/unlink", h.OIDC.Unlink)
 		slurm := api.Group("/slurm")
 
 		// 读：集群状态（所有已认证角色）

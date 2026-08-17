@@ -20,7 +20,7 @@ function RootLayout() {
       setUser(JSON.parse(savedUser));
       // R4：挂载时按 /auth/me 刷新权限面（角色改派/权限调整后刷新页面即感知，静默失败）
       refreshMe().then((u) => u && setUser(u));
-    } else if (location.pathname !== '/login') {
+    } else if (!isAuthPage()) {
       navigate({ to: '/login' });
     }
 
@@ -41,7 +41,11 @@ function RootLayout() {
     window.location.reload();
   };
 
-  if (location.pathname === '/login') {
+  // 登录页与其子路由（/login/oidc/callback）都不渲染侧栏布局
+  const isAuthPage = () =>
+    location.pathname === '/login' || location.pathname.startsWith('/login/');
+
+  if (isAuthPage()) {
     return <Outlet />;
   }
 
