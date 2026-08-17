@@ -17,6 +17,8 @@ var globalJobIDCounter int64 = 1000
 type JobService interface {
 	SubmitJob(ctx context.Context, req *SubmitJobRequest, clusterUser, account string) (*SubmitJobResponse, error)
 	ListJobs(ctx context.Context) ([]JobSummary, error)
+	// JobDetail 返回单个作业的生命期详情（sacct）+ 输出尾部（/shared/jobs/<id>.out）。
+	JobDetail(ctx context.Context, jobID int) (*JobDetail, error)
 	// JobOwner 返回作业的归属者（submit 时写入的 slurm account，即 clusterUser）。
 	// 用于归属隔离：member 只能控制自己的作业。空 owner 视为遗留作业（放行）。
 	JobOwner(ctx context.Context, jobID int) (string, error)
@@ -45,6 +47,9 @@ type jobServiceImpl struct {
 	// 经 docker exec slurmctld `sudo -u <clusterUser> sbatch` 以真实身份提交。
 	// 测试注入假实现。
 	cliSubmit func(opts CliSubmitOpts) (int, error)
+	// sacctRun / tailOut 供 JobDetail 注入（默认走 slurmctld CLI）。
+	sacctRun func(args ...string) ([]byte, error)
+	tailOut  func(jobID int) (string, error)
 }
 
 // CliSubmitOpts 是 GPU 作业 CLI 提交参数（sbatch）；导出供测试断言。
@@ -73,6 +78,7 @@ func defaultCliSubmit(o CliSubmitOpts) (int, error) {
 		fmt.Sprintf("--mem=%d", max(o.MemoryMB, 1)),
 		fmt.Sprintf("--gres=gpu:%d", max(o.Gpus, 1)),
 		fmt.Sprintf("--time=%d", max(o.TimeLimit, 60)),
+		"--chdir=/shared", "--output=/shared/jobs/%j.out",
 	}
 	if o.Nodes > 1 {
 		args = append(args, fmt.Sprintf("--nodes=%d", o.Nodes))
@@ -111,6 +117,8 @@ func NewJobService(client *slurmrest.Client) JobService {
 		jobs:      api,
 		localJobs: make(map[int]*JobSummary),
 		cliSubmit: defaultCliSubmit,
+		sacctRun:  defaultSacctRun,
+		tailOut:   defaultTailOut,
 	}
 }
 
@@ -123,6 +131,8 @@ func NewJobServiceWithDeps(jobs slurmJobAPI, cliSubmit func(opts CliSubmitOpts) 
 		jobs:      jobs,
 		localJobs: make(map[int]*JobSummary),
 		cliSubmit: cliSubmit,
+		sacctRun:  defaultSacctRun,
+		tailOut:   defaultTailOut,
 	}
 }
 
@@ -212,6 +222,10 @@ func (s *jobServiceImpl) SubmitJob(ctx context.Context, req *SubmitJobRequest, c
 		}
 		slurmReq.Job.Account = account // 真实 Slurm account（== clusterUser），AccountingStorageEnforce=associations 校验其关联存在
 		slurmReq.Job.MemoryPerNode = req.MemoryMB // 0=缺省（DefMemPerCPU 350/核）
+		// 1.2 输出管理：统一落 /shared/jobs/%j.out（stdout/stderr 合流；%j 由 Slurm 展开，
+		// 实测可用），cwd=/shared（容器家目录是临时的）。旧作业输出在临时 home 即丢。
+		slurmReq.Job.CurrentWorkingDirectory = "/shared"
+		slurmReq.Job.StandardOutput = "/shared/jobs/%j.out"
 
 		// 以 clusterUser 真实身份提交（per-user JWT）→ 作业以该 unix 身份运行（L1 隔离核心）
 		resp, err := s.jobs.SubmitJobAs(slurmReq, clusterUser)
@@ -314,6 +328,53 @@ func (s *jobServiceImpl) ListJobs(ctx context.Context) ([]JobSummary, error) {
 	}
 
 	return summaries, nil
+}
+
+// defaultSacctRun 经 slurmctld 执行 sacct。
+func defaultSacctRun(args ...string) ([]byte, error) {
+	return slurmrest.RunInSlurmctld(append([]string{"sacct"}, args...)...)
+}
+
+// defaultTailOut 读作业输出文件尾部（/shared/jobs/<id>.out；共享卷挂载于所有容器）。
+func defaultTailOut(jobID int) (string, error) {
+	out, err := slurmrest.RunInSlurmctld("sh", "-c",
+		fmt.Sprintf("tail -n 200 /shared/jobs/%d.out 2>/dev/null", jobID))
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
+// JobDetail sacct 生命期数据 + 输出尾部。作业不存在 → ErrJobNotFound。
+// 取 -P 首条主记录（.batch/.step 行忽略）。
+func (s *jobServiceImpl) JobDetail(ctx context.Context, jobID int) (*JobDetail, error) {
+	if s.sacctRun == nil || jobID <= 0 {
+		return nil, ErrJobNotFound
+	}
+	out, err := s.sacctRun("-n", "-P", "-j", strconv.Itoa(jobID),
+		"-o", "JobID,JobName,User,Account,Partition,State,ElapsedRaw,ExitCode,Start,End,Submit")
+	if err != nil {
+		return nil, fmt.Errorf("sacct: %w", err)
+	}
+	for _, ln := range strings.Split(string(out), "\n") {
+		f := strings.Split(ln, "|")
+		if len(f) < 11 || strings.Contains(f[0], ".") {
+			continue // 步骤行/短行
+		}
+		d := &JobDetail{
+			Name: f[1], Owner: f[2], Account: f[3], Partition: f[4], State: f[5],
+			ExitCode: f[7], Start: f[8], End: f[9], Submit: f[10],
+		}
+		d.JobID = jobID
+		d.ElapsedSec, _ = strconv.Atoi(f[6])
+		if s.tailOut != nil {
+			if tail, terr := s.tailOut(jobID); terr == nil {
+				d.StdoutTail = tail
+			}
+		}
+		return d, nil
+	}
+	return nil, ErrJobNotFound
 }
 
 // JobOwner 返回作业归属者（submit 时写入的 slurm account）。复用 ListJobs 的合并视图

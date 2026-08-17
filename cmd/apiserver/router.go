@@ -56,6 +56,7 @@ func NewRouter(h Handlers) *gin.Engine {
 		slurm.GET("/ping", h.Cluster.GetStatus)
 		slurm.GET("/nodes", h.Nodes.GetNodes)
 		slurm.GET("/jobs", h.Jobs.ListJobs)
+		slurm.GET("/jobs/:id/detail", h.Jobs.GetJobDetail)
 		slurm.GET("/partitions", h.Cluster.GetPartitions)
 		slurm.GET("/monitor/snapshot", h.Monitor.GetSnapshot)
 		slurm.GET("/monitor/history", h.Monitor.GetHistory)

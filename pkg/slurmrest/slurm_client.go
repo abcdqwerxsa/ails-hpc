@@ -574,6 +574,9 @@ type SlurmJobSubmitReq struct {
 		Environment             map[string]string `json:"environment,omitempty"`
 		// MemoryPerNode 显式内存申请（MB；v0.0.37 实测可用。0=缺省 DefMemPerCPU=350/核）。
 		MemoryPerNode int `json:"memory_per_node,omitempty"`
+		// StandardOutput 输出重定向（%j 由 Slurm 展开为 jobid；门户用 /shared/jobs/%j.out，
+		// stdout/stderr 合流——1.2 作业输出管理，实测 v0.0.37 可用）。
+		StandardOutput string `json:"standard_output,omitempty"`
 		// Account 携带提交者用户名，作为 apiserver 层归属隔离的 owner 载体
 		// （集群 AccountingStorageEnforce=none，不校验 account 存在性，可安全复用）。
 		Account string `json:"account,omitempty"`
