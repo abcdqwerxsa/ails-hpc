@@ -35,8 +35,8 @@
 
 | # | 内容 | 规模 | 状态 |
 |---|---|---|---|
-| C1 | **启用外键执行**:DSN 加 `_pragma=foreign_keys(1)`;先做存量孤儿行扫描清洗(避免开 FK 后写操作报错) | S | 待做 |
-| C2 | 索引/触发器审计:audit_log(actor,id) 索引、updated_at 触发器统一维护 | S | 待做 |
+| C1 | **启用外键执行**:DSN 加 `_pragma=foreign_keys(1)`;迁移 v2 先清存量孤儿 | S | **已完成**(PR #57,prod 验证:migrations=[1,2]、孤儿=0) |
+| C2 | 索引/触发器:idx_audit_actor + trg_users/tenants_updated_at | S | **已完成**(PR #57) |
 | C3 | schema 文档化 docs/db-schema.md(ERD+每表每列说明,与 migrate.go 对照) | S | 待做 |
 | C4 | 备份恢复演练:真实恢复一次用户库+文档化 runbook | S | 待做 |
 
