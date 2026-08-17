@@ -23,7 +23,7 @@ var (
 // Tenant 是租户记录（映射 tenants 表；设计 §3）。JSON 形状与前端 admin 页契约对齐。
 type Tenant struct {
 	ID            int64  `json:"id"`
-	Slug          string `json:"slug"`          // 唯一；保留 'system'（admin/ops_admin 所属）
+	Slug          string `json:"slug"` // 唯一；保留 'system'（admin/ops_admin 所属）
 	Name          string `json:"name"`
 	ParentAccount string `json:"parentAccount"` // Slurm 父账号（Phase 5 起用于 fairshare 层级）
 	Status        string `json:"status"`        // active | suspended

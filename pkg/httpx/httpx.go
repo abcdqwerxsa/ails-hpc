@@ -6,7 +6,7 @@
 //   - error       always present (the web UI reads data.error)
 //   - request_id  echoed when the requestIDMiddleware injected one
 //   - code        never present (HTTP status is authoritative; jobs used to
-//                 emit a redundant code field — removed)
+//     emit a redundant code field — removed)
 //
 // 4xx errors surface their message verbatim (it is about the client's request);
 // 5xx errors go through Internal, which logs the real error server-side and

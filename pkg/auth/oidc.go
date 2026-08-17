@@ -54,17 +54,17 @@ type OIDCClient struct {
 	cfg OIDCConfig
 	hc  *http.Client
 
-	mu         sync.Mutex
-	disc       *discovery
-	jwksCache  map[string]crypto.PublicKey
+	mu          sync.Mutex
+	disc        *discovery
+	jwksCache   map[string]crypto.PublicKey
 	jwksFetched time.Time
 }
 
 // NewOIDCClient 构造（cfg.Enabled()==false 时仍可构造，调用方负责门面）。
 func NewOIDCClient(cfg OIDCConfig) *OIDCClient {
 	return &OIDCClient{
-		cfg:  cfg,
-		hc:   &http.Client{Timeout: 10 * time.Second},
+		cfg:       cfg,
+		hc:        &http.Client{Timeout: 10 * time.Second},
 		jwksCache: map[string]crypto.PublicKey{},
 	}
 }
@@ -169,15 +169,15 @@ func (c *OIDCClient) ExchangeCode(code, codeVerifier string) (*TokenResponse, er
 
 // IDTokenClaims 是验签后的 ID token 载荷（标准 claim + S2 的角色/组 claim）。
 type IDTokenClaims struct {
-	Sub                string   `json:"sub"`
-	PreferredUsername  string   `json:"preferred_username"`
-	Email              string   `json:"email"`
-	Name               string   `json:"name"`
-	Aud                audClaim `json:"aud"`
-	Iss                string   `json:"iss"`
-	Exp                int64    `json:"exp"`
-	RawRoles           []string `json:"-"` // 由 RolesClaim 解析（见 ParseRoles）
-	raw                map[string]json.RawMessage
+	Sub               string   `json:"sub"`
+	PreferredUsername string   `json:"preferred_username"`
+	Email             string   `json:"email"`
+	Name              string   `json:"name"`
+	Aud               audClaim `json:"aud"`
+	Iss               string   `json:"iss"`
+	Exp               int64    `json:"exp"`
+	RawRoles          []string `json:"-"` // 由 RolesClaim 解析（见 ParseRoles）
+	raw               map[string]json.RawMessage
 }
 
 // audClaim 兼容 aud 的字符串与数组两种形态（OIDC Core 允许两者）。

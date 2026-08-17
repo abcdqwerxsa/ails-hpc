@@ -19,8 +19,6 @@ const passwordHistoryKeep = 5
 // ErrPasswordReused 新密码与最近 N 次历史重复（A1）。
 var ErrPasswordReused = errors.New("store: password was used recently and cannot be reused")
 
-
-
 // CheckPasswordHistory 判断新密码是否与最近 N 次历史重复（bcrypt 逐条比对）。
 // 无历史/库不支持 → 通过。
 func (s *sqliteStore) CheckPasswordHistory(ctx context.Context, username, newPassword string) error {
@@ -84,7 +82,7 @@ func (s *sqliteStore) SetPasswordWithHistory(ctx context.Context, username, newH
 }
 
 // ResetUserPassword 管理员重置（已有方法，A1 起加强）：must_change_password=1
-//（被重置者下次登录强制改密）+ 旧哈希入历史。
+// （被重置者下次登录强制改密）+ 旧哈希入历史。
 func (s *sqliteStore) ResetUserPassword(ctx context.Context, username, newHash string) error {
 	if !isBcryptHash(newHash) {
 		return fmt.Errorf("%w: %q is not a bcrypt hash", ErrInvalidHash, newHash)

@@ -24,15 +24,15 @@ type LoginRequest struct {
 
 // UserInfo 登录响应中的用户可见信息（不含密码哈希）。
 type UserInfo struct {
-	Username    string `json:"username"`
-	Role        string `json:"role"` // 基角色（scope 语义）
-	RoleName    string `json:"roleName,omitempty"` // 实际角色名（自定义角色 ≠ role）
+	Username    string   `json:"username"`
+	Role        string   `json:"role"`                  // 基角色（scope 语义）
+	RoleName    string   `json:"roleName,omitempty"`    // 实际角色名（自定义角色 ≠ role）
 	Permissions []string `json:"permissions,omitempty"` // 权限点清单（R4 前端能力驱动）
-	OrgSlug     string `json:"orgSlug"`
-	TenantNS    string `json:"tenantNs"`
-	ClusterUser string `json:"clusterUser"`
-	Account     string `json:"account"`
-	TenantSlug  string `json:"tenantSlug"`
+	OrgSlug     string   `json:"orgSlug"`
+	TenantNS    string   `json:"tenantNs"`
+	ClusterUser string   `json:"clusterUser"`
+	Account     string   `json:"account"`
+	TenantSlug  string   `json:"tenantSlug"`
 	// MustChangePassword A1：首次登录/被重置后须改密（前端引导到设置页）。
 	MustChangePassword bool `json:"mustChangePassword,omitempty"`
 	// AuthSource 凭证来源（local|oidc）；OIDCLinked 供 S4 绑定/解绑 UI 判定。

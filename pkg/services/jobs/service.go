@@ -71,9 +71,9 @@ type CliSubmitOpts struct {
 	Gpus        int
 	Nodes       int
 	Tasks       int
-	TimeLimit int // 分钟（sbatch --time 单位）
-	ArraySpec  string // sbatch --array（4.1；空=不用）
-	Dependency string // sbatch --dependency（4.1；空=不用）
+	TimeLimit   int    // 分钟（sbatch --time 单位）
+	ArraySpec   string // sbatch --array（4.1；空=不用）
+	Dependency  string // sbatch --dependency（4.1；空=不用）
 }
 
 // defaultCliSubmit 生产实现：脚本写入 /shared/portal-jobs/<name>-<rand>.job，
@@ -252,7 +252,7 @@ func (s *jobServiceImpl) SubmitJob(ctx context.Context, req *SubmitJobRequest, c
 		slurmReq.Job.Environment = map[string]string{
 			"PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 		}
-		slurmReq.Job.Account = account // 真实 Slurm account（== clusterUser），AccountingStorageEnforce=associations 校验其关联存在
+		slurmReq.Job.Account = account            // 真实 Slurm account（== clusterUser），AccountingStorageEnforce=associations 校验其关联存在
 		slurmReq.Job.MemoryPerNode = req.MemoryMB // 0=缺省（DefMemPerCPU 350/核）
 		// 1.2 输出管理：统一落 /shared/jobs/%j.out（stdout/stderr 合流；%j 由 Slurm 展开，
 		// 实测可用），cwd=/shared（容器家目录是临时的）。旧作业输出在临时 home 即丢。

@@ -32,12 +32,12 @@ type Reservation struct {
 
 // QOS 是一条 Slurm QOS（sacctmgr show qos -P 解析）。
 type QOS struct {
-	Name      string `json:"name"`
-	Priority  string `json:"priority,omitempty"`
-	GrpTRES   string `json:"grp_tres,omitempty"`
-	MaxTRES   string `json:"max_tres,omitempty"`
-	MaxWall   string `json:"max_wall,omitempty"`
-	MaxJobs   string `json:"max_jobs,omitempty"`
+	Name     string `json:"name"`
+	Priority string `json:"priority,omitempty"`
+	GrpTRES  string `json:"grp_tres,omitempty"`
+	MaxTRES  string `json:"max_tres,omitempty"`
+	MaxWall  string `json:"max_wall,omitempty"`
+	MaxJobs  string `json:"max_jobs,omitempty"`
 }
 
 // nameRE 予約/QOS 名白名单。

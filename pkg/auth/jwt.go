@@ -20,7 +20,7 @@ var jwtSecret []byte
 var tokenTTL = 24 * time.Hour
 
 const (
-	jwtIssuer  = "ails-hpc"
+	jwtIssuer   = "ails-hpc"
 	jwtAudience = "ails-hpc"
 )
 
@@ -59,9 +59,9 @@ type Claims struct {
 	// Perms 权限点快照（签发时来自角色表；带 store 的中间件每请求按库刷新——角色
 	// 权限调整即刻生效）。空 = 回退 BuiltinRolePermissions[Role]（旧令牌/内存库）。
 	Perms []string `json:"perms,omitempty"`
-	Iss         string `json:"iss"`
-	Aud         string `json:"aud"`
-	Exp         int64  `json:"exp"`
+	Iss   string   `json:"iss"`
+	Aud   string   `json:"aud"`
+	Exp   int64    `json:"exp"`
 }
 
 // GenerateToken 用当前 tokenTTL 签发一个新的 access token（兼容包装，不带 tid/ver）。

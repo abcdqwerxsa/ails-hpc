@@ -129,10 +129,10 @@ func (h *AdminHandler) CreateTenant(c *gin.Context) {
 // UpdateTenant PATCH /api/v1/admin/tenants/:slug {name?,status?}
 func (h *AdminHandler) UpdateTenant(c *gin.Context) {
 	var req struct {
-		Name       string `json:"name"`
-		Status     string `json:"status"`
-		GrpTRES    string `json:"grpTRES"`
-		Fairshare  string `json:"fairshare"`
+		Name      string `json:"name"`
+		Status    string `json:"status"`
+		GrpTRES   string `json:"grpTRES"`
+		Fairshare string `json:"fairshare"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		httpx.BadRequest(c, "invalid payload")
@@ -210,12 +210,12 @@ func (h *AdminHandler) ListReservations(c *gin.Context) {
 // CreateReservation POST /api/v1/admin/reservations {name,startTime,durationMinutes,nodes,users,partition}
 func (h *AdminHandler) CreateReservation(c *gin.Context) {
 	var req struct {
-		Name           string `json:"name" binding:"required"`
-		StartTime      string `json:"startTime"` // 空=now+1min；YYYY-MM-DDTHH:MM
-		DurationMinutes int   `json:"durationMinutes" binding:"required"`
-		Nodes          string `json:"nodes"`
-		Users          string `json:"users"`
-		Partition      string `json:"partition"`
+		Name            string `json:"name" binding:"required"`
+		StartTime       string `json:"startTime"` // 空=now+1min；YYYY-MM-DDTHH:MM
+		DurationMinutes int    `json:"durationMinutes" binding:"required"`
+		Nodes           string `json:"nodes"`
+		Users           string `json:"users"`
+		Partition       string `json:"partition"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		httpx.BadRequest(c, "name and durationMinutes are required")

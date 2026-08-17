@@ -88,7 +88,7 @@ func validateRolePerms(perms []string) error {
 }
 
 // ListRoles 列角色。tenantSlug="" → 平台角色（tenant_id IS NULL）；否则该租户的角色
-//（含平台角色不含——租户只见自己的自定义角色 + 服务层另行附内置角色语义）。
+// （含平台角色不含——租户只见自己的自定义角色 + 服务层另行附内置角色语义）。
 func (s *sqliteStore) ListRoles(ctx context.Context, tenantSlug string) ([]Role, error) {
 	q := roleSelect
 	var args []any

@@ -6,9 +6,9 @@ import "time"
 // （Jupyter Lab / code-server）。"Container" 为历史命名，实际是 Slurm 交互会话。
 type ContainerInstance struct {
 	ID        string    `json:"container_id"` // 会话 uuid（apiserver 生成）
-	EnvType   string    `json:"env_type"`      // jupyter | vscode
-	Status    string    `json:"status"`        // STARTING | RUNNING | STOPPED
-	WebURL    string    `json:"web_url"`       // /api/v1/ide/<session>/
+	EnvType   string    `json:"env_type"`     // jupyter | vscode
+	Status    string    `json:"status"`       // STARTING | RUNNING | STOPPED
+	WebURL    string    `json:"web_url"`      // /api/v1/ide/<session>/
 	JobID     int       `json:"job_id"`
 	Node      string    `json:"node,omitempty"`
 	Owner     string    `json:"owner,omitempty"` // 会话属主 clusterUser（Phase 4 列表租户过滤）

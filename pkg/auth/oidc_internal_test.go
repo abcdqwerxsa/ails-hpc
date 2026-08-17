@@ -295,7 +295,7 @@ func TestOIDC_ConfigEndpoint(t *testing.T) {
 }
 
 // fakeProvisioner 记录调用的 OIDC 写面假实现。store 非空时同步落用户
-//（issueAndRedirect 的活体 Lookup 需要）。
+// （issueAndRedirect 的活体 Lookup 需要）。
 type fakeProvisioner struct {
 	linked      map[string]string // username → sub
 	provisioned []string

@@ -20,8 +20,8 @@ import (
 	"ails-hpc/pkg/services/jobs"
 	"ails-hpc/pkg/services/monitor"
 	"ails-hpc/pkg/services/nodes"
-	"ails-hpc/pkg/store"
 	"ails-hpc/pkg/slurmrest"
+	"ails-hpc/pkg/store"
 )
 
 // main 是 AILS HPC Slurm 管理平台的唯一运行入口（纯 SlurmRESTd 单体）。
@@ -159,8 +159,8 @@ func main() {
 		Billing:    billing.NewBillingHandlerWithScope(billingService, tenantResolver),
 		Monitor: monitor.NewMonitorHandler(
 			monitor.NewMonitorServicePersistent(slurmClient, filepath.Join(filepath.Dir(cfg.DBPath), "monitor.db"))),
-		Admin:      admin.NewAdminHandler(adminService),
-		Audit:      adminStore, // A2：/slurm/** 变更操作审计出口
+		Admin: admin.NewAdminHandler(adminService),
+		Audit: adminStore, // A2：/slurm/** 变更操作审计出口
 	}
 
 	r := NewRouter(handlers)

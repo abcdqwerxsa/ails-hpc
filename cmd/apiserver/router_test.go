@@ -55,6 +55,7 @@ func (f *captureFetcher) Query(ctx context.Context, user string, start, end time
 // setupTestRouter 构造一个接入真实 NewRouter 的测试路由：
 //   - 内存四角色用户库（admin/member/tenant_admin/ops，明文 *123）
 //   - common.MockSlurmServer 承载 slurmrestd v0.0.37 调用
+//
 // 该测试驱动的是生产路由表本身，而非 test/e2e 的内存平行实现。
 func setupTestRouter(t *testing.T) (*gin.Engine, *common.MockSlurmServer) {
 	t.Helper()
@@ -98,7 +99,7 @@ func setupTestRouter(t *testing.T) (*gin.Engine, *common.MockSlurmServer) {
 		Nodes:      nodes.NewNodeHandler(nodes.NewNodeServiceWithApplier(slurmClient, func(string, string, string) error { return nil })),
 		Jobs:       jobs.NewJobHandlerScoped(jobs.NewJobService(slurmClient), tenantMembers(store)),
 		Containers: containers.NewContainerHandlerScoped(containers.NewContainerService(slurmClient), tenantMembers(store)),
-				Billing: billing.NewBillingHandlerWithScope(billingService, func(tenant string) ([]string, error) {
+		Billing: billing.NewBillingHandlerWithScope(billingService, func(tenant string) ([]string, error) {
 			var members []string
 			for _, u := range store.ListUsers() {
 				if u.OrgSlug == tenant {
@@ -124,10 +125,10 @@ func tokenFor(t *testing.T, role string) string {
 	// WithStore 活体校验要求用户在 store 中；clusterUser 一并对齐 store 的 ails* 命名，
 	// 使租户成员解析（按 orgSlug 派生 clusterUser 清单）能命中提交者身份。
 	userOf := map[string][2]string{
-		auth.RoleSystemAdmin:  {"admin", "ailsadmin"},
-		auth.RoleTenantAdmin:  {"tenantadmin", "ailstadmin"},
-		auth.RoleMember:       {"member", "ailsmember"},
-		auth.RoleOpsAdmin:     {"ops", "ailsops"},
+		auth.RoleSystemAdmin: {"admin", "ailsadmin"},
+		auth.RoleTenantAdmin: {"tenantadmin", "ailstadmin"},
+		auth.RoleMember:      {"member", "ailsmember"},
+		auth.RoleOpsAdmin:    {"ops", "ailsops"},
 	}
 	pair, ok := userOf[role]
 	if !ok {
@@ -175,7 +176,9 @@ func TestRouter_JobOwnership(t *testing.T) {
 		if code != http.StatusOK {
 			t.Fatalf("submit: want 200 got %d body=%s", code, body)
 		}
-		var resp struct{ JobID int `json:"job_id"` }
+		var resp struct {
+			JobID int `json:"job_id"`
+		}
 		_ = json.Unmarshal([]byte(body), &resp)
 		return resp.JobID
 	}
@@ -233,7 +236,6 @@ func TestRouter_PerUserSubmitIdentity(t *testing.T) {
 	}
 }
 
-
 // TestRouter_L4ControlAuthz 控制操作的下发身份（L4）：member 取消自己的作业时，
 // 到 slurmrestd 的请求必须以其 clusterUser 执行（"member"）；tenant_admin 越权取消
 // 走 root（"root"）。mock 按 Slurm 语义执法（非属主非 root → 403）。
@@ -247,7 +249,9 @@ func TestRouter_L4ControlAuthz(t *testing.T) {
 		if code != http.StatusOK {
 			t.Fatalf("submit: want 200 got %d body=%s", code, body)
 		}
-		var resp struct{ JobID int `json:"job_id"` }
+		var resp struct {
+			JobID int `json:"job_id"`
+		}
 		_ = json.Unmarshal([]byte(body), &resp)
 		return resp.JobID
 	}
@@ -274,7 +278,6 @@ func TestRouter_L4ControlAuthz(t *testing.T) {
 		t.Errorf("override control acting user = %q, want \"root\"", got)
 	}
 }
-
 
 // TestRouter_BillingScope 多租户 Phase 0：计费读按登录者收口。
 //   - member 带 ?user=他人 → 无视 query，强制本人（修复"可读任意用户账单"漏洞）
@@ -331,7 +334,6 @@ func indexOf(s, sub string) int {
 	return -1
 }
 
-
 // TestRouter_PasswordChange 自助改密端到端：登录→改密→旧 token 即刻 401（ver 吊销）→
 // 新密码可登录。中间件为 WithStore 形态（活体校验）。
 func TestRouter_PasswordChange(t *testing.T) {
@@ -366,7 +368,6 @@ func TestRouter_PasswordChange(t *testing.T) {
 	}
 }
 
-
 // TestRouter_TenantScoping 多租户 Phase 4：作业/会话列表与控制按租户收口。
 //   - 跨租户 member 的作业：本租户 member 不可控（403）、tenant_admin 不可控（403）
 //   - tenant_admin 可控本租户 member 的作业（200）
@@ -375,7 +376,7 @@ func TestRouter_TenantScoping(t *testing.T) {
 	r, _ := setupTestRouter(t)
 	// 跨租户 member：bio-lab 租户（store 无此租户成员清单 → 解析为空）
 	bioTok, _ := auth.GenerateToken("biomember", auth.RoleMember, "bio-lab", "default", "ailsmember2", "ailsmember2")
-	hpTok := tokenFor(t, auth.RoleMember)   // clusterUser=ailsmember @ hpc-lab
+	hpTok := tokenFor(t, auth.RoleMember) // clusterUser=ailsmember @ hpc-lab
 	taTok := tokenFor(t, auth.RoleTenantAdmin)
 	opsTok := tokenFor(t, auth.RoleOpsAdmin)
 
@@ -385,7 +386,9 @@ func TestRouter_TenantScoping(t *testing.T) {
 		if code != http.StatusOK {
 			t.Fatalf("submit: %d %s", code, body)
 		}
-		var resp struct{ JobID int `json:"job_id"` }
+		var resp struct {
+			JobID int `json:"job_id"`
+		}
 		_ = json.Unmarshal([]byte(body), &resp)
 		return resp.JobID
 	}
@@ -406,7 +409,7 @@ func TestRouter_TenantScoping(t *testing.T) {
 	}
 
 	bioJob := subNamed(bioTok, "sc-bio") // bio-lab 的作业（owner=ailsmember2）
-	hpJob := subNamed(hpTok, "sc-hp")   // hpc-lab member 的作业（owner=ailsmember）
+	hpJob := subNamed(hpTok, "sc-hp")    // hpc-lab member 的作业（owner=ailsmember）
 
 	// 1) hpc-lab member 不能控 bio 的作业
 	if c := cancel(bioJob, hpTok); c != http.StatusForbidden {

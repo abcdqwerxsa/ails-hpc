@@ -17,8 +17,8 @@ import (
 
 // oidcSession 是一次 /auth/oidc/login 发起的待完成流程。
 type oidcSession struct {
-	verifier  string
-	issuedAt  time.Time
+	verifier string
+	issuedAt time.Time
 	// bindUsername 非空 = 账号关联流程（S4：已登录用户绑定 OIDC sub）
 	bindUsername string
 }
@@ -68,7 +68,7 @@ func BindSession(username string) *oidcSession {
 }
 
 // IsBind 报告会话是否为账号关联流程。
-func (s *oidcSession) IsBind() bool  { return s != nil && s.bindUsername != "" }
+func (s *oidcSession) IsBind() bool     { return s != nil && s.bindUsername != "" }
 func (s *oidcSession) BindUser() string { return s.bindUsername }
 
 // --- 关联令牌（S4 撞名确认流） ---

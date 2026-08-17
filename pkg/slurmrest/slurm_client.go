@@ -165,7 +165,6 @@ func UpdateNodeStateCLI(name, state, reason string) error {
 	return err
 }
 
-
 // Client 封装了与原生 slurmrestd REST API 交互的客户端。
 // UserToken 为 root 特权令牌（读/控制类调用）；tokens 为 per-user 令牌缓存（submit 类调用，
 // 使作业以各用户真实 unix 身份运行——L1 隔离）。mint 为令牌铸造函数（默认走 scontrol token，
@@ -395,7 +394,7 @@ type NodesResponse struct {
 		RealMemory  int      `json:"real_memory"`
 		AllocMemory int      `json:"alloc_memory"`
 		Cores       int      `json:"cores"`
-		Gres        string   `json:"gres"`     // 配置的 GRES，如 "gpu:1"（无 GPU 为空）
+		Gres        string   `json:"gres"`      // 配置的 GRES，如 "gpu:1"（无 GPU 为空）
 		GresUsed    string   `json:"gres_used"` // 已占用的 GRES，如 "gpu:0"
 	} `json:"nodes"`
 }
@@ -447,7 +446,7 @@ func (c *Client) GetJobs() (*JobsResponse, error) {
 
 // PartitionsResponse 定义了 /slurm/v0.0.37/partitions 的响应体解析结构
 // PartitionInfo 是 slurmrestd 分区记录的解析结构。Tres 形如 "cpu=8,mem=3000M,node=2,billing=8"
-//（内存在这里；GPU 不在分区记录里——GRES 挂在节点上，需按成员节点聚合）。
+// （内存在这里；GPU 不在分区记录里——GRES 挂在节点上，需按成员节点聚合）。
 type PartitionInfo struct {
 	Name       string `json:"name"`
 	Nodes      string `json:"nodes"`

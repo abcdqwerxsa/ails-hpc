@@ -145,10 +145,10 @@ CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(username, id);`,
 func rolesMigration() string {
 	order := []string{auth.RoleSystemAdmin, auth.RoleOpsAdmin, auth.RoleTenantAdmin, auth.RoleMember}
 	desc := map[string]string{
-		auth.RoleSystemAdmin:  "platform administrator (system)",
-		auth.RoleOpsAdmin:     "operations admin (system)",
-		auth.RoleTenantAdmin:  "tenant administrator (system)",
-		auth.RoleMember:       "tenant member (system)",
+		auth.RoleSystemAdmin: "platform administrator (system)",
+		auth.RoleOpsAdmin:    "operations admin (system)",
+		auth.RoleTenantAdmin: "tenant administrator (system)",
+		auth.RoleMember:      "tenant member (system)",
 	}
 	values := ""
 	for _, r := range order {

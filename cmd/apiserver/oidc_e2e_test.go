@@ -68,7 +68,7 @@ func newE2EIdP(t *testing.T) *e2eIdP {
 func (idp *e2eIdP) signToken() string {
 	claims := map[string]any{
 		"iss": idp.srv.URL, "aud": "ails-e2e", "sub": "sub-e2e-1",
-		"exp": time.Now().Add(5 * time.Minute).Unix(),
+		"exp":                time.Now().Add(5 * time.Minute).Unix(),
 		"preferred_username": "zhang.san@example.com", "email": "zhang.san@example.com",
 	}
 	for k, v := range idp.Claims {

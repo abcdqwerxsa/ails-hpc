@@ -119,7 +119,7 @@ func TestOIDCFlow_StateReplayRejected(t *testing.T) {
 	fx := newFlowFixture(t, store, prov, OIDCMappingConfig{})
 
 	state := fx.startLogin(t)
-	fx.completeCallback(t, state) // 第一次消耗
+	fx.completeCallback(t, state)      // 第一次消耗
 	w := fx.completeCallback(t, state) // 重放
 	if fragmentParam(t, w.Header().Get("Location"), "status") != "error" {
 		t.Error("state replay must be rejected")
@@ -170,7 +170,9 @@ func TestOIDCFlow_UsernameConflictLink(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("link confirm: %d %s", w.Code, w.Body.String())
 	}
-	var resp struct{ Token string `json:"token"` }
+	var resp struct {
+		Token string `json:"token"`
+	}
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)
 	if resp.Token == "" {
 		t.Fatalf("portal token missing: %s", w.Body.String())
@@ -190,9 +192,9 @@ func TestOIDCFlow_JITProvision(t *testing.T) {
 	prov := &fakeProvisioner{}
 	store := NewUserStoreFromList(nil)
 	mapping := OIDCMappingConfig{
-		RolesClaim: "groups",
-		RoleMap:    map[string]string{"hpc-dev": "dev"},
-		TenantMap:  map[string]string{"lab-a": "hpc-lab"},
+		RolesClaim:     "groups",
+		RoleMap:        map[string]string{"hpc-dev": "dev"},
+		TenantMap:      map[string]string{"lab-a": "hpc-lab"},
 		UnmappedPolicy: "deny",
 	}
 	fx := newFlowFixture(t, store, prov, mapping)

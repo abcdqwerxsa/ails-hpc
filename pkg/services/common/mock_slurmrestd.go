@@ -312,8 +312,8 @@ func (m *MockSlurmServer) handleSubmitJob(w http.ResponseWriter, r *http.Request
 
 	w.WriteHeader(http.StatusOK)
 	resp := map[string]interface{}{
-		"errors": []interface{}{},
-		"job_id": jobID,
+		"errors":  []interface{}{},
+		"job_id":  jobID,
 		"step_id": "batch",
 	}
 	_ = json.NewEncoder(w).Encode(resp)

@@ -15,8 +15,8 @@ import (
 type TenantResolver = auth.TenantResolver
 
 type BillingHandler struct {
-	service  BillingService
-	tenants  TenantResolver // 可为 nil：tenant_admin 退化为无租户约束（仅测试场景）
+	service BillingService
+	tenants TenantResolver // 可为 nil：tenant_admin 退化为无租户约束（仅测试场景）
 }
 
 func NewBillingHandler(service BillingService) *BillingHandler {

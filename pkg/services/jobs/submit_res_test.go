@@ -18,9 +18,9 @@ import (
 
 // fakeAPI 捕获 REST 提交（内存字段断言用）。
 type fakeAPI struct {
-	last    *slurmrest.SlurmJobSubmitReq
-	lastAs  string
-	calls   int
+	last   *slurmrest.SlurmJobSubmitReq
+	lastAs string
+	calls  int
 }
 
 func (f *fakeAPI) SubmitJobAs(req *slurmrest.SlurmJobSubmitReq, actAs string) (*slurmrest.SlurmJobSubmitResp, error) {
@@ -35,7 +35,7 @@ func (f *fakeAPI) RequeueJobAs(int, string) error            { return nil }
 
 // fakeCli 捕获 GPU CLI 提交参数。
 type fakeCli struct {
-	opts jobs.CliSubmitOpts
+	opts  jobs.CliSubmitOpts
 	calls int
 }
 
@@ -120,7 +120,9 @@ func (s *stubHistorySvc) SubmitJob(ctx context.Context, r *jobs.SubmitJobRequest
 	return nil, nil
 }
 func (s *stubHistorySvc) ListJobs(ctx context.Context) ([]jobs.JobSummary, error) { return nil, nil }
-func (s *stubHistorySvc) JobDetail(ctx context.Context, id int) (*jobs.JobDetail, error) { return nil, nil }
+func (s *stubHistorySvc) JobDetail(ctx context.Context, id int) (*jobs.JobDetail, error) {
+	return nil, nil
+}
 func (s *stubHistorySvc) JobOwner(ctx context.Context, id int) (string, error) { return "", nil }
 func (s *stubHistorySvc) CancelJob(ctx context.Context, id int, a string) (*jobs.JobControlResponse, error) {
 	return nil, nil

@@ -15,14 +15,14 @@ import (
 
 // Config 持有进程启动所需的全部运行时参数。
 type Config struct {
-	ListenPort         string        // AILS_PORT，默认 "8090"（可被 -port flag 覆盖）
-	JWTSecret          []byte        // AILS_JWT_SECRET，必填（空则 Load 报错，fail-closed）
-	TokenTTL           time.Duration // AILS_TOKEN_TTL，默认 24h
-	SlurmRESTDURL      string        // SLURMRESTD_URL，默认 "http://192.168.20.226:6820"
-	SlurmUserName      string        // AILS_SLURM_USER，默认 "hpcuser"
-	UsersFile          string        // AILS_USERS_FILE，默认 "config/users.yaml"
-	UserStoreKind      string        // AILS_USER_STORE，"yaml"|"db"（多租户 Phase 1 双模，默认 yaml）
-	DBPath             string        // AILS_DB_PATH，sqlite 用户库路径（UserStoreKind=db 时生效）
+	ListenPort    string        // AILS_PORT，默认 "8090"（可被 -port flag 覆盖）
+	JWTSecret     []byte        // AILS_JWT_SECRET，必填（空则 Load 报错，fail-closed）
+	TokenTTL      time.Duration // AILS_TOKEN_TTL，默认 24h
+	SlurmRESTDURL string        // SLURMRESTD_URL，默认 "http://192.168.20.226:6820"
+	SlurmUserName string        // AILS_SLURM_USER，默认 "hpcuser"
+	UsersFile     string        // AILS_USERS_FILE，默认 "config/users.yaml"
+	UserStoreKind string        // AILS_USER_STORE，"yaml"|"db"（多租户 Phase 1 双模，默认 yaml）
+	DBPath        string        // AILS_DB_PATH，sqlite 用户库路径（UserStoreKind=db 时生效）
 
 	// OIDC SSO（S1/S2；Issuer 空 = 功能整体禁用，本地密码登录不受影响）
 	OIDC auth.OIDCConfig
@@ -38,14 +38,14 @@ type Config struct {
 // 以免签发出可被伪造的令牌。
 func Load() (*Config, error) {
 	cfg := &Config{
-		ListenPort:         envOr("AILS_PORT", "8090"),
-		JWTSecret:          []byte(os.Getenv("AILS_JWT_SECRET")),
-		TokenTTL:           envDurOr("AILS_TOKEN_TTL", 24*time.Hour),
-		SlurmRESTDURL:      envOr("SLURMRESTD_URL", "http://192.168.20.226:6820"),
-		SlurmUserName:      envOr("AILS_SLURM_USER", "hpcuser"),
-		UsersFile:          envOr("AILS_USERS_FILE", "config/users.yaml"),
+		ListenPort:    envOr("AILS_PORT", "8090"),
+		JWTSecret:     []byte(os.Getenv("AILS_JWT_SECRET")),
+		TokenTTL:      envDurOr("AILS_TOKEN_TTL", 24*time.Hour),
+		SlurmRESTDURL: envOr("SLURMRESTD_URL", "http://192.168.20.226:6820"),
+		SlurmUserName: envOr("AILS_SLURM_USER", "hpcuser"),
+		UsersFile:     envOr("AILS_USERS_FILE", "config/users.yaml"),
 
-		DBPath:             envOr("AILS_DB_PATH", "var/lib/ails/ails.db"),
+		DBPath: envOr("AILS_DB_PATH", "var/lib/ails/ails.db"),
 
 		OIDC: auth.OIDCConfig{
 			Issuer:       envOr("AILS_OIDC_ISSUER", ""),

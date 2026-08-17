@@ -265,7 +265,7 @@ func TestRoles_CrossTenantIsolation(t *testing.T) {
 }
 
 // TestRoles_PlatformAdminSubset 平台侧同理：admin 不能授予自己没有的权限
-//（admin 无 jobs:submit——纯监控角色）。
+// （admin 无 jobs:submit——纯监控角色）。
 func TestRoles_PlatformAdminSubset(t *testing.T) {
 	r, _ := newRolesFixture(t)
 	code, _ := rolesCall(r, http.MethodPost, "/api/v1/admin/roles",
