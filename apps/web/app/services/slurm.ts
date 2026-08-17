@@ -224,6 +224,48 @@ export interface BillingExportJSON {
   exported_by: string;
 }
 
+// 多租户管理（阶段 3）。注：与 jobs/billing 的 snake_case 不同，
+// 本组接口字段对齐后端 tenant/user handler 的 camelCase 序列化。
+export interface TenantInfo {
+  slug: string;
+  name: string;
+  parentAccount?: string; // Slurm 父账号（fair-share 归属，可缺省）
+  status: string; // active | suspended
+  userCount: number;
+}
+export interface TenantsListResponse {
+  tenants: TenantInfo[];
+}
+export interface UpdateTenantRequest {
+  name?: string;
+  status?: string; // active | suspended
+}
+export interface AdminUser {
+  username: string;
+  role: string; // admin | ops_admin | tenant_admin | member
+  clusterUser?: string; // Slurm 集群映射用户（开通后回填）
+  uid?: number;
+  account?: string;
+  tenantSlug?: string;
+  status: string; // active | disabled
+  displayName?: string;
+  email?: string;
+}
+export interface TenantUsersResponse {
+  users: AdminUser[];
+}
+export interface CreateAdminUserRequest {
+  username: string;
+  role: string;
+  tenantSlug: string;
+  password: string;
+}
+export interface CreateTenantUserRequest {
+  username: string;
+  password: string;
+  role: string; // member | tenant_admin
+}
+
 // ideFullURL 把后端返回的相对 web_url(/api/v1/ide/<sid>/) 拼成完整 URL 并附 ?token=<JWT>。
 // 浏览器导航/iframe 无法带 Authorization 头，/ide/ 反代接受 ?token= 兜底（见 auth 中间件）。
 export function ideFullURL(webUrl: string): string {
@@ -307,4 +349,42 @@ export const slurm = {
     if (project) q.set("project", project);
     return apiFetch<BillingExportJSON>(`/slurm/billing/export?${q.toString()}`);
   },
+
+  // 多租户管理（阶段 3）。写接口在后端以只读 yaml 存储运行时可能 503，
+  // ApiError.message 已带后端 error 文本，调用方直接透出到页面 Notice 即可。
+  // —— 平台管理员（admin）——
+  listTenants: () => apiFetch<TenantsListResponse>("/admin/tenants"),
+  createTenant: (slug: string, name: string) =>
+    apiFetch<TenantInfo>("/admin/tenants", {
+      method: "POST",
+      body: JSON.stringify({ slug, name }),
+    }),
+  updateTenant: (slug: string, payload: UpdateTenantRequest) =>
+    apiFetch<{ tenant: TenantInfo }>(`/admin/tenants/${encodeURIComponent(slug)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  createAdminUser: (payload: CreateAdminUserRequest) =>
+    apiFetch<{ user: AdminUser }>("/admin/users", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  // —— 租户管理员（tenant_admin，仅本租户）——
+  listMyTenantUsers: () => apiFetch<TenantUsersResponse>("/tenants/me/users"),
+  createTenantUser: (payload: CreateTenantUserRequest) =>
+    apiFetch<{ user: AdminUser }>("/tenants/me/users", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateTenantUser: (username: string, payload: { displayName?: string; status?: string }) =>
+    apiFetch<{ user: AdminUser }>(`/tenants/me/users/${encodeURIComponent(username)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  resetTenantUserPassword: (username: string, newPassword: string) =>
+    apiFetch<{ message: string }>(`/tenants/me/users/${encodeURIComponent(username)}/password`, {
+      method: "POST",
+      body: JSON.stringify({ newPassword }),
+    }),
 };

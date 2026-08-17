@@ -32,6 +32,14 @@ func Open(path string) (Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	// 保留租户 'system' 恒存在（admin/ops_admin 的归属，设计 §2.3）——冷启动空库
+	// 即可建平台管理员做 bootstrap；幂等，重开不重复。CreateTenant 仍拒绝经 API 建。
+	if _, err := db.ExecContext(context.Background(), `
+		INSERT INTO tenants (slug, name, parent_account) VALUES (?, ?, ?)
+		ON CONFLICT(slug) DO NOTHING`, systemTenant, systemTenant, systemTenant); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("store: ensure reserved tenant %q: %w", systemTenant, err)
+	}
 	return &sqliteStore{db: db}, nil
 }
 
