@@ -28,6 +28,31 @@ type User struct {
 	UID          int    `yaml:"uid"           json:"uid"`
 	GID          int    `yaml:"gid"           json:"gid"`
 	Account      string `yaml:"account"       json:"account"`
+	// TenantSlug 所属租户（多租户 Phase 1）：DB 库映射 tenants.slug；yaml 库 = OrgSlug。
+	TenantSlug string `yaml:"tenantSlug,omitempty" json:"tenantSlug"`
+	// Status 账号状态（active|disabled）；yaml 库恒 active。
+	Status string `yaml:"status,omitempty" json:"status,omitempty"`
+}
+
+// CompareHashAndPassword 是 bcrypt 校验的薄导出（pkg/store 等同面实现复用）。
+func CompareHashAndPassword(hash, password string) error {
+	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
+}
+
+// BcryptGenerateFromPassword 是 bcrypt 加密的薄导出（导入/测试用；MinCost 由调用方决定）。
+func BcryptGenerateFromPassword(password string) (string, error) {
+	h, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)
+	return string(h), err
+}
+
+// normalize 填充派生默认值（yaml 库与导入共用：租户回退 orgSlug、状态默认 active）。
+func (u *User) normalize() {
+	if u.TenantSlug == "" {
+		u.TenantSlug = u.OrgSlug
+	}
+	if u.Status == "" {
+		u.Status = "active"
+	}
 }
 
 // usersFile 对应 config/users.yaml 的磁盘结构。
@@ -57,6 +82,7 @@ func NewUserStoreFromList(users []User) UserStore {
 	m := make(map[string]*User, len(users))
 	for i := range users {
 		u := users[i]
+		u.normalize() // 派生默认值：TenantSlug←OrgSlug、Status←active
 		m[u.Username] = &u
 	}
 	return &userStoreImpl{users: m}
