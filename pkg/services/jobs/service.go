@@ -86,10 +86,16 @@ func defaultCliSubmit(o CliSubmitOpts) (int, error) {
 	}
 	args := []string{"sudo", "-u", o.ClusterUser, "sbatch", "--parsable",
 		"-J", o.Name, "-p", o.Partition,
-		fmt.Sprintf("--mem=%d", max(o.MemoryMB, 1)),
-		fmt.Sprintf("--gres=gpu:%d", max(o.Gpus, 1)),
 		fmt.Sprintf("--time=%d", max(o.TimeLimit, 1)), // sbatch --time 单位=分钟（TimeLimit 本就是分钟）
 		"--chdir=/shared", "--output=/shared/jobs/%j.out",
+	}
+	// 资源参数仅在有值时附加：--mem 缺省=DefMemPerCPU/核；--gres 仅 GPU 作业
+	// （数组/依赖作业 Gpus=0，无条件 gres=gpu:1 会被 standard 分区拒绝——实测 exit 125）。
+	if o.MemoryMB > 0 {
+		args = append(args, fmt.Sprintf("--mem=%d", o.MemoryMB))
+	}
+	if o.Gpus > 0 {
+		args = append(args, fmt.Sprintf("--gres=gpu:%d", o.Gpus))
 	}
 	if o.ArraySpec != "" {
 		args = append(args, "--array="+o.ArraySpec)
