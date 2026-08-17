@@ -1,0 +1,10 @@
+[Unit]
+Description=AILS HPC sqlite user-store backup
+After=ails-apiserver.service
+
+[Service]
+Type=oneshot
+# sqlite3 .backup 在线快照（WAL 安全）；保留 7 份轮转
+ExecStart=/bin/sh -c 'sqlite3 /opt/slurm-cluster/var/lib/ails/ails.db ".backup /opt/slurm-cluster/var/lib/ails/backups/ails-$(date +%%u).db"'
+User=ails
+Group=ails

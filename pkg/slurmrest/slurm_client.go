@@ -136,6 +136,13 @@ func RunInSlurmctldWithStdin(stdin string, args ...string) ([]byte, error) {
 	return out, nil
 }
 
+// ExtendJobTimeLimit 经 scontrol 延长运行中作业的时限（21.08 REST 无作业更新端点，
+// 与节点写同教义走 CLI）。addMinutes 为增量分钟。
+func ExtendJobTimeLimit(jobID int, addMinutes int) error {
+	_, err := RunInSlurmctld("scontrol", "update", fmt.Sprintf("JobId=%d", jobID), fmt.Sprintf("TimeLimit+=%d", addMinutes))
+	return err
+}
+
 // SacctQuery 在 slurmctld 容器内执行 sacct 并返回原始 stdout，供调用方按
 // --parsable2 等格式解析（用于真实 SACCT 计费）。
 func (c *Client) SacctQuery(args ...string) ([]byte, error) {

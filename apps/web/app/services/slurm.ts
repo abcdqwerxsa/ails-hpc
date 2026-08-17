@@ -175,6 +175,7 @@ export interface ContainerLaunchRequest {
   nodes?: number;
   cpus?: number;
   memory_mb?: number;
+  time_limit_min?: number; // 会话时长分钟（1.4；默认 120，上限 720）
 }
 export interface ContainerLaunchResponse {
   container_id: string;
@@ -382,6 +383,11 @@ export const slurm = {
     apiFetch<ContainerLaunchResponse>("/slurm/containers/launch", {
       method: "POST",
       body: JSON.stringify(payload),
+    }),
+  extendSession: (id: string, addMinutes: number) =>
+    apiFetch<ContainerRecycleResponse>(`/slurm/containers/${encodeURIComponent(id)}/extend`, {
+      method: "POST",
+      body: JSON.stringify({ addMinutes }),
     }),
   recycleContainer: (id: string) =>
     apiFetch<ContainerRecycleResponse>(`/slurm/containers/${encodeURIComponent(id)}`, {

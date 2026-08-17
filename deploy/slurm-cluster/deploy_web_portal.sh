@@ -22,6 +22,9 @@ rsync -avz --inplace -e "ssh -o BatchMode=yes" config/   ${REMOTE_HOST}:${REMOTE
 rsync -avz --exclude node_modules -e "ssh -o BatchMode=yes" apps/web/  ${REMOTE_HOST}:${REMOTE_DIR}/apps/web/
 rsync -avz -e "ssh -o BatchMode=yes" deploy/slurm-cluster/ails-apiserver.service \
     ${REMOTE_HOST}:/etc/systemd/system/ails-apiserver.service
+# 2.4 用户库每日备份 timer（sqlite3 在线快照，7 份轮转按星期）
+rsync -avz -e "ssh -o BatchMode=yes" deploy/slurm-cluster/ails-db-backup.service deploy/slurm-cluster/ails-db-backup.timer \
+    ${REMOTE_HOST}:/etc/systemd/system/
 
 echo "3. Installing systemd service on remote Slurm server (192.168.20.226:${PORT})..."
 echo "   Requires ${REMOTE_DIR}/.env containing AILS_JWT_SECRET (server is fail-closed without it)."
@@ -43,9 +46,11 @@ ssh -o BatchMode=yes -o ServerAliveInterval=15 ${REMOTE_HOST} "
 
   # 3) systemd 原子重启。systemd 已托管 unit，无需手动 stop/pkill——那会在重启间隙留空窗。
   chmod 644 /etc/systemd/system/ails-apiserver.service
+  mkdir -p ${REMOTE_DIR}/var/lib/ails/backups && chown -R ails:ails ${REMOTE_DIR}/var/lib/ails
   systemctl daemon-reload
   systemctl enable ails-apiserver >/dev/null 2>&1 || true
   systemctl restart ails-apiserver
+  systemctl enable --now ails-db-backup.timer >/dev/null 2>&1 || true
 
   # 4) 验证：is-active + /healthz 探活；失败则打印 journalctl 排障
   if systemctl is-active --quiet ails-apiserver && curl -fsS http://127.0.0.1:${PORT}/healthz >/dev/null; then

@@ -112,13 +112,17 @@ case "$ROLE" in
         wait_for_port "slurmdbd" "6819" "SlurmDBD"
         sleep 2
 
-        # 创建并初始化属组可读 (640) 的 JWT Symmetric Key
-        if [ ! -f /etc/slurm/jwt_hs256.key ]; then
-            echo "Generating JWT Key in /etc/slurm/jwt_hs256.key..."
-            dd if=/dev/urandom bs=1 count=32 of=/etc/slurm/jwt_hs256.key 2>/dev/null
-            chown slurm:slurm /etc/slurm/jwt_hs256.key
-            chmod 640 /etc/slurm/jwt_hs256.key
+        # 创建并初始化属组可读 (640) 的 JWT Symmetric Key。
+        # 2.5：key 落在 named volume /etc/slurm/jwt/ —— 容器重建不再换 key，
+        # 免除全量 token 重铸（apiserver 虽能自愈，但省掉雷群）。
+        mkdir -p /etc/slurm/jwt
+        if [ ! -f /etc/slurm/jwt/jwt_hs256.key ]; then
+            echo "Generating JWT Key in /etc/slurm/jwt/jwt_hs256.key (persistent volume)..."
+            dd if=/dev/urandom bs=1 count=32 of=/etc/slurm/jwt/jwt_hs256.key 2>/dev/null
         fi
+        chown slurm:slurm /etc/slurm/jwt/jwt_hs256.key
+        chmod 640 /etc/slurm/jwt/jwt_hs256.key
+        ln -sf /etc/slurm/jwt/jwt_hs256.key /etc/slurm/jwt_hs256.key
         
         # 尝试注册 Cluster 到 SlurmDBD 记账服务中
         echo "Registering cluster ails-hpc-cluster in SlurmDBD..."
