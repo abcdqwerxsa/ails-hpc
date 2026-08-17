@@ -55,6 +55,10 @@ type User struct {
 	AuthSource string `yaml:"-" json:"authSource,omitempty"`
 	// OIDCSub SSO 身份标识（IdP sub claim）；S4 绑定/解绑与 S1 回落查找用。
 	OIDCSub string `yaml:"-" json:"-"`
+
+	// MustChangePassword 首次登录/被重置后须改密（A1）；中间件放行面仅限自助改密
+	// 相关端点，改密成功后清除。
+	MustChangePassword bool `yaml:"-" json:"mustChangePassword,omitempty"`
 }
 
 // CompareHashAndPassword 是 bcrypt 校验的薄导出（pkg/store 等同面实现复用）。

@@ -40,6 +40,11 @@ function LoginPage() {
           clusterUser: data.user.clusterUser,
         })
       );
+      // A1：初始/被重置密码强制首登改密
+      if (data.user.mustChangePassword) {
+        navigate({ to: '/settings' });
+        return;
+      }
       navigate({ to: '/' });
     } catch (err: any) {
       setErrorMsg('系统连接失败: ' + err.message);

@@ -179,9 +179,14 @@ func (h *AdminHandler) CreatePlatformUser(c *gin.Context) {
 		httpx.BadRequest(c, "username, role, tenantSlug, password are required")
 		return
 	}
+	if err := auth.ValidatePasswordPolicy(req.Password); err != nil {
+		httpx.BadRequest(c, err.Error())
+		return
+	}
 	actor, _ := actorAndTenant(c)
 	u, err := h.service.CreatePlatformUser(c.Request.Context(), actor, store.NewUser{
 		Username: req.Username, Password: req.Password, Role: req.Role, TenantSlug: req.TenantSlug,
+		MustChangePassword: true, // A1：初始密码首登强制改密
 	}, requestID(c))
 	if err != nil {
 		mapErr(c, err, "admin.CreatePlatformUser")
@@ -312,9 +317,14 @@ func (h *AdminHandler) CreateTenantUser(c *gin.Context) {
 		httpx.BadRequest(c, "username, password, role are required")
 		return
 	}
+	if err := auth.ValidatePasswordPolicy(req.Password); err != nil {
+		httpx.BadRequest(c, err.Error())
+		return
+	}
 	actor, tenant := actorAndTenant(c)
 	u, err := h.service.CreateTenantUser(c.Request.Context(), actor, tenant, store.NewUser{
 		Username: req.Username, Password: req.Password, Role: req.Role,
+		MustChangePassword: true, // A1：初始密码首登强制改密
 	}, requestID(c))
 	if err != nil {
 		mapErr(c, err, "admin.CreateTenantUser")
@@ -354,8 +364,8 @@ func (h *AdminHandler) ResetMyUserPassword(c *gin.Context) {
 		httpx.BadRequest(c, "newPassword is required")
 		return
 	}
-	if len(req.NewPassword) < 8 {
-		httpx.BadRequest(c, "newPassword must be at least 8 characters")
+	if err := auth.ValidatePasswordPolicy(req.NewPassword); err != nil {
+		httpx.BadRequest(c, err.Error())
 		return
 	}
 	actor, tenant := actorAndTenant(c)

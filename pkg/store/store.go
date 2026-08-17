@@ -8,6 +8,7 @@ package store
 import (
 	"context"
 	"errors"
+	"time"
 
 	"ails-hpc/pkg/auth"
 )
@@ -92,4 +93,16 @@ type AdminStore interface {
 	UnlinkOIDC(username string) error
 	// ProvisionOIDCUser JIT 开户（S2 映射；随机本地密码 + 角色/租户归属校验）。
 	ProvisionOIDCUser(username, email, displayName, roleName, tenantSlug, sub string) (*auth.User, error)
+
+	// --- A1 密码与会话策略 ---
+	// CheckPasswordHistory 新密码与最近 N 次重复 → ErrPasswordReused。
+	CheckPasswordHistory(ctx context.Context, username, newPassword string) error
+	// SetPasswordWithHistory 自助改密落库（清 must_change + 旧哈希入历史 + bump 版本）。
+	SetPasswordWithHistory(ctx context.Context, username, newHash string) error
+	// RecordLogin 台账一条会话（登录成功时）。
+	RecordLogin(ctx context.Context, username, ip, userAgent string, expiresAt time.Time)
+	// ListSessions 当前有效会话（未过期且 token_version 对齐）。
+	ListSessions(ctx context.Context, username string) ([]auth.SessionEntry, error)
+	// LogoutAll 全设备登出（token_version+1 + 台账清理）。
+	LogoutAll(ctx context.Context, username string) error
 }

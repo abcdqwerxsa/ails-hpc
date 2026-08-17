@@ -50,6 +50,9 @@ export interface UserInfo {
   clusterUser?: string;
   account?: string;
   tenantSlug?: string;
+  mustChangePassword?: boolean; // A1：首登/被重置后强制改密
+  authSource?: string; // local | oidc
+  oidcLinked?: boolean; // S4：是否已绑定 SSO 身份
 }
 export interface LoginResponse {
   token: string;
@@ -362,6 +365,15 @@ export interface UpdateRoleRequest {
   permissions?: string[];
 }
 
+// 会话台账行（A1；对齐后端 auth.SessionEntry）
+export interface SessionEntry {
+  id: number;
+  issuedAt: string;
+  expiresAt: string;
+  ip: string;
+  userAgent: string;
+}
+
 // --- OIDC SSO（S1/S3/S4） ---
 export interface OidcConfig {
   enabled: boolean;
@@ -422,6 +434,10 @@ export const slurm = {
 
   // 权限自描述（R4 能力驱动数据源：角色 + 权限清单 + 集群身份）
   getMe: () => apiFetch<LoginResponse>("/auth/me"),
+
+  // A1 会话策略：会话台账 + 全设备登出（token_version+1，全部在途 token 失效）
+  getMySessions: () => apiFetch<{ sessions: SessionEntry[] }>("/auth/me/sessions"),
+  logoutAll: () => apiFetch<{ message: string }>("/auth/logout-all", { method: "POST" }),
 
   // 集群状态：200 + pings[0].ping==="UP" 即 UP；503 抛错 → 调用方按 DEGRADED 处理
   getClusterStatus: () => apiFetch<PingResponse>("/slurm/ping"),

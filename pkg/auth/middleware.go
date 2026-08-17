@@ -96,6 +96,15 @@ func authenticate(c *gin.Context, store UserStore) (*Claims, bool) {
 		claims.Rn = u.RoleName
 		claims.Perms = u.Permissions
 		claims.Rid = u.RoleID
+
+		// A1 强制改密：must_change_password=1 时只放行自助面（改密/自描述/登出全部/
+		// SSO 关联），其余业务端点一律 403——防初始/被重置密码被长期使用。
+		if u.MustChangePassword && !mustChangeAllowed(c.Request.URL.Path) {
+			httpx.Error(c, http.StatusForbidden,
+				"password change required before using this service",
+				httpx.Extra{"code": "must_change_password"})
+			return nil, false
+		}
 	}
 	if isIDE && fromQuery {
 		http.SetCookie(c.Writer, &http.Cookie{
@@ -108,6 +117,21 @@ func authenticate(c *gin.Context, store UserStore) (*Claims, bool) {
 		})
 	}
 	return claims, true
+}
+
+// mustChangeAllowed 是 must_change_password=1 时的端点白名单（自助面）。
+func mustChangeAllowed(path string) bool {
+	for _, p := range []string{
+		"/api/v1/auth/password",
+		"/api/v1/auth/me",
+		"/api/v1/auth/logout-all",
+		"/api/v1/auth/oidc/",
+	} {
+		if strings.HasPrefix(path, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // RequireRole 按角色白名单放行（R1 前的路由门面）。

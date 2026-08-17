@@ -28,7 +28,7 @@ func TestAudit_CoversAuthAndOps(t *testing.T) {
 	// IDE 启动 → ide.launch
 	doAuth(r, http.MethodPost, "/api/v1/slurm/containers/launch", `{"env_type":"vscode"}`, alice)
 	// 改密成功 → auth.password.change（改完旧 token 吊销，审计已先行写入）
-	doAuth(r, http.MethodPost, "/api/v1/auth/password", `{"oldPassword":"alice12345","newPassword":"alice12345x"}`, alice)
+	doAuth(r, http.MethodPost, "/api/v1/auth/password", `{"oldPassword":"alice12345","newPassword":"Alice#12345x"}`, alice)
 
 	entries, err := st.ListAudit(t.Context(), "", "", 100)
 	if err != nil {

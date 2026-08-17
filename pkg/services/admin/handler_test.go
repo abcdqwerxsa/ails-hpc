@@ -152,20 +152,20 @@ func TestTenantAdmin_ManagesOwnUsersOnly(t *testing.T) {
 
 	// 2) 建 member：200 + 供给调用 + 可登录
 	code, body = do(r, http.MethodPost, "/api/v1/tenants/me/users",
-		`{"username":"bob","password":"bob12345","role":"member"}`)
+		`{"username":"bob","password":"Bob#23456","role":"member"}`)
 	if code != 200 {
 		t.Fatalf("create bob: %d %s", code, body)
 	}
 	if len(prov.calls) != 1 || prov.calls[0] != "u:bob/bob@hpc-lab" {
 		t.Errorf("provisioner calls = %v, want [u:bob/bob@hpc-lab]", prov.calls)
 	}
-	if u, err := st.Verify("bob", "bob12345"); err != nil || u.ClusterUser != "bob" || u.Account != "bob" {
+	if u, err := st.Verify("bob", "Bob#23456"); err != nil || u.ClusterUser != "bob" || u.Account != "bob" {
 		t.Errorf("bob login/mapping: %v %+v", err, u)
 	}
 
 	// 3) 不可建平台角色
 	if code, _ := do(r, http.MethodPost, "/api/v1/tenants/me/users",
-		`{"username":"eve","password":"eve12345","role":"admin"}`); code != 400 {
+		`{"username":"eve","password":"Eve#23456","role":"admin"}`); code != 400 {
 		t.Errorf("tenant_admin creating admin: want 400 got %d", code)
 	}
 
@@ -177,10 +177,10 @@ func TestTenantAdmin_ManagesOwnUsersOnly(t *testing.T) {
 
 	// 5) 重置密码（active 态）：新密码可登录、旧密码失效
 	if code, _ := do(r, http.MethodPost, "/api/v1/tenants/me/users/alice/password",
-		`{"newPassword":"alice99999"}`); code != 200 {
+		`{"newPassword":"Alice#99999"}`); code != 200 {
 		t.Errorf("reset alice pw: got %d", code)
 	}
-	if _, err := st.Verify("alice", "alice99999"); err != nil {
+	if _, err := st.Verify("alice", "Alice#99999"); err != nil {
 		t.Errorf("alice new pw login: %v", err)
 	}
 	if _, err := st.Verify("alice", "alice12345"); err == nil {
@@ -195,7 +195,7 @@ func TestTenantAdmin_ManagesOwnUsersOnly(t *testing.T) {
 	if u, ok := st.Lookup("alice"); !ok || u.Status != "disabled" {
 		t.Errorf("alice status = %+v", u)
 	}
-	if _, err := st.Verify("alice", "alice99999"); err == nil {
+	if _, err := st.Verify("alice", "Alice#99999"); err == nil {
 		t.Error("disabled user must not log in even with the right password")
 	}
 }
@@ -217,15 +217,15 @@ func TestPlatformAdmin_TenantsAndUsers(t *testing.T) {
 
 	// 平台建 admin（system）与 member（bio-lab）
 	if code, body := do(r, http.MethodPost, "/api/v1/admin/users",
-		`{"username":"root2","role":"admin","tenantSlug":"system","password":"root12345"}`); code != 200 {
+		`{"username":"root2","role":"admin","tenantSlug":"system","password":"Root#23456"}`); code != 200 {
 		t.Errorf("platform admin: %d %s", code, body)
 	}
 	if code, _ := do(r, http.MethodPost, "/api/v1/admin/users",
-		`{"username":"bio1","role":"member","tenantSlug":"bio-lab","password":"bio12345"}`); code != 200 {
+		`{"username":"bio1","role":"member","tenantSlug":"bio-lab","password":"Bio#23456"}`); code != 200 {
 		t.Errorf("platform member into bio-lab: got %d", code)
 	}
 	if code, _ := do(r, http.MethodPost, "/api/v1/admin/users",
-		`{"username":"bad1","role":"admin","tenantSlug":"bio-lab","password":"bad12345"}`); code != 400 {
+		`{"username":"bad1","role":"admin","tenantSlug":"bio-lab","password":"Bad#23456"}`); code != 400 {
 		t.Errorf("admin outside system: want 400 got %d", code)
 	}
 	_ = st
@@ -238,7 +238,7 @@ func TestProvisionFailureReturns502(t *testing.T) {
 	prov.fail = true
 
 	code, _ := do(r, http.MethodPost, "/api/v1/tenants/me/users",
-		`{"username":"carol","password":"carol12345","role":"member"}`)
+		`{"username":"carol","password":"Carol#23456","role":"member"}`)
 	if code != http.StatusBadGateway {
 		t.Fatalf("provision fail: want 502 got %d", code)
 	}
@@ -248,7 +248,7 @@ func TestProvisionFailureReturns502(t *testing.T) {
 	// 供给恢复后重试幂等：重复用户名 → 409（已存在，不重复建）
 	prov.fail = false
 	if code, _ := do(r, http.MethodPost, "/api/v1/tenants/me/users",
-		`{"username":"carol","password":"carol12345","role":"member"}`); code != 409 {
+		`{"username":"carol","password":"Carol#23456","role":"member"}`); code != 409 {
 		t.Errorf("retry duplicate: want 409 got %d", code)
 	}
 }
@@ -279,7 +279,7 @@ func TestAuditEndpointAndEntries(t *testing.T) {
 		t.Fatalf("create tenant: %d %s", code, body)
 	}
 	if code, _ := do(r, http.MethodPost, "/api/v1/admin/users",
-		`{"username":"aud1","role":"member","tenantSlug":"bio-x","password":"aud12345"}`); code != 200 {
+		`{"username":"aud1","role":"member","tenantSlug":"bio-x","password":"Aud#23456"}`); code != 200 {
 		t.Fatalf("create user: got %d", code)
 	}
 	entries, err := st.ListAudit(context.Background(), "", "tenant.create", 10)

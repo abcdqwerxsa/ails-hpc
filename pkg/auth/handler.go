@@ -33,6 +33,11 @@ type UserInfo struct {
 	ClusterUser string `json:"clusterUser"`
 	Account     string `json:"account"`
 	TenantSlug  string `json:"tenantSlug"`
+	// MustChangePassword A1：首次登录/被重置后须改密（前端引导到设置页）。
+	MustChangePassword bool `json:"mustChangePassword,omitempty"`
+	// AuthSource 凭证来源（local|oidc）；OIDCLinked 供 S4 绑定/解绑 UI 判定。
+	AuthSource string `json:"authSource,omitempty"`
+	OIDCLinked bool   `json:"oidcLinked,omitempty"`
 }
 
 // LoginResponse 严格匹配 React login.tsx 解析的结构：{token, user:{username,role,orgSlug,tenantNs}}。
@@ -110,6 +115,11 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	h.Rate.RecordSuccess(req.Username, ip)
 	h.writeAudit(c, user.Username, "auth.login", "user:"+user.Username,
 		fmt.Sprintf(`{"ip":%q,"auth_source":%q,"role":%q}`, ip, "local", user.Role))
+	// A1 会话台账（可选面：DB 库支持；内存/yaml 库跳过）
+	if sp, ok := h.store.(SessionSink); ok {
+		sp.RecordLogin(c.Request.Context(), user.Username, ip, c.Request.UserAgent(),
+			time.Now().Add(tokenTTL))
+	}
 
 	// Phase 2：整 Claims 签发——tid（租户）+ ver（令牌版本，改密/禁用即吊销在途令牌）。
 	// R2：rid/rn/perms 携带实际角色（自定义角色时代 Role=基角色仅作 scope 推导）。
@@ -138,15 +148,18 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	c.JSON(http.StatusOK, LoginResponse{
 		Token: token,
 		User: UserInfo{
-			Username:    user.Username,
-			Role:        user.Role,
-			RoleName:    rn,
-			Permissions: user.Permissions,
-			OrgSlug:     user.OrgSlug,
-			TenantNS:    user.TenantNS,
-			ClusterUser: user.ClusterUser,
-			Account:     user.Account,
-			TenantSlug:  user.TenantSlug,
+			Username:           user.Username,
+			Role:               user.Role,
+			RoleName:           rn,
+			Permissions:        user.Permissions,
+			OrgSlug:            user.OrgSlug,
+			TenantNS:           user.TenantNS,
+			ClusterUser:        user.ClusterUser,
+			Account:            user.Account,
+			TenantSlug:         user.TenantSlug,
+			MustChangePassword: user.MustChangePassword,
+			AuthSource:         user.AuthSource,
+			OIDCLinked:         user.OIDCSub != "",
 		},
 	})
 }
@@ -158,15 +171,16 @@ type ChangePasswordRequest struct {
 }
 
 // ChangePassword POST /api/v1/auth/password —— 自助改密（任何已认证角色）。
-// 成功后 TokenVersion+1：本人所有在途 JWT 即刻失效，需重新登录。
+// A1 起执行复杂度策略（大小写/数字/符号 + ≥8）与历史 N 次不可重用；成功后
+// TokenVersion+1：本人所有在途 JWT 即刻失效，需重新登录（must_change 标记同时清除）。
 func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	var req ChangePasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		httpx.BadRequest(c, "oldPassword and newPassword are required")
 		return
 	}
-	if len(req.NewPassword) < 8 {
-		httpx.BadRequest(c, "newPassword must be at least 8 characters")
+	if err := ValidatePasswordPolicy(req.NewPassword); err != nil {
+		httpx.BadRequest(c, err.Error())
 		return
 	}
 	if req.NewPassword == req.OldPassword {
@@ -179,12 +193,24 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 		httpx.Unauthorized(c, "invalid username or password")
 		return
 	}
+	// A1 历史 N 次不可重用（DB 库可选面；内存库跳过）
+	if ps, ok := h.store.(PolicyStore); ok {
+		if err := ps.CheckPasswordHistory(c.Request.Context(), username, req.NewPassword); err != nil {
+			httpx.BadRequest(c, err.Error())
+			return
+		}
+	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
 	if err != nil {
 		httpx.Internal(c, "ChangePassword.hash", err)
 		return
 	}
-	if err := h.store.SetPassword(username, string(hash)); err != nil {
+	if ps, ok := h.store.(PolicyStore); ok {
+		if err := ps.SetPasswordWithHistory(c.Request.Context(), username, string(hash)); err != nil {
+			httpx.Internal(c, "ChangePassword.SetPassword", err)
+			return
+		}
+	} else if err := h.store.SetPassword(username, string(hash)); err != nil {
 		if errors.Is(err, ErrUserStoreReadOnly) {
 			// yaml 文件库落在只读文件系统（systemd ProtectSystem）等：明确拒绝，
 			// 密码未变化；DB 用户库（AILS_USER_STORE=db）可写。
@@ -196,6 +222,52 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	}
 	h.writeAudit(c, username, "auth.password.change", "user:"+username, `{}`)
 	c.JSON(http.StatusOK, gin.H{"message": "password updated; please log in again"})
+}
+
+// SessionSink 是 A1 会话台账写面（生产 = sqlite store；内存库不实现 → 跳过）。
+type SessionSink interface {
+	RecordLogin(ctx context.Context, username, ip, userAgent string, expiresAt time.Time)
+	ListSessions(ctx context.Context, username string) ([]SessionEntry, error)
+	LogoutAll(ctx context.Context, username string) error
+}
+
+// SessionEntry 是会话台账行（auth 侧形状；store.SessionInfo 对齐）。
+type SessionEntry struct {
+	ID        int64  `json:"id"`
+	IssuedAt  string `json:"issuedAt"`
+	ExpiresAt string `json:"expiresAt"`
+	IP        string `json:"ip"`
+	UserAgent string `json:"userAgent"`
+}
+
+// MySessions GET /api/v1/auth/me/sessions —— 本人当前有效会话清单。
+func (h *AuthHandler) MySessions(c *gin.Context) {
+	username, _, _, _ := claimsFromCtx(c)
+	sp, ok := h.store.(SessionSink)
+	if !ok {
+		c.JSON(http.StatusOK, gin.H{"sessions": []SessionEntry{}})
+		return
+	}
+	out, err := sp.ListSessions(c.Request.Context(), username)
+	if err != nil {
+		httpx.Internal(c, "MySessions", err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"sessions": out})
+}
+
+// LogoutAll POST /api/v1/auth/logout-all —— 全设备登出：token_version+1，
+// 本人所有在途 JWT 即刻失效；台账清理。
+func (h *AuthHandler) LogoutAll(c *gin.Context) {
+	username, _, _, _ := claimsFromCtx(c)
+	if sp, ok := h.store.(SessionSink); ok {
+		if err := sp.LogoutAll(c.Request.Context(), username); err != nil {
+			httpx.Internal(c, "LogoutAll", err)
+			return
+		}
+	}
+	h.writeAudit(c, username, "auth.logout_all", "user:"+username, `{}`)
+	c.JSON(http.StatusOK, gin.H{"message": "all sessions revoked; please log in again"})
 }
 
 // claimsFromCtx 从 gin 上下文取 JWT claims（中间件注入）。
@@ -224,18 +296,29 @@ func (h *AuthHandler) Me(c *gin.Context) {
 	if roleName == cl.Role {
 		roleName = "" // 内置角色不重复携带（与 Login 的 rn 归一化一致）
 	}
+	mustChange, authSource, oidcLinked := false, "local", false
+	if u, ok := h.store.Lookup(cl.Username); ok {
+		mustChange = u.MustChangePassword
+		if u.AuthSource != "" {
+			authSource = u.AuthSource
+		}
+		oidcLinked = u.OIDCSub != ""
+	}
 	c.JSON(http.StatusOK, LoginResponse{
 		Token: "",
 		User: UserInfo{
-			Username:    cl.Username,
-			Role:        cl.Role,
-			RoleName:    roleName,
-			Permissions: SortedPermissions(PermissionsOf(cl)),
-			OrgSlug:     cl.OrgSlug,
-			TenantNS:    cl.TenantNS,
-			ClusterUser: cl.ClusterUser,
-			Account:     cl.Account,
-			TenantSlug:  tenantOfPublic(cl),
+			Username:           cl.Username,
+			Role:               cl.Role,
+			RoleName:           roleName,
+			Permissions:        SortedPermissions(PermissionsOf(cl)),
+			OrgSlug:            cl.OrgSlug,
+			TenantNS:           cl.TenantNS,
+			ClusterUser:        cl.ClusterUser,
+			Account:            cl.Account,
+			TenantSlug:         tenantOfPublic(cl),
+			MustChangePassword: mustChange,
+			AuthSource:         authSource,
+			OIDCLinked:         oidcLinked,
 		},
 	})
 }

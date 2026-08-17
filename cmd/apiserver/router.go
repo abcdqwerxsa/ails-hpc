@@ -64,6 +64,9 @@ func NewRouter(h Handlers) *gin.Engine {
 		api.POST("/auth/password", h.Auth.ChangePassword)
 		// 权限自描述（R4 前端能力驱动：角色 + 权限点清单 + 集群身份）
 		api.GET("/auth/me", h.Auth.Me)
+		// A1 会话策略：会话台账 + 全设备登出（token_version+1）
+		api.GET("/auth/me/sessions", h.Auth.MySessions)
+		api.POST("/auth/logout-all", h.Auth.LogoutAll)
 		// OIDC 账号关联（S4；需登录）
 		api.GET("/auth/oidc/bind", h.OIDC.BindLogin)
 		api.POST("/auth/oidc/unlink", h.OIDC.Unlink)

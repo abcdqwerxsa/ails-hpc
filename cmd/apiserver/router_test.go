@@ -346,11 +346,11 @@ func TestRouter_PasswordChange(t *testing.T) {
 	}
 
 	// 无鉴权调改密 → 401
-	if c := doRequest(r, http.MethodPost, "/api/v1/auth/password", `{"oldPassword":"member123","newPassword":"changed99"}`, ""); c != http.StatusUnauthorized {
+	if c := doRequest(r, http.MethodPost, "/api/v1/auth/password", `{"oldPassword":"member123","newPassword":"Changed#99"}`, ""); c != http.StatusUnauthorized {
 		t.Errorf("no-token change: want 401 got %d", c)
 	}
 	// 带令牌改密成功
-	if c, b := doAuth(r, http.MethodPost, "/api/v1/auth/password", `{"oldPassword":"member123","newPassword":"changed99"}`, login.Token); c != http.StatusOK {
+	if c, b := doAuth(r, http.MethodPost, "/api/v1/auth/password", `{"oldPassword":"member123","newPassword":"Changed#99"}`, login.Token); c != http.StatusOK {
 		t.Fatalf("change with token: want 200 got %d body=%s", c, b)
 	}
 	// 旧 token 已被吊销（对任意受保护路由 401）
@@ -361,7 +361,7 @@ func TestRouter_PasswordChange(t *testing.T) {
 	if c, _ := doAuth(r, http.MethodPost, "/api/v1/auth/login", `{"username":"member","password":"member123"}`, ""); c != http.StatusUnauthorized {
 		t.Errorf("old password must be rejected, got %d", c)
 	}
-	if c, b := doAuth(r, http.MethodPost, "/api/v1/auth/login", `{"username":"member","password":"changed99"}`, ""); c != http.StatusOK {
+	if c, b := doAuth(r, http.MethodPost, "/api/v1/auth/login", `{"username":"member","password":"Changed#99"}`, ""); c != http.StatusOK {
 		t.Fatalf("new password login: want 200 got %d body=%s", c, b)
 	}
 }

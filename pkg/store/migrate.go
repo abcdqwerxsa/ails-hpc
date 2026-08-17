@@ -112,6 +112,27 @@ CREATE TRIGGER IF NOT EXISTS trg_users_updated_at
   BEGIN
     UPDATE users SET updated_at = datetime('now') WHERE id = OLD.id;
   END;`,
+		// v5(A1 密码与会话策略)：password_history（历史 N 次不可重用）、
+		// sessions（会话台账）、users.must_change_password（首次登录/被重置后强制改密）。
+		`
+CREATE TABLE IF NOT EXISTS password_history (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  username      TEXT NOT NULL,
+  password_hash TEXT NOT NULL,
+  changed_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_password_history_user ON password_history(username, id);
+ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE IF NOT EXISTS sessions (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  username      TEXT NOT NULL,
+  issued_at     TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at    TEXT NOT NULL,
+  ip            TEXT NOT NULL DEFAULT '',
+  user_agent    TEXT NOT NULL DEFAULT '',
+  token_version INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(username, id);`,
 	}
 }
 

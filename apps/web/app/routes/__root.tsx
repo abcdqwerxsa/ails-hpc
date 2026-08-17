@@ -112,6 +112,11 @@ function RootLayout() {
                 </Link>
               </li>
             )}
+            <li className="nav-item">
+              <Link to="/settings" activeProps={{ className: 'active' }}>
+                安全设置
+              </Link>
+            </li>
             {/* 管理入口：平台面板（tenants:read）或租户面板（tenant:users:read）任一可见 */}
             {(can('tenants:read', user) || can('tenant:users:read', user)) && (
               <li className="nav-item">
