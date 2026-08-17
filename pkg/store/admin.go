@@ -346,3 +346,51 @@ func (s *sqliteStore) WriteAudit(ctx context.Context, actor, action, target, req
 		actor, action, target, detail, requestID)
 	return err
 }
+
+// AuditEntry 是 audit_log 的读取行。
+type AuditEntry struct {
+	ID        int64  `json:"id"`
+	Actor     string `json:"actor"`
+	Action    string `json:"action"`
+	Target    string `json:"target"`
+	Detail    string `json:"detail"`
+	RequestID string `json:"requestId"`
+	CreatedAt string `json:"createdAt"`
+}
+
+// ListAudit 返回审计日志（时间倒序）。actor/action 为空=不过滤；limit 上限 500。
+func (s *sqliteStore) ListAudit(ctx context.Context, actor, action string, limit int) ([]AuditEntry, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	q := `SELECT id, actor, action, target, detail, request_id, created_at FROM audit_log`
+	args := []interface{}{}
+	where := []string{}
+	if actor != "" {
+		where = append(where, "actor = ?")
+		args = append(args, actor)
+	}
+	if action != "" {
+		where = append(where, "action = ?")
+		args = append(args, action)
+	}
+	if len(where) > 0 {
+		q += " WHERE " + strings.Join(where, " AND ")
+	}
+	q += " ORDER BY id DESC LIMIT ?"
+	args = append(args, limit)
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []AuditEntry{}
+	for rows.Next() {
+		var e AuditEntry
+		if err := rows.Scan(&e.ID, &e.Actor, &e.Action, &e.Target, &e.Detail, &e.RequestID, &e.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}

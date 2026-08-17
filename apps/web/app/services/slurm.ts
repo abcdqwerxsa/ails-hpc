@@ -258,6 +258,8 @@ export interface TenantsListResponse {
 export interface UpdateTenantRequest {
   name?: string;
   status?: string; // active | suspended
+  grpTRES?: string; // 如 "cpu=4,mem=8G"（Slurm GrpTRES 语法，白名单字符集）
+  fairshare?: string; // 数字
 }
 export interface AdminUser {
   username: string;
@@ -278,6 +280,15 @@ export interface CreateAdminUserRequest {
   role: string;
   tenantSlug: string;
   password: string;
+}
+export interface AuditEntry {
+  id: number;
+  actor: string;
+  action: string;
+  target: string;
+  detail?: string;
+  requestId?: string;
+  createdAt?: string;
 }
 export interface CreateTenantUserRequest {
   username: string;
@@ -381,6 +392,14 @@ export const slurm = {
       method: "POST",
       body: JSON.stringify({ slug, name }),
     }),
+  listAudit: (actor?: string, action?: string, limit?: number) => {
+    const q = new URLSearchParams();
+    if (actor) q.set("actor", actor);
+    if (action) q.set("action", action);
+    if (limit) q.set("limit", String(limit));
+    const s = q.toString();
+    return apiFetch<{ entries: AuditEntry[] }>(`/admin/audit${s ? "?" + s : ""}`);
+  },
   updateTenant: (slug: string, payload: UpdateTenantRequest) =>
     apiFetch<{ tenant: TenantInfo }>(`/admin/tenants/${encodeURIComponent(slug)}`, {
       method: "PATCH",

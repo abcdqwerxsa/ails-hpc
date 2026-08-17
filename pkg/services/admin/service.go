@@ -182,6 +182,14 @@ func (s *Service) CreatePlatformUser(ctx context.Context, actor string, nu store
 	return u, nil
 }
 
+// ListAudit 审计日志（admin）。
+func (s *Service) ListAudit(ctx context.Context, actor, action string, limit int) ([]store.AuditEntry, error) {
+	if err := s.ensure(); err != nil {
+		return nil, err
+	}
+	return s.st.ListAudit(ctx, actor, action, limit)
+}
+
 // --- 租户级（tenant_admin，仅本租户） ---
 
 // ListMyUsers 本租户用户。

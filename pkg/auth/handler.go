@@ -2,7 +2,9 @@ package auth
 
 import (
 	"errors"
+	"log"
 	"net/http"
+	"time"
 
 	"ails-hpc/pkg/httpx"
 
@@ -35,13 +37,19 @@ type LoginResponse struct {
 	User  UserInfo `json:"user"`
 }
 
-// AuthHandler 负责登录与令牌签发。
+// AuthHandler 负责登录与令牌签发。Rate(2.1 登录防爆破)可为 nil=不限速（测试）。
 type AuthHandler struct {
 	store UserStore
+	Rate  *RateLimiter
 }
 
-// NewAuthHandler 构造登录处理器。
+// NewAuthHandler 构造登录处理器（带默认限速器）。
 func NewAuthHandler(store UserStore) *AuthHandler {
+	return &AuthHandler{store: store, Rate: NewRateLimiter()}
+}
+
+// NewAuthHandlerNoRate 构造不限速的登录处理器（测试用）。
+func NewAuthHandlerNoRate(store UserStore) *AuthHandler {
 	return &AuthHandler{store: store}
 }
 
@@ -53,12 +61,23 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
+	ip := c.ClientIP()
+	if ok, wait := h.Rate.Allow(req.Username, ip); !ok {
+		// 锁定中：不比对密码（防在线穷举），文案与普通失败一致（防枚举/不泄露锁定态）
+		log.Printf("AUDIT login.locked username=%s ip=%s wait=%s", req.Username, ip, wait.Truncate(time.Second))
+		httpx.Unauthorized(c, "invalid username or password")
+		return
+	}
+
 	user, err := h.store.Verify(req.Username, req.Password)
 	if err != nil {
+		locked := h.Rate.RecordFailure(req.Username, ip)
+		log.Printf("AUDIT login.fail username=%s ip=%s locked=%v", req.Username, ip, locked)
 		// 用户不存在/密码错同一文案，避免用户名枚举
 		httpx.Unauthorized(c, "invalid username or password")
 		return
 	}
+	h.Rate.RecordSuccess(req.Username, ip)
 
 	// Phase 2：整 Claims 签发——tid（租户）+ ver（令牌版本，改密/禁用即吊销在途令牌）。
 	token, err := GenerateTokenClaims(Claims{

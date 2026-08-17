@@ -270,3 +270,29 @@ func TestReadOnlyStoreRefused(t *testing.T) {
 		t.Fatalf("nil store: want 503 got %d body=%s", w.Code, w.Body.String())
 	}
 }
+
+// TestAuditEndpointAndEntries：写审计的变更产生可读条目；ListAudit 按 action 过滤。
+func TestAuditEndpointAndEntries(t *testing.T) {
+	r, st, _ := newFixture(t)
+	// 制造两条审计（建租户 bio-x + 建用户）
+	if code, body := do(r, http.MethodPost, "/api/v1/admin/tenants", `{"slug":"bio-x"}`); code != 200 {
+		t.Fatalf("create tenant: %d %s", code, body)
+	}
+	if code, _ := do(r, http.MethodPost, "/api/v1/admin/users",
+		`{"username":"aud1","role":"member","tenantSlug":"bio-x","password":"aud12345"}`); code != 200 {
+		t.Fatalf("create user: got %d", code)
+	}
+	entries, err := st.ListAudit(context.Background(), "", "tenant.create", 10)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("tenant.create entries: %v %d", err, len(entries))
+	}
+	all, err := st.ListAudit(context.Background(), "", "", 100)
+	if err != nil || len(all) < 2 {
+		t.Fatalf("all entries: %v %d", err, len(all))
+	}
+	// 时间倒序：最新在前
+	if all[0].Action != "user.create" {
+		t.Errorf("first entry action=%q want user.create (desc order)", all[0].Action)
+	}
+	_ = r
+}
