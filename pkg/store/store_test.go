@@ -1,7 +1,9 @@
 package store
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -162,5 +164,46 @@ func TestOpenMigratesIdempotently(t *testing.T) {
 			t.Fatalf("open %d: %v", i+1, err)
 		}
 		_ = st.Close()
+	}
+}
+
+func TestExportSeeds(t *testing.T) {
+	st := newTestStore(t)
+	yamlPath := writeYaml(t, t.TempDir())
+	if _, err := ImportYaml(st, yamlPath); err != nil {
+		t.Fatal(err)
+	}
+	sd, err := ExportSeeds(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 租户：system+hpc-lab+bio-lab，parentAccount=slug
+	ts := map[string]string{}
+	for _, tn := range sd.Tenants {
+		ts[tn.Slug] = tn.ParentAccount
+	}
+	if len(ts) != 3 || ts["hpc-lab"] != "hpc-lab" || ts["system"] != "system" {
+		t.Errorf("tenants = %v", ts)
+	}
+	// 用户：clusterUser/account/uid/tenant 完整（entrypoint 供给用）
+	byCU := map[string]SeedUser{}
+	for _, u := range sd.Users {
+		byCU[u.ClusterUser] = u
+	}
+	m := byCU["ailsmember"]
+	if m.Username != "member" || m.Account != "ailsmember" || m.UID != 2003 || m.TenantSlug != "hpc-lab" || m.GID != 2000 {
+		t.Errorf("ailsmember seed = %+v", m)
+	}
+	// JSON 往返（entrypoint 用 python json 消费）
+	var buf bytes.Buffer
+	if err := WriteSeedsJSON(&buf, st); err != nil {
+		t.Fatal(err)
+	}
+	var back Seeds
+	if err := json.Unmarshal(buf.Bytes(), &back); err != nil {
+		t.Fatalf("roundtrip: %v", err)
+	}
+	if len(back.Users) != len(sd.Users) || len(back.Tenants) != len(sd.Tenants) {
+		t.Error("roundtrip count mismatch")
 	}
 }

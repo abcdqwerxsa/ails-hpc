@@ -35,7 +35,30 @@ import (
 func main() {
 	portFlag := flag.String("port", "", "Port for API server (overrides AILS_PORT; default 8090)")
 	importUsersFlag := flag.String("import-users", "", "Import a users.yaml into the sqlite user store (AILS_DB_PATH), then exit")
+	exportSeedsFlag := flag.String("export-seeds", "", "Export the sqlite user store as cluster seed JSON (tenants+users), then exit")
 	flag.Parse()
+
+	// -export-seeds：把用户库导出为集群供给种子（entrypoint 重建集群时消费；db 真相源）。
+	if *exportSeedsFlag != "" {
+		dbPath := os.Getenv("AILS_DB_PATH")
+		if dbPath == "" {
+			dbPath = "var/lib/ails/ails.db"
+		}
+		st, err := store.Open(dbPath)
+		if err != nil {
+			log.Fatalf("open sqlite store %s: %v", dbPath, err)
+		}
+		f, err := os.Create(*exportSeedsFlag)
+		if err != nil {
+			log.Fatalf("create seeds file: %v", err)
+		}
+		if err := store.WriteSeedsJSON(f, st); err != nil {
+			log.Fatalf("export seeds: %v", err)
+		}
+		_ = f.Close()
+		fmt.Printf("seeds exported to %s\n", *exportSeedsFlag)
+		return
+	}
 
 	// -import-users：一次性迁移工具（多租户 Phase 1）。不启动服务。
 	if *importUsersFlag != "" {

@@ -17,15 +17,36 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// fakeProvision 记录 sacctmgr 供给调用，可注入失败。
+// fakeProvision 记录 sacctmgr 供给调用，可注入失败（实现 SlurmProvisioner）。
 type fakeProvision struct {
-	calls []string
-	fail  bool
+	calls   []string // "u:cu/acct@parent" 用户 / "a:acct@parent" 账号 / "l:acct:setting" 限额
+	fail    bool
+	failLmt bool
 }
 
-func (f *fakeProvision) p(clusterUser, account string) error {
-	f.calls = append(f.calls, clusterUser+"/"+account)
+func (f *fakeProvision) ProvisionAccount(account, parent string) error {
+	f.calls = append(f.calls, "a:"+account+"@"+parent)
 	if f.fail {
+		return errors.New("sacctmgr unreachable")
+	}
+	return nil
+}
+
+func (f *fakeProvision) ProvisionUser(cu, account, parent string) error {
+	f.calls = append(f.calls, "u:"+cu+"/"+account+"@"+parent)
+	if f.fail {
+		return errors.New("sacctmgr unreachable")
+	}
+	return nil
+}
+
+func (f *fakeProvision) SetAccountLimits(account, setting string) error {
+	f.calls = append(f.calls, "l:"+account+":"+setting)
+	return condErr(f.failLmt)
+}
+
+func condErr(yes bool) error {
+	if yes {
 		return errors.New("sacctmgr unreachable")
 	}
 	return nil
@@ -64,7 +85,7 @@ func newFixture(t *testing.T) (*gin.Engine, store.AdminStore, *fakeProvision) {
 	}
 
 	prov := &fakeProvision{}
-	h := admin.NewAdminHandler(admin.NewService(st, prov.p))
+	h := admin.NewAdminHandler(admin.NewService(st, prov))
 
 	// 复刻 router.go：/admin 组 admin 独占；/tenants 组 tenant_admin。
 	r := gin.New()
@@ -135,8 +156,8 @@ func TestTenantAdmin_ManagesOwnUsersOnly(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("create bob: %d %s", code, body)
 	}
-	if len(prov.calls) != 1 || prov.calls[0] != "bob/bob" {
-		t.Errorf("provisioner calls = %v, want [bob/bob]", prov.calls)
+	if len(prov.calls) != 1 || prov.calls[0] != "u:bob/bob@hpc-lab" {
+		t.Errorf("provisioner calls = %v, want [u:bob/bob@hpc-lab]", prov.calls)
 	}
 	if u, err := st.Verify("bob", "bob12345"); err != nil || u.ClusterUser != "bob" || u.Account != "bob" {
 		t.Errorf("bob login/mapping: %v %+v", err, u)
