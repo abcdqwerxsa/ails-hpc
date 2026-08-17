@@ -583,7 +583,8 @@ func TestRouter_ErrorEnvelope(t *testing.T) {
 		t.Errorf("auto-generated request_id missing/empty: %v", body2)
 	}
 
-	// 语义 extra：member 调 admin 独占路由 → 403 体应含 required:["admin"]
+	// 语义 extra：member 调 admin 独占路由 → 403 体应含 required:["nodes:manage"]
+	// （R1 起门面为权限点；四角色鉴权结果与 RequireRole 时代一致）
 	drainReq, _ := http.NewRequest(http.MethodPost, "/api/v1/slurm/nodes/node1/state", bytes.NewBufferString(`{"state":"DRAIN"}`))
 	drainReq.Header.Set("Content-Type", "application/json")
 	drainReq.Header.Set("Authorization", "Bearer "+tokenFor(t, auth.RoleMember))
@@ -597,8 +598,8 @@ func TestRouter_ErrorEnvelope(t *testing.T) {
 		t.Fatalf("unmarshal 403 body: %v body=%s", err, w3.Body.String())
 	}
 	required, ok := body3["required"].([]any)
-	if !ok || len(required) == 0 || required[0] != auth.RoleSystemAdmin {
-		t.Errorf("403 required = %v, want [%q] (semantic extra lost)", body3["required"], auth.RoleSystemAdmin)
+	if !ok || len(required) == 0 || required[0] != auth.PermNodesManage {
+		t.Errorf("403 required = %v, want [%q] (semantic extra lost)", body3["required"], auth.PermNodesManage)
 	}
 }
 

@@ -28,13 +28,15 @@ type Handlers struct {
 }
 
 // NewRouter 装配整套路由：CORS、公开登录端点、JWT 保护的 /api/v1 组，
-// 并按四角色矩阵在每个写/读敏感路由上挂 auth.RequireRole。
+// 并按权限点在每个写/读敏感路由上挂 auth.RequirePermission（R1 起）。
 //
-// 角色矩阵（与系统角色边界一致）：
-//   - 读集群状态（ping/nodes/jobs/partitions）：所有已认证角色
-//   - 节点 DRAIN/RESUME：admin 独占（member/tenant_admin/ops 不可）
-//   - 作业提交/控制 + 容器 IDE：member + tenant_admin（admin 是纯监控角色，不提交作业）
-//   - 计费读取：member(自己)/tenant_admin(租户)/ops_admin(全部)（admin 纯硬件监控不含计费）
+// 历史角色矩阵（内置角色经 BuiltinRolePermissions 映射到权限点，行为零变化）：
+//   - 读集群状态（ping/nodes/jobs/partitions）：cluster:read（所有已认证角色）
+//   - 节点 DRAIN/RESUME：nodes:manage（admin 独占；member/tenant_admin/ops 不可）
+//   - 作业提交/控制 + 容器 IDE：jobs:submit|jobs:control|ide:*（member + tenant_admin；
+//     admin 是纯监控角色，不提交作业）
+//   - 计费读取：billing:read（member(自己)/tenant_admin(租户)/ops_admin(全部)；
+//     admin 纯硬件监控不含计费）
 func NewRouter(h Handlers) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Recovery(), requestIDMiddleware(), accessLogMiddleware(), corsMiddleware())
@@ -63,51 +65,52 @@ func NewRouter(h Handlers) *gin.Engine {
 		slurm.GET("/monitor/history", h.Monitor.GetHistory)
 
 		// 管理员独占：节点 DRAIN/RESUME
-		slurm.POST("/nodes/:name/state", auth.RequireRole(auth.RoleSystemAdmin), h.Nodes.UpdateNodeState)
+		slurm.POST("/nodes/:name/state", auth.RequirePermission(auth.PermNodesManage), h.Nodes.UpdateNodeState)
 
 		// member + tenant_admin：作业提交与控制
-		memberWrite := auth.RequireRole(auth.RoleMember, auth.RoleTenantAdmin)
-		slurm.POST("/jobs/submit", memberWrite, h.Jobs.SubmitJob)
-		slurm.POST("/jobs/:id/cancel", memberWrite, h.Jobs.CancelJob)
-		slurm.POST("/jobs/:id/hold", memberWrite, h.Jobs.HoldJob)
-		slurm.POST("/jobs/:id/requeue", memberWrite, h.Jobs.RequeueJob)
+		slurm.POST("/jobs/submit", auth.RequirePermission(auth.PermJobsSubmit), h.Jobs.SubmitJob)
+		slurm.POST("/jobs/:id/cancel", auth.RequirePermission(auth.PermJobsControl), h.Jobs.CancelJob)
+		slurm.POST("/jobs/:id/hold", auth.RequirePermission(auth.PermJobsControl), h.Jobs.HoldJob)
+		slurm.POST("/jobs/:id/requeue", auth.RequirePermission(auth.PermJobsControl), h.Jobs.RequeueJob)
 
 		// member + tenant_admin：交互式开发环境（Web-IDE）
-		slurm.POST("/containers/launch", memberWrite, h.Containers.LaunchContainer)
-		slurm.GET("/containers/list", memberWrite, h.Containers.ListContainers)
-		slurm.DELETE("/containers/:id", memberWrite, h.Containers.RecycleContainer)
-		slurm.POST("/containers/:id/extend", memberWrite, h.Containers.ExtendSession)
+		slurm.POST("/containers/launch", auth.RequirePermission(auth.PermIdeManage), h.Containers.LaunchContainer)
+		slurm.GET("/containers/list", auth.RequirePermission(auth.PermIdeList), h.Containers.ListContainers)
+		slurm.DELETE("/containers/:id", auth.RequirePermission(auth.PermIdeManage), h.Containers.RecycleContainer)
+		slurm.POST("/containers/:id/extend", auth.RequirePermission(auth.PermIdeManage), h.Containers.ExtendSession)
 
 		// member(自己)/tenant_admin(租户)/ops_admin(全部)：计费读取
-		billingRead := auth.RequireRole(auth.RoleMember, auth.RoleTenantAdmin, auth.RoleOpsAdmin)
+		billingRead := auth.RequirePermission(auth.PermBillingRead)
 		slurm.GET("/billing/usage", billingRead, h.Billing.GetUsage)
 		slurm.GET("/billing/export", billingRead, h.Billing.ExportReport)
 
-		// 平台管理（admin 独占；sqlite 库未启用时端点统一 503）
-		platformAdmin := api.Group("/admin", auth.RequireRole(auth.RoleSystemAdmin))
-		platformAdmin.GET("/tenants", h.Admin.ListTenants)
-		platformAdmin.POST("/tenants", h.Admin.CreateTenant)
-		platformAdmin.PATCH("/tenants/:slug", h.Admin.UpdateTenant)
-		platformAdmin.GET("/tenants/:slug/users", h.Admin.ListTenantUsers)
-		platformAdmin.POST("/users", h.Admin.CreatePlatformUser)
-		platformAdmin.GET("/audit", h.Admin.ListAudit)
+		// 平台管理（admin 独占；sqlite 库未启用时端点统一 503）。
+		// R1 起按权限点逐路由挂（原 RequireRole(admin) 组门面的等价拆分——admin 持有
+		// 全部平台权限点，鉴权结果不变；自定义角色获得细粒度准入）。
+		platformAdmin := api.Group("/admin")
+		platformAdmin.GET("/tenants", auth.RequirePermission(auth.PermTenantsRead), h.Admin.ListTenants)
+		platformAdmin.POST("/tenants", auth.RequirePermission(auth.PermTenantsManage), h.Admin.CreateTenant)
+		platformAdmin.PATCH("/tenants/:slug", auth.RequirePermission(auth.PermTenantsManage), h.Admin.UpdateTenant)
+		platformAdmin.GET("/tenants/:slug/users", auth.RequirePermission(auth.PermTenantsRead), h.Admin.ListTenantUsers)
+		platformAdmin.POST("/users", auth.RequirePermission(auth.PermUsersCreate), h.Admin.CreatePlatformUser)
+		platformAdmin.GET("/audit", auth.RequirePermission(auth.PermAuditRead), h.Admin.ListAudit)
 		// 4.2 预约 / QOS 管理（admin 直通 scontrol/sacctmgr）
-		platformAdmin.GET("/reservations", h.Admin.ListReservations)
-		platformAdmin.POST("/reservations", h.Admin.CreateReservation)
-		platformAdmin.DELETE("/reservations/:name", h.Admin.DeleteReservation)
-		platformAdmin.GET("/qos", h.Admin.ListQOS)
-		platformAdmin.POST("/qos", h.Admin.CreateQOS)
-		platformAdmin.PATCH("/tenants/:slug/qos", h.Admin.SetTenantQOS)
+		platformAdmin.GET("/reservations", auth.RequirePermission(auth.PermReservationsManage), h.Admin.ListReservations)
+		platformAdmin.POST("/reservations", auth.RequirePermission(auth.PermReservationsManage), h.Admin.CreateReservation)
+		platformAdmin.DELETE("/reservations/:name", auth.RequirePermission(auth.PermReservationsManage), h.Admin.DeleteReservation)
+		platformAdmin.GET("/qos", auth.RequirePermission(auth.PermQosManage), h.Admin.ListQOS)
+		platformAdmin.POST("/qos", auth.RequirePermission(auth.PermQosManage), h.Admin.CreateQOS)
+		platformAdmin.PATCH("/tenants/:slug/qos", auth.RequirePermission(auth.PermQosManage), h.Admin.SetTenantQOS)
 
 		// 租户管理（tenant_admin；租户归属以 claims 为权威，不信任请求体）
-		tenantAdmin := api.Group("/tenants", auth.RequireRole(auth.RoleTenantAdmin))
-		tenantAdmin.GET("/me/users", h.Admin.ListMyUsers)
-		tenantAdmin.POST("/me/users", h.Admin.CreateTenantUser)
-		tenantAdmin.PATCH("/me/users/:username", h.Admin.UpdateMyUser)
-		tenantAdmin.POST("/me/users/:username/password", h.Admin.ResetMyUserPassword)
+		tenants := api.Group("/tenants")
+		tenants.GET("/me/users", auth.RequirePermission(auth.PermTenantUsersRead), h.Admin.ListMyUsers)
+		tenants.POST("/me/users", auth.RequirePermission(auth.PermTenantUsersManage), h.Admin.CreateTenantUser)
+		tenants.PATCH("/me/users/:username", auth.RequirePermission(auth.PermTenantUsersManage), h.Admin.UpdateMyUser)
+		tenants.POST("/me/users/:username/password", auth.RequirePermission(auth.PermTenantUsersResetPassword), h.Admin.ResetMyUserPassword)
 
 		// Web-IDE 反向代理：/api/v1/ide/<session>/* → 计算节点上的 Jupyter/code-server
-		api.Any("/ide/:session/*any", memberWrite, h.Containers.ProxyIDE)
+		api.Any("/ide/:session/*any", auth.RequirePermission(auth.PermIdeManage), h.Containers.ProxyIDE)
 	}
 
 	// 静态门户：React 构建产物（apps/web/dist）。SPA 用 hash 路由，gin.Static 即可（无需 fallback）。

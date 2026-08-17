@@ -103,6 +103,10 @@ func authenticate(c *gin.Context, store UserStore) (*Claims, bool) {
 	return claims, true
 }
 
+// RequireRole 按角色白名单放行（R1 前的路由门面）。
+//
+// Deprecated: 生产路由已全部切换到 RequirePermission（权限点为权威，角色是权限的命名
+// 集合——自定义角色时代按角色名放行无法表达）。保留供旧测试装配与迁移期引用。
 func RequireRole(allowedRoles ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		val, exists := c.Get("claims")
