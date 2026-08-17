@@ -41,6 +41,64 @@ type jobServiceImpl struct {
 	jobs      slurmJobAPI
 	mu        sync.RWMutex
 	localJobs map[int]*JobSummary
+	// cliSubmit 是 GPU 作业的 CLI 提交路径（slurm 21.08 REST 无 gres 字段）：
+	// 经 docker exec slurmctld `sudo -u <clusterUser> sbatch` 以真实身份提交。
+	// 测试注入假实现。
+	cliSubmit func(opts CliSubmitOpts) (int, error)
+}
+
+// CliSubmitOpts 是 GPU 作业 CLI 提交参数（sbatch）；导出供测试断言。
+type CliSubmitOpts struct {
+	ClusterUser string
+	Name        string
+	Partition   string
+	Script      string
+	MemoryMB    int
+	Gpus        int
+	Nodes       int
+	Tasks       int
+	TimeLimit   int // 秒
+}
+
+// defaultCliSubmit 生产实现：脚本写入 /shared/portal-jobs/<name>-<rand>.job，
+// sudo -u <clusterUser> sbatch（身份/记账与 REST 提交同口径），随后保留脚本（复现/排查）。
+func defaultCliSubmit(o CliSubmitOpts) (int, error) {
+	scriptPath := fmt.Sprintf("/shared/portal-jobs/%s-%d.job", o.Name, time.Now().UnixNano())
+	if _, err := slurmrest.RunInSlurmctldWithStdin(o.Script, "sh", "-c",
+		"mkdir -p /shared/portal-jobs && cat > "+scriptPath+" && chmod 644 "+scriptPath); err != nil {
+		return 0, fmt.Errorf("stage script: %w", err)
+	}
+	args := []string{"sudo", "-u", o.ClusterUser, "sbatch", "--parsable",
+		"-J", o.Name, "-p", o.Partition,
+		fmt.Sprintf("--mem=%d", max(o.MemoryMB, 1)),
+		fmt.Sprintf("--gres=gpu:%d", max(o.Gpus, 1)),
+		fmt.Sprintf("--time=%d", max(o.TimeLimit, 60)),
+	}
+	if o.Nodes > 1 {
+		args = append(args, fmt.Sprintf("--nodes=%d", o.Nodes))
+	}
+	if o.Tasks > 1 {
+		args = append(args, fmt.Sprintf("--ntasks=%d", o.Tasks))
+	}
+	args = append(args, scriptPath)
+	out, err := slurmrest.RunInSlurmctld(args...)
+	if err != nil {
+		return 0, fmt.Errorf("sbatch: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	// --parsable 输出 "jobid" 或 "jobid:cluster"
+	idStr := strings.SplitN(strings.TrimSpace(string(out)), ":", 2)[0]
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		return 0, fmt.Errorf("sbatch job id parse: %w (out=%q)", err, string(out))
+	}
+	return id, nil
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // NewJobService 以真实 slurmrestd 客户端构造作业服务。
@@ -52,14 +110,19 @@ func NewJobService(client *slurmrest.Client) JobService {
 	return &jobServiceImpl{
 		jobs:      api,
 		localJobs: make(map[int]*JobSummary),
+		cliSubmit: defaultCliSubmit,
 	}
 }
 
-// NewJobServiceWithDeps 注入自定义作业 API（测试用：绕过真实 slurmrestd）。
-func NewJobServiceWithDeps(jobs slurmJobAPI) JobService {
+// NewJobServiceWithDeps 注入自定义作业 API（测试用：绕过真实 slurmrestd；CLI 路径同注）。
+func NewJobServiceWithDeps(jobs slurmJobAPI, cliSubmit func(opts CliSubmitOpts) (int, error)) JobService {
+	if cliSubmit == nil {
+		cliSubmit = defaultCliSubmit
+	}
 	return &jobServiceImpl{
 		jobs:      jobs,
 		localJobs: make(map[int]*JobSummary),
+		cliSubmit: cliSubmit,
 	}
 }
 
@@ -78,6 +141,15 @@ func (s *jobServiceImpl) SubmitJob(ctx context.Context, req *SubmitJobRequest, c
 	}
 
 	if cpus > 1000 || req.Nodes > 100 {
+		return nil, ErrInvalidResourceLimit
+	}
+
+	// 内存/GPU 申请（1.1）：内存 0<mb≤6000（节点 RealMemory 上限）；GPU 仅 performance
+	// 分区（唯一 GPU 节点 node1）——不满足则明确报错而非静默排队。
+	if req.MemoryMB < 0 || req.MemoryMB > 6000 {
+		return nil, ErrInvalidResourceLimit
+	}
+	if req.Gpus < 0 || req.Gpus > 8 {
 		return nil, ErrInvalidResourceLimit
 	}
 
@@ -105,8 +177,24 @@ func (s *jobServiceImpl) SubmitJob(ctx context.Context, req *SubmitJobRequest, c
 		name = "unnamed_job"
 	}
 
+	if req.Gpus > 0 && partition != "performance" {
+		return nil, ErrGPUPartition
+	}
+
 	var jobID int
-	if s.jobs != nil {
+	// GPU 作业：slurm 21.08 REST 无 gres 提交字段（实测 tres_per_node 未知键、gres 被静默
+	// 丢弃、#SBATCH 指令不解析）→ CLI 路径 sudo -u <clusterUser> sbatch（身份/记账同口径）。
+	if req.Gpus > 0 && s.cliSubmit != nil {
+		id, err := s.cliSubmit(CliSubmitOpts{
+			ClusterUser: clusterUser, Name: name, Partition: partition,
+			Script: req.Script, MemoryMB: req.MemoryMB, Gpus: req.Gpus,
+			Nodes: nodesCount, Tasks: req.Tasks, TimeLimit: timeLimit,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("gpu job submit: %w", err)
+		}
+		jobID = id
+	} else if s.jobs != nil {
 		slurmReq := &slurmrest.SlurmJobSubmitReq{
 			Script: req.Script,
 		}
@@ -123,6 +211,7 @@ func (s *jobServiceImpl) SubmitJob(ctx context.Context, req *SubmitJobRequest, c
 			"PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 		}
 		slurmReq.Job.Account = account // 真实 Slurm account（== clusterUser），AccountingStorageEnforce=associations 校验其关联存在
+		slurmReq.Job.MemoryPerNode = req.MemoryMB // 0=缺省（DefMemPerCPU 350/核）
 
 		// 以 clusterUser 真实身份提交（per-user JWT）→ 作业以该 unix 身份运行（L1 隔离核心）
 		resp, err := s.jobs.SubmitJobAs(slurmReq, clusterUser)

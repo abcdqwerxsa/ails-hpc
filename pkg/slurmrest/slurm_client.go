@@ -117,6 +117,25 @@ func softErrors(body []byte) []string {
 	return msgs
 }
 
+// RunInSlurmctldWithStdin 同 RunInSlurmctld，但向容器进程 stdin 注入数据
+// （经 `docker exec -i` —— 用于把作业脚本写进 /shared 的文件再 sbatch）。
+func RunInSlurmctldWithStdin(stdin string, args ...string) ([]byte, error) {
+	execArgs := append([]string{"exec", "-i", slurmctldService}, args...)
+	cmd := exec.Command("docker", execArgs...)
+	cmd.Stdin = strings.NewReader(stdin)
+	if out, err := cmd.Output(); err == nil {
+		return out, nil
+	}
+	localArgs := append([]string{"compose", "-f", composeFile, "exec", "-T", slurmctldService}, args...)
+	cmd2 := exec.Command("docker", localArgs...)
+	cmd2.Stdin = strings.NewReader(stdin)
+	out, err := cmd2.Output()
+	if err != nil {
+		return nil, fmt.Errorf("run in slurmctld (stdin, %s) failed: %w", strings.Join(args, " "), err)
+	}
+	return out, nil
+}
+
 // SacctQuery 在 slurmctld 容器内执行 sacct 并返回原始 stdout，供调用方按
 // --parsable2 等格式解析（用于真实 SACCT 计费）。
 func (c *Client) SacctQuery(args ...string) ([]byte, error) {
@@ -553,6 +572,8 @@ type SlurmJobSubmitReq struct {
 		CurrentWorkingDirectory string            `json:"current_working_directory,omitempty"`
 		TimeLimit               int               `json:"time_limit,omitempty"`
 		Environment             map[string]string `json:"environment,omitempty"`
+		// MemoryPerNode 显式内存申请（MB；v0.0.37 实测可用。0=缺省 DefMemPerCPU=350/核）。
+		MemoryPerNode int `json:"memory_per_node,omitempty"`
 		// Account 携带提交者用户名，作为 apiserver 层归属隔离的 owner 载体
 		// （集群 AccountingStorageEnforce=none，不校验 account 存在性，可安全复用）。
 		Account string `json:"account,omitempty"`
