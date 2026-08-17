@@ -79,14 +79,27 @@ func mapErr(c *gin.Context, err error, op string) {
 
 // --- 平台级 ---
 
-// ListTenants GET /api/v1/admin/tenants
+// ListTenants GET /api/v1/admin/tenants（附每租户用户数，前端契约含 userCount）
 func (h *AdminHandler) ListTenants(c *gin.Context) {
 	ts, err := h.service.ListTenants(c.Request.Context())
 	if err != nil {
 		mapErr(c, err, "admin.ListTenants")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"tenants": ts})
+	type tenantWithCount struct {
+		store.Tenant
+		UserCount int `json:"userCount"`
+	}
+	out := make([]tenantWithCount, 0, len(ts))
+	for _, t := range ts {
+		us, err := h.service.ListTenantUsers(c.Request.Context(), t.Slug)
+		n := 0
+		if err == nil {
+			n = len(us)
+		}
+		out = append(out, tenantWithCount{Tenant: t, UserCount: n})
+	}
+	c.JSON(http.StatusOK, gin.H{"tenants": out})
 }
 
 // CreateTenant POST /api/v1/admin/tenants {slug,name}
