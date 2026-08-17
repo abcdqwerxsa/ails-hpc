@@ -1,6 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
 import { slurm, type JobDetail, type JobSummary, type Partition } from '../services/slurm';
+import { can } from '../services/auth';
 
 export const Route = createFileRoute('/jobs')({ component: JobsPage });
 
@@ -149,6 +150,7 @@ function JobsPage() {
       {error && <Notice color="#f43f5e" bg="rgba(239,68,68,.1)">{error}</Notice>}
       {info && <Notice color="#10b981" bg="rgba(16,185,129,.1)">{info}</Notice>}
 
+      {can('jobs:submit') && (
       <form
         onSubmit={submit}
         style={{ background: 'var(--bg-card,#1b1e28)', border: '1px solid var(--border-color,#2a2f3a)', borderRadius: 12, padding: '1.25rem', marginBottom: '1.5rem', display: 'grid', gap: '0.75rem', boxShadow: 'var(--shadow-card)', transition: 'box-shadow .3s ease' }}
@@ -233,6 +235,8 @@ function JobsPage() {
           {submitting ? '提交中…' : '提交作业'}
         </button>
       </form>
+      )}
+
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
         <h3 style={{ margin: 0, fontSize: '1.05rem' }}>作业队列</h3>
@@ -304,10 +308,14 @@ function JobsPage() {
                   <td style={td}>{j.submit_time ? new Date(j.submit_time * 1000).toLocaleString() : '-'}</td>
                   <td style={{ ...td, display: 'flex', gap: '0.4rem' }}>
                     <MiniBtn onClick={() => openDetail(j.job_id)}>详情</MiniBtn>
-                    {/* 只禁用正在操作的这一行（acting = jobId+kind），其他行不受影响 */}
-                    <MiniBtn disabled={acting.startsWith(String(j.job_id))} onClick={() => act(j.job_id, 'cancel')}>取消</MiniBtn>
-                    <MiniBtn disabled={acting.startsWith(String(j.job_id))} onClick={() => act(j.job_id, 'hold')}>挂起</MiniBtn>
-                    <MiniBtn disabled={acting.startsWith(String(j.job_id))} onClick={() => act(j.job_id, 'requeue')}>重排</MiniBtn>
+                    {/* 只禁用正在操作的这一行（acting = jobId+kind），其他行不受影响；控制按钮需 jobs:control */}
+                    {can('jobs:control') && (
+                      <>
+                        <MiniBtn disabled={acting.startsWith(String(j.job_id))} onClick={() => act(j.job_id, 'cancel')}>取消</MiniBtn>
+                        <MiniBtn disabled={acting.startsWith(String(j.job_id))} onClick={() => act(j.job_id, 'hold')}>挂起</MiniBtn>
+                        <MiniBtn disabled={acting.startsWith(String(j.job_id))} onClick={() => act(j.job_id, 'requeue')}>重排</MiniBtn>
+                      </>
+                    )}
                   </td>
                 </tr>
               ))}

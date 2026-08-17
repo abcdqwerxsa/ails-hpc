@@ -179,3 +179,40 @@ func claimsFromCtx(c *gin.Context) (username, role, clusterUser, account string)
 
 // Store 暴露用户库（NewRouter 挂带 store 的 JWT 中间件用）。
 func (h *AuthHandler) Store() UserStore { return h.store }
+
+// Me GET /api/v1/auth/me —— 权限自描述（R4 前端能力驱动的数据源）。
+// 返回本人基角色/实际角色名/权限点清单 + 集群身份；claims 由带 store 的中间件
+// 每请求按库刷新——角色改派/权限调整后前端无需重登即可感知（刷新页面或重拉本端点）。
+func (h *AuthHandler) Me(c *gin.Context) {
+	cl := ClaimsFromCtx(c)
+	if cl == nil {
+		httpx.Unauthorized(c, "missing authenticated context")
+		return
+	}
+	roleName := cl.Rn
+	if roleName == "" {
+		roleName = cl.Role // 内置角色：实际角色名 = 基角色名
+	}
+	c.JSON(http.StatusOK, LoginResponse{
+		Token: "",
+		User: UserInfo{
+			Username:    cl.Username,
+			Role:        cl.Role,
+			RoleName:    roleName,
+			Permissions: SortedPermissions(PermissionsOf(cl)),
+			OrgSlug:     cl.OrgSlug,
+			TenantNS:    cl.TenantNS,
+			ClusterUser: cl.ClusterUser,
+			Account:     cl.Account,
+			TenantSlug:  tenantOfPublic(cl),
+		},
+	})
+}
+
+// tenantOfPublic 对齐 scope.tenantOf 的可见语义（TID 优先，迁移期回退 OrgSlug）。
+func tenantOfPublic(cl *Claims) string {
+	if cl.TID != "" {
+		return cl.TID
+	}
+	return cl.OrgSlug
+}

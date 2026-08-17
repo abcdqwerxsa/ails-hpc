@@ -21,13 +21,17 @@ function LoginPage() {
     try {
       const data = await slurm.login(username, password);
       localStorage.setItem('ails_token', data.token);
+      // R4：存全量用户面（含权限点清单）——前端能力驱动（can()）的数据源
       localStorage.setItem(
         'ails_user',
         JSON.stringify({
           name: data.user.username,
           role: data.user.role,
+          roleName: data.user.roleName || undefined,
+          permissions: data.user.permissions || [],
           org: data.user.orgSlug,
           tenantNs: data.user.tenantNs,
+          clusterUser: data.user.clusterUser,
         })
       );
       navigate({ to: '/' });

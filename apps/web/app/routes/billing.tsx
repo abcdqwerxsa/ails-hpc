@@ -1,5 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useEffect, useState, type ChangeEvent, type ReactNode } from 'react';
+import { can } from '../services/auth';
 import { slurm, type BillingUsage, type BreakdownRow } from '../services/slurm';
 
 export const Route = createFileRoute('/billing')({ component: BillingPage });
@@ -49,6 +50,17 @@ function BillingPage() {
     }
   };
 
+  // R4 路由守卫：无 billing:read 权限时不出数据视图（服务端同门 403，双保险）
+  if (!can('billing:read')) {
+    return (
+      <div>
+        <h2 style={{ marginTop: 0, marginBottom: '1rem' }}>计费</h2>
+        <div style={{ padding: '0.65rem 0.9rem', background: 'rgba(239,68,68,.1)', color: '#f43f5e', borderRadius: 8, fontSize: '.9rem' }}>
+          当前账号无计费读取权限（billing:read）。
+        </div>
+      </div>
+    );
+  }
   return (
     <div>
       <h2 style={{ marginTop: 0, marginBottom: '1rem' }}>计费与资源用量</h2>

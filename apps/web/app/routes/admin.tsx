@@ -1,28 +1,40 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
 import { slurm, type AdminUser, type AuditEntry, type QOSInfo, type Reservation, type TenantInfo } from '../services/slurm';
+import { can, getStoredUser } from '../services/auth';
+import { RolesPanel, RoleAssignSelect } from '../components/roles_panel';
 
 export const Route = createFileRoute('/admin')({ component: AdminPage });
 
-// 登录角色存于 localStorage('ails_user').role（login 页写入，__root 侧栏同源解析）。
-function readRole(): string {
-  try {
-    const raw = localStorage.getItem('ails_user');
-    return raw ? String(JSON.parse(raw)?.role || '') : '';
-  } catch {
-    return '';
-  }
-}
-
-// 单页双面板：admin → 平台管理（租户 + 平台用户）；tenant_admin → 本租户用户管理。
+// R4 能力驱动：面板按权限点渲染（角色名硬编码已全部移除；服务端 RequirePermission 为
+// 权威门）。持有对应权限即显示对应面板——自定义角色可获得单个面板（如仅审计）。
 function AdminPage() {
-  const [role] = useState(readRole);
-  if (role === 'admin') return <PlatformAdminPanel />;
-  if (role === 'tenant_admin') return <TenantUsersPanel />;
+  const user = getStoredUser();
+  const showPlatform = can('tenants:read', user);
+  const showTenant = can('tenant:users:read', user);
+  if (!showPlatform && !showTenant) {
+    return (
+      <div>
+        <h2 style={{ marginTop: 0, marginBottom: '1rem' }}>管理</h2>
+        <Notice color="#f43f5e" bg="rgba(239,68,68,.1)">当前账号无管理权限。</Notice>
+      </div>
+    );
+  }
   return (
     <div>
       <h2 style={{ marginTop: 0, marginBottom: '1rem' }}>管理</h2>
-      <Notice color="#f43f5e" bg="rgba(239,68,68,.1)">当前账号（{role || '未登录'}）无管理权限。</Notice>
+      {showTenant && (
+        <>
+          <TenantUsersPanel />
+          {can('tenant:roles:manage', user) && <RolesPanel scope="tenant" />}
+        </>
+      )}
+      {showPlatform && (
+        <>
+          <PlatformAdminPanel />
+          {can('roles:manage', user) && <RolesPanel scope="platform" />}
+        </>
+      )}
     </div>
   );
 }
@@ -41,6 +53,10 @@ function TenantUsersPanel() {
   const [acting, setActing] = useState(''); // `<username>:status` | `<username>:pw`
   const [resetFor, setResetFor] = useState(''); // 正在重置密码的用户名（空 = 未展开）
   const [resetPw, setResetPw] = useState('');
+
+  const user = getStoredUser();
+  const canManageUsers = can('tenant:users:manage', user);
+  const canResetPw = can('tenant:users:reset_password', user);
 
   const refresh = useCallback(async () => {
     try {
@@ -126,38 +142,40 @@ function TenantUsersPanel() {
 
   return (
     <div>
-      <h2 style={{ marginTop: 0, marginBottom: '1rem' }}>租户用户管理</h2>
+      <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>租户用户管理</h3>
 
       {error && <Notice color="#f43f5e" bg="rgba(239,68,68,.1)">{error}</Notice>}
       {info && <Notice color="#10b981" bg="rgba(16,185,129,.1)">{info}</Notice>}
 
-      <form
-        onSubmit={submit}
-        style={cardStyle}
-      >
-        <div style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '0.75rem' }}>新建用户</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(160px,1fr))', gap: '0.75rem' }}>
-          <Field label="用户名">
-            <input className="form-control" value={form.username} onChange={field('username')} placeholder="zhangsan" />
-          </Field>
-          <Field label="密码">
-            <input className="form-control" type="password" value={form.password} onChange={field('password')} placeholder="初始密码" />
-          </Field>
-          <Field label="角色">
-            <select
-              className="form-control"
-              value={form.role}
-              onChange={(e: ChangeEvent<HTMLSelectElement>) => setForm({ ...form, role: e.target.value })}
-            >
-              <option value="member">member（普通成员）</option>
-              <option value="tenant_admin">tenant_admin（租户管理员）</option>
-            </select>
-          </Field>
-        </div>
-        <button className="btn-primary" type="submit" disabled={submitting} style={{ justifySelf: 'start', padding: '0.5rem 1.5rem', marginTop: '0.75rem' }}>
-          {submitting ? '创建中…' : '创建用户'}
-        </button>
-      </form>
+      {canManageUsers && (
+        <form
+          onSubmit={submit}
+          style={cardStyle}
+        >
+          <div style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '0.75rem' }}>新建用户</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(160px,1fr))', gap: '0.75rem' }}>
+            <Field label="用户名">
+              <input className="form-control" value={form.username} onChange={field('username')} placeholder="zhangsan" />
+            </Field>
+            <Field label="密码">
+              <input className="form-control" type="password" value={form.password} onChange={field('password')} placeholder="初始密码" />
+            </Field>
+            <Field label="角色">
+              <select
+                className="form-control"
+                value={form.role}
+                onChange={(e: ChangeEvent<HTMLSelectElement>) => setForm({ ...form, role: e.target.value })}
+              >
+                <option value="member">member（普通成员）</option>
+                <option value="tenant_admin">tenant_admin（租户管理员）</option>
+              </select>
+            </Field>
+          </div>
+          <button className="btn-primary" type="submit" disabled={submitting} style={{ justifySelf: 'start', padding: '0.5rem 1.5rem', marginTop: '0.75rem' }}>
+            {submitting ? '创建中…' : '创建用户'}
+          </button>
+        </form>
+      )}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '1.5rem 0 0.75rem' }}>
         <h3 style={{ margin: 0, fontSize: '1.05rem' }}>本租户用户</h3>
@@ -190,25 +208,34 @@ function TenantUsersPanel() {
                   return (
                     <tr key={u.username} style={{ borderBottom: isLast ? 'none' : '1px solid var(--row-line,#2a2f3a)' }}>
                       <td style={td}><span style={{ fontWeight: 700 }}>{u.username}</span></td>
-                      <td style={td}>{u.role || '-'}</td>
+                      <td style={td}>
+                        <div>{(u as any).roleName || u.role || '-'}</div>
+                        {(u as any).roleName && (u as any).roleName !== u.role && (
+                          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted,#94a3b8)' }}>基角色 {u.role}</div>
+                        )}
+                      </td>
                       <td style={{ ...td, ...mono, color: 'var(--text-muted,#94a3b8)' }}>{u.clusterUser || '-'}</td>
                       <td style={{ ...td, ...num }}>{u.uid != null ? String(u.uid) : '-'}</td>
                       <td style={td}><StatusBadge status={u.status} /></td>
                       <td style={{ ...td, color: 'var(--text-muted,#94a3b8)' }}>{u.displayName || '-'}</td>
                       <td style={{ ...td, minWidth: 260 }}>
                         <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                          <MiniBtn disabled={rowBusy(u.username)} onClick={() => toggleStatus(u)}>
-                            {active ? '禁用' : '启用'}
-                          </MiniBtn>
-                          <MiniBtn
-                            disabled={rowBusy(u.username)}
-                            onClick={() => {
-                              setResetFor(resetFor === u.username ? '' : u.username);
-                              setResetPw('');
-                            }}
-                          >
-                            重置密码
-                          </MiniBtn>
+                          {canManageUsers && (
+                            <MiniBtn disabled={rowBusy(u.username)} onClick={() => toggleStatus(u)}>
+                              {active ? '禁用' : '启用'}
+                            </MiniBtn>
+                          )}
+                          {canResetPw && (
+                            <MiniBtn
+                              disabled={rowBusy(u.username)}
+                              onClick={() => {
+                                setResetFor(resetFor === u.username ? '' : u.username);
+                                setResetPw('');
+                              }}
+                            >
+                              重置密码
+                            </MiniBtn>
+                          )}
                           {resetFor === u.username && (
                             <>
                               <input
@@ -221,6 +248,18 @@ function TenantUsersPanel() {
                               />
                               <MiniBtn disabled={acting === `${u.username}:pw`} onClick={() => submitReset(u.username)}>确认</MiniBtn>
                             </>
+                          )}
+                          {canManageUsers && (
+                            <RoleAssignSelect
+                              username={u.username}
+                              currentRole={u.role || 'member'}
+                              currentRoleName={(u as any).roleName}
+                              scope="tenant"
+                              onDone={(m) => {
+                                setInfo(m);
+                                refresh();
+                              }}
+                            />
                           )}
                         </div>
                       </td>
@@ -445,11 +484,12 @@ function PlatformAdminPanel() {
 
   return (
     <div>
-      <h2 style={{ marginTop: 0, marginBottom: '1rem' }}>平台管理</h2>
+      <h3 style={{ marginTop: '2rem', marginBottom: '1rem' }}>平台管理</h3>
 
       {error && <Notice color="#f43f5e" bg="rgba(239,68,68,.1)">{error}</Notice>}
       {info && <Notice color="#10b981" bg="rgba(16,185,129,.1)">{info}</Notice>}
 
+      {can('tenants:manage', getStoredUser()) && (
       <form onSubmit={submitTenant} style={cardStyle}>
         <div style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '0.75rem' }}>新建租户</div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(180px,1fr))', gap: '0.75rem' }}>
@@ -474,6 +514,7 @@ function PlatformAdminPanel() {
           {creatingTenant ? '创建中…' : '创建租户'}
         </button>
       </form>
+      )}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '1.5rem 0 0.75rem' }}>
         <h3 style={{ margin: 0, fontSize: '1.05rem' }}>租户列表</h3>
@@ -514,12 +555,16 @@ function PlatformAdminPanel() {
                       <td style={{ ...td, ...num }}>{t.userCount}</td>
                       <td style={td}>
                         <div style={{ display: 'flex', gap: '0.4rem' }}>
-                          <MiniBtn disabled={acting === `tenant:${t.slug}`} onClick={() => toggleTenant(t)}>
-                            {active ? '停用' : '启用'}
-                          </MiniBtn>
-                          <MiniBtn disabled={acting === `tenant:${t.slug}`} onClick={() => setLimit(t)}>
-                            限额
-                          </MiniBtn>
+                          {can('tenants:manage', getStoredUser()) && (
+                            <>
+                              <MiniBtn disabled={acting === `tenant:${t.slug}`} onClick={() => toggleTenant(t)}>
+                                {active ? '停用' : '启用'}
+                              </MiniBtn>
+                              <MiniBtn disabled={acting === `tenant:${t.slug}`} onClick={() => setLimit(t)}>
+                                限额
+                              </MiniBtn>
+                            </>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -531,6 +576,7 @@ function PlatformAdminPanel() {
         )}
       </div>
 
+      {can('users:create', getStoredUser()) && (
       <form onSubmit={submitPlatUser} style={{ ...cardStyle, marginTop: '1.5rem' }}>
         <div style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '0.75rem' }}>新建平台用户</div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(180px,1fr))', gap: '0.75rem' }}>
@@ -582,6 +628,7 @@ function PlatformAdminPanel() {
           {creatingUser ? '创建中…' : '创建平台用户'}
         </button>
       </form>
+      )}
     </div>
   );
 }

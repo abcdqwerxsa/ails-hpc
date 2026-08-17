@@ -668,3 +668,48 @@ func doRequestWithBody(r *gin.Engine, method, path, body string) (int, string) {
 	r.ServeHTTP(w, req)
 	return w.Code, w.Body.String()
 }
+
+// TestRouter_AuthMe R4 权限自描述：/auth/me 返回基角色+权限点清单+集群身份；
+// 无 token → 401。内存库用户 → 权限回退内置映射（与登录响应一致）。
+func TestRouter_AuthMe(t *testing.T) {
+	r, _ := setupTestRouter(t)
+
+	// 无 token
+	if c := doRequest(r, http.MethodGet, "/api/v1/auth/me", "", ""); c != http.StatusUnauthorized {
+		t.Fatalf("no token: want 401 got %d", c)
+	}
+	// member：基角色 member + 内置权限集
+	code, body := doAuth(r, http.MethodGet, "/api/v1/auth/me", "", tokenFor(t, auth.RoleMember))
+	if code != http.StatusOK {
+		t.Fatalf("member me: want 200 got %d body=%s", code, body)
+	}
+	var resp auth.LoginResponse
+	if err := json.Unmarshal([]byte(body), &resp); err != nil {
+		t.Fatalf("unmarshal: %v body=%s", err, body)
+	}
+	if resp.User.Username != "member" || resp.User.Role != auth.RoleMember {
+		t.Errorf("user = %+v", resp.User)
+	}
+	permSet := map[string]bool{}
+	for _, p := range resp.User.Permissions {
+		permSet[p] = true
+	}
+	for _, want := range []string{auth.PermClusterRead, auth.PermJobsSubmit, auth.PermIdeList, auth.PermBillingRead} {
+		if !permSet[want] {
+			t.Errorf("member /auth/me missing %q (has %v)", want, resp.User.Permissions)
+		}
+	}
+	if permSet[auth.PermNodesManage] {
+		t.Errorf("member /auth/me must not hold nodes:manage (has %v)", resp.User.Permissions)
+	}
+	// admin：平台权限集（无 jobs/ide/billing——纯监控）
+	_, body = doAuth(r, http.MethodGet, "/api/v1/auth/me", "", tokenFor(t, auth.RoleSystemAdmin))
+	_ = json.Unmarshal([]byte(body), &resp)
+	permSet = map[string]bool{}
+	for _, p := range resp.User.Permissions {
+		permSet[p] = true
+	}
+	if !permSet[auth.PermRolesManage] || permSet[auth.PermJobsSubmit] {
+		t.Errorf("admin /auth/me perms wrong: %v", resp.User.Permissions)
+	}
+}

@@ -1,6 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useCallback, useEffect, useState } from 'react';
 import { slurm, type NodeStateInfo, type NodeStateOp } from '../services/slurm';
+import { can } from '../services/auth';
 
 export const Route = createFileRoute('/nodes')({ component: NodesPage });
 
@@ -87,14 +88,18 @@ function NodesPage() {
                   )}
                   {n.reason && <div style={{ color: '#f59e0b' }}>原因：{n.reason}</div>}
                 </div>
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                  <button className="btn-primary" style={{ flex: 1, opacity: drained ? 0.5 : 1 }} disabled={!!acting || drained} onClick={() => act(n.name, 'DRAIN')}>
-                    {acting === n.name + 'DRAIN' ? '…' : 'DRAIN'}
-                  </button>
-                  <button className="neu-btn" style={{ flex: 1, opacity: !drained ? 0.5 : 1 }} disabled={!!acting || !drained} onClick={() => act(n.name, 'RESUME')}>
-                    {acting === n.name + 'RESUME' ? '…' : 'RESUME'}
-                  </button>
-                </div>
+                {can('nodes:manage') ? (
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button className="btn-primary" style={{ flex: 1, opacity: drained ? 0.5 : 1 }} disabled={!!acting || drained} onClick={() => act(n.name, 'DRAIN')}>
+                      {acting === n.name + 'DRAIN' ? '…' : 'DRAIN'}
+                    </button>
+                    <button className="neu-btn" style={{ flex: 1, opacity: !drained ? 0.5 : 1 }} disabled={!!acting || !drained} onClick={() => act(n.name, 'RESUME')}>
+                      {acting === n.name + 'RESUME' ? '…' : 'RESUME'}
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted, #94a3b8)' }}>只读视图（需 nodes:manage 权限控制节点）</div>
+                )}
               </div>
             );
           })}

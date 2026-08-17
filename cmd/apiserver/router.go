@@ -52,6 +52,8 @@ func NewRouter(h Handlers) *gin.Engine {
 	{
 		// 自助改密（任何已认证角色；成功后本人令牌全部失效）
 		api.POST("/auth/password", h.Auth.ChangePassword)
+		// 权限自描述（R4 前端能力驱动：角色 + 权限点清单 + 集群身份）
+		api.GET("/auth/me", h.Auth.Me)
 		slurm := api.Group("/slurm")
 
 		// 读：集群状态（所有已认证角色）

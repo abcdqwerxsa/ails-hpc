@@ -42,7 +42,9 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
 // --- 类型（字段对齐 Go 后端 types） ---
 export interface UserInfo {
   username: string;
-  role: string;
+  role: string; // 基角色（scope 语义）
+  roleName?: string; // 实际角色名（自定义角色 ≠ role）
+  permissions?: string[]; // 权限点清单（能力驱动）
   orgSlug: string;
   tenantNs: string;
   clusterUser?: string;
@@ -284,7 +286,9 @@ export interface UpdateTenantRequest {
 }
 export interface AdminUser {
   username: string;
-  role: string; // admin | ops_admin | tenant_admin | member
+  role: string; // 基角色 admin | ops_admin | tenant_admin | member
+  roleName?: string; // 实际角色名（自定义角色 ≠ role）
+  permissions?: string[];
   clusterUser?: string; // Slurm 集群映射用户（开通后回填）
   uid?: number;
   account?: string;
@@ -333,6 +337,31 @@ export interface CreateTenantUserRequest {
   role: string; // member | tenant_admin
 }
 
+// 角色管理（R3 自定义角色；字段对齐 pkg/store/roles.go Role）
+export interface RoleInfo {
+  id: number;
+  name: string;
+  description: string;
+  permissions: string[];
+  baseRole: string;
+  isSystem: boolean;
+  tenantSlug?: string;
+  userCount: number;
+}
+export interface RolesListResponse {
+  roles: RoleInfo[];
+}
+export interface CreateRoleRequest {
+  name: string;
+  description?: string;
+  permissions: string[];
+  baseRole?: string;
+}
+export interface UpdateRoleRequest {
+  description?: string;
+  permissions?: string[];
+}
+
 // ideFullURL 把后端返回的相对 web_url(/api/v1/ide/<sid>/) 拼成完整 URL 并附 ?token=<JWT>。
 // 浏览器导航/iframe 无法带 Authorization 头，/ide/ 反代接受 ?token= 兜底（见 auth 中间件）。
 export function ideFullURL(webUrl: string): string {
@@ -358,6 +387,9 @@ export const slurm = {
       method: "POST",
       body: JSON.stringify({ oldPassword, newPassword }),
     }),
+
+  // 权限自描述（R4 能力驱动数据源：角色 + 权限清单 + 集群身份）
+  getMe: () => apiFetch<LoginResponse>("/auth/me"),
 
   // 集群状态：200 + pings[0].ping==="UP" 即 UP；503 抛错 → 调用方按 DEGRADED 处理
   getClusterStatus: () => apiFetch<PingResponse>("/slurm/ping"),
@@ -495,5 +527,46 @@ export const slurm = {
     apiFetch<{ message: string }>(`/tenants/me/users/${encodeURIComponent(username)}/password`, {
       method: "POST",
       body: JSON.stringify({ newPassword }),
+    }),
+
+  // —— 角色管理（R3；admin 平台 + tenant_admin 本租户）——
+  listPlatformRoles: () => apiFetch<RolesListResponse>("/admin/roles"),
+  listTenantRolesOf: (slug: string) =>
+    apiFetch<RolesListResponse>(`/admin/tenants/${encodeURIComponent(slug)}/roles`),
+  createPlatformRole: (payload: CreateRoleRequest) =>
+    apiFetch<{ role: RoleInfo }>("/admin/roles", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updatePlatformRole: (name: string, payload: UpdateRoleRequest) =>
+    apiFetch<{ role: RoleInfo }>(`/admin/roles/${encodeURIComponent(name)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deletePlatformRole: (name: string) =>
+    apiFetch<{ message: string }>(`/admin/roles/${encodeURIComponent(name)}`, { method: "DELETE" }),
+  assignPlatformRole: (username: string, role: string) =>
+    apiFetch<{ message: string }>(`/admin/users/${encodeURIComponent(username)}/role`, {
+      method: "PATCH",
+      body: JSON.stringify({ role }),
+    }),
+
+  listMyRoles: () => apiFetch<RolesListResponse>("/tenants/me/roles"),
+  createMyRole: (payload: CreateRoleRequest) =>
+    apiFetch<{ role: RoleInfo }>("/tenants/me/roles", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateMyRole: (name: string, payload: UpdateRoleRequest) =>
+    apiFetch<{ role: RoleInfo }>(`/tenants/me/roles/${encodeURIComponent(name)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deleteMyRole: (name: string) =>
+    apiFetch<{ message: string }>(`/tenants/me/roles/${encodeURIComponent(name)}`, { method: "DELETE" }),
+  assignMyRole: (username: string, role: string) =>
+    apiFetch<{ message: string }>(`/tenants/me/users/${encodeURIComponent(username)}/role`, {
+      method: "PATCH",
+      body: JSON.stringify({ role }),
     }),
 };
