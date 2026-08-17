@@ -43,8 +43,11 @@ func NewRouter(h Handlers) *gin.Engine {
 	r.GET("/readyz", h.Cluster.Readyz) // 免鉴权 readiness：探 slurmrestd 可达性
 
 	api := r.Group("/api/v1")
-	api.Use(auth.JWTAuthMiddleware())
+	// Phase 2：带用户库实校——禁用/改密即刻吊销在途令牌（claims.Ver 比对）。
+	api.Use(auth.JWTAuthMiddlewareWithStore(h.Auth.Store()))
 	{
+		// 自助改密（任何已认证角色；成功后本人令牌全部失效）
+		api.POST("/auth/password", h.Auth.ChangePassword)
 		slurm := api.Group("/slurm")
 
 		// 读：集群状态（所有已认证角色）

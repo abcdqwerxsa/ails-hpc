@@ -49,14 +49,42 @@ type Claims struct {
 	Account     string `json:"account"`
 	// TID 租户 slug（多租户 Phase 2 起签发；空=迁移期旧 token，scope 回退 OrgSlug）
 	TID string `json:"tid,omitempty"`
+	// Ver token_version：签发时用户库中的版本号。改密/禁用会 bump，中间件按请求比对，
+	// 使在途 token 即刻失效（不必等 24h TTL）。旧 token 无此字段=0。
+	Ver int `json:"ver,omitempty"`
 	Iss         string `json:"iss"`
 	Aud         string `json:"aud"`
 	Exp         int64  `json:"exp"`
 }
 
-// GenerateToken 用当前 tokenTTL 签发一个新的 access token。
+// GenerateToken 用当前 tokenTTL 签发一个新的 access token（兼容包装，不带 tid/ver）。
 func GenerateToken(username, role, orgSlug, tenantNs, clusterUser, account string) (string, error) {
 	return GenerateTokenWithTTL(username, role, orgSlug, tenantNs, clusterUser, account, tokenTTL)
+}
+
+// GenerateTokenClaims 以完整 Claims 签发（Phase 2 起 Login 用：携带 tid/ver）。
+// Exp 由本函数按当前 tokenTTL 填充，其余字段原样签入。
+func GenerateTokenClaims(cl Claims) (string, error) {
+	cl.Iss = jwtIssuer
+	cl.Aud = jwtAudience
+	cl.Exp = time.Now().Add(tokenTTL).Unix()
+	return signClaims(cl)
+}
+
+// signClaims 序列化+签名（GenerateTokenWithTTL 与 GenerateTokenClaims 共用）。
+func signClaims(cl Claims) (string, error) {
+	if len(jwtSecret) == 0 {
+		return "", errors.New("jwt secret not configured")
+	}
+	header := map[string]string{"alg": "HS256", "typ": "JWT"}
+	headerJSON, _ := json.Marshal(header)
+	headerB64 := base64.RawURLEncoding.EncodeToString(headerJSON)
+	claimsJSON, _ := json.Marshal(cl)
+	claimsB64 := base64.RawURLEncoding.EncodeToString(claimsJSON)
+	unsigned := fmt.Sprintf("%s.%s", headerB64, claimsB64)
+	h := hmac.New(sha256.New, jwtSecret)
+	h.Write([]byte(unsigned))
+	return fmt.Sprintf("%s.%s", unsigned, base64.RawURLEncoding.EncodeToString(h.Sum(nil))), nil
 }
 
 // GenerateTokenWithTTL 用显式 TTL 签发 access token（测试用于构造过期/将过期令牌）。

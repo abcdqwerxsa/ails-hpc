@@ -76,6 +76,7 @@ func setupTestRouter(t *testing.T) (*gin.Engine, *common.MockSlurmServer) {
 		{Username: "tenantadmin", PasswordHash: hashPw("tenantadmin123"), Role: auth.RoleTenantAdmin, OrgSlug: "hpc-lab", TenantNS: "default", ClusterUser: "ailstadmin", Account: "ailstadmin"},
 		{Username: "member", PasswordHash: hashPw("member123"), Role: auth.RoleMember, OrgSlug: "hpc-lab", TenantNS: "default", ClusterUser: "ailsmember", Account: "ailsmember"},
 		{Username: "ops", PasswordHash: hashPw("ops123"), Role: auth.RoleOpsAdmin, OrgSlug: "hpc-lab", TenantNS: "default", ClusterUser: "ailsops", Account: "ailsops"},
+		{Username: "member2", PasswordHash: hashPw("member2123"), Role: auth.RoleMember, OrgSlug: "hpc-lab", TenantNS: "default", ClusterUser: "member2", Account: "member2"},
 	})
 
 	h := Handlers{
@@ -107,7 +108,18 @@ func tokenFor(t *testing.T, role string) string {
 	if role == "" {
 		return ""
 	}
-	tok, err := auth.GenerateToken(role, role, "hpc-lab", "default", role, role)
+	// WithStore 中间件做活体校验（用户须在 store 中）——用户名映射真实账号，
+	// clusterUser 保持角色名（作业归属断言依赖它与 mock 记录一致）。
+	user := map[string]string{
+		auth.RoleSystemAdmin:  "admin",
+		auth.RoleTenantAdmin:  "tenantadmin",
+		auth.RoleMember:       "member",
+		auth.RoleOpsAdmin:     "ops",
+	}[role]
+	if user == "" {
+		user = role
+	}
+	tok, err := auth.GenerateToken(user, role, "hpc-lab", "default", role, role)
 	if err != nil {
 		t.Fatalf("mint token for %s: %v", role, err)
 	}
@@ -303,6 +315,41 @@ func indexOf(s, sub string) int {
 		}
 	}
 	return -1
+}
+
+
+// TestRouter_PasswordChange 自助改密端到端：登录→改密→旧 token 即刻 401（ver 吊销）→
+// 新密码可登录。中间件为 WithStore 形态（活体校验）。
+func TestRouter_PasswordChange(t *testing.T) {
+	r, _ := setupTestRouter(t)
+
+	// 登录 member
+	_, body := doAuth(r, http.MethodPost, "/api/v1/auth/login", `{"username":"member","password":"member123"}`, "")
+	var login auth.LoginResponse
+	_ = json.Unmarshal([]byte(body), &login)
+	if login.Token == "" {
+		t.Fatalf("login failed: %s", body)
+	}
+
+	// 无鉴权调改密 → 401
+	if c := doRequest(r, http.MethodPost, "/api/v1/auth/password", `{"oldPassword":"member123","newPassword":"changed99"}`, ""); c != http.StatusUnauthorized {
+		t.Errorf("no-token change: want 401 got %d", c)
+	}
+	// 带令牌改密成功
+	if c, b := doAuth(r, http.MethodPost, "/api/v1/auth/password", `{"oldPassword":"member123","newPassword":"changed99"}`, login.Token); c != http.StatusOK {
+		t.Fatalf("change with token: want 200 got %d body=%s", c, b)
+	}
+	// 旧 token 已被吊销（对任意受保护路由 401）
+	if c := doRequest(r, http.MethodGet, "/api/v1/slurm/nodes", "", login.Token); c != http.StatusUnauthorized {
+		t.Errorf("revoked token must 401, got %d", c)
+	}
+	// 旧密码失效、新密码可登录
+	if c, _ := doAuth(r, http.MethodPost, "/api/v1/auth/login", `{"username":"member","password":"member123"}`, ""); c != http.StatusUnauthorized {
+		t.Errorf("old password must be rejected, got %d", c)
+	}
+	if c, b := doAuth(r, http.MethodPost, "/api/v1/auth/login", `{"username":"member","password":"changed99"}`, ""); c != http.StatusOK {
+		t.Fatalf("new password login: want 200 got %d body=%s", c, b)
+	}
 }
 
 // TestRouter_Login 校验登录契约与失败路径

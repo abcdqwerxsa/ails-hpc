@@ -41,13 +41,13 @@ func (s *sqliteStore) Close() error { return s.db.Close() }
 // （兼容既有 tenantResolver/claims 路径——它们以 orgSlug 为租户标识直至 Phase 2 的 tid）。
 const userSelect = `
 SELECT u.username, u.password_hash, u.role, t.slug,
-       u.cluster_user, u.uid, u.gid, u.account, u.status
+       u.cluster_user, u.uid, u.gid, u.account, u.status, u.token_version
 FROM users u JOIN tenants t ON t.id = u.tenant_id`
 
 func scanUser(row interface{ Scan(...any) error }) (*auth.User, error) {
 	var u auth.User
 	if err := row.Scan(&u.Username, &u.PasswordHash, &u.Role, &u.TenantSlug,
-		&u.ClusterUser, &u.UID, &u.GID, &u.Account, &u.Status); err != nil {
+		&u.ClusterUser, &u.UID, &u.GID, &u.Account, &u.Status, &u.TokenVersion); err != nil {
 		return nil, err
 	}
 	u.OrgSlug = u.TenantSlug // 兼容：迁移期租户标识 = orgSlug
@@ -97,6 +97,30 @@ func (s *sqliteStore) ListUsers() []*auth.User {
 		out = append(out, u)
 	}
 	return out
+}
+
+// SetPassword 更新哈希并 bump token_version（在途 JWT 即刻失效；满足 auth.UserStore）。
+func (s *sqliteStore) SetPassword(username, bcryptHash string) error {
+	res, err := s.db.Exec(`
+		UPDATE users SET password_hash = ?, token_version = token_version + 1, updated_at = datetime('now')
+		WHERE username = ?`, bcryptHash, username)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return auth.ErrInvalidCredentials
+	}
+	return nil
+}
+
+// UserVersion 返回用户当前 token_version。
+func (s *sqliteStore) UserVersion(username string) (int, bool) {
+	var ver int
+	err := s.db.QueryRow(`SELECT token_version FROM users WHERE username = ?`, username).Scan(&ver)
+	if err != nil {
+		return 0, false
+	}
+	return ver, true
 }
 
 // Tenants 列出全部租户。
