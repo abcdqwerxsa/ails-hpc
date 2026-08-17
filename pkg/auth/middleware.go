@@ -25,67 +25,84 @@ const (
 const ideCookieName = "ails_ide_token"
 const ideCookiePath = "/api/v1/ide/"
 
-// JWTAuthMiddleware 校验 Authorization: Bearer <token>，将 *Claims 注入 gin.Context。
-//
-// 无令牌或令牌无效/过期一律 401 —— fail-closed，绝不默认授予任何角色
-// （历史版本在无 Authorization 头时默认下发 admin claims，已移除）。
+// JWTAuthMiddleware 校验 Authorization: Bearer <token>（纯签名校验形态，等价于
+// JWTAuthMiddlewareWithStore(nil)）。生产路由请用 WithStore 形态（活体校验）。
 func JWTAuthMiddleware() gin.HandlerFunc {
+	return JWTAuthMiddlewareWithStore(nil)
+}
+
+// JWTAuthMiddlewareWithStore 带用户库实校的 JWT 中间件（生产形态：NewRouter 挂载）。
+// 在签名校验通过后追加两条活体检查（Lookup/UserVersion 各一次，内存 map 与 sqlite
+// 均为微秒级）：
+//  1. 用户存在且 status=active（禁用即刻踢出，不等 24h TTL）
+//  2. claims.Ver == 用户当前 TokenVersion（改密后旧令牌即刻失效）
+//
+// 旧格式令牌（无 ver，Ver=0）与初始版本 0 天然兼容——迁移期不强制重登。
+// store 为 nil 时等价于 JWTAuthMiddleware（纯签名校验）。
+func JWTAuthMiddlewareWithStore(store UserStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		authHeader := strings.TrimSpace(c.GetHeader("Authorization"))
-		tokenStr := ""
-		if strings.HasPrefix(authHeader, "Bearer ") {
-			tokenStr = strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+		claims, ok := authenticate(c, store)
+		if !ok {
+			return // 响应已在 authenticate 写好
 		}
-
-		// /ide/ 反代路径：浏览器导航/iframe 无法带 Authorization 头。凭证取用顺序：
-		// Authorization 头 > ?token= 查询参数 > cookie（首跳 ?token= 种下）。
-		// 仅限 /api/v1/ide/（Web-IDE 会话），避免把宽松凭证方式放宽到所有 API。
-		isIDE := strings.HasPrefix(c.Request.URL.Path, "/api/v1/ide/")
-		fromQuery := false
-		if tokenStr == "" && isIDE {
-			tokenStr = strings.TrimSpace(c.Query("token"))
-			fromQuery = tokenStr != ""
-		}
-		if tokenStr == "" && isIDE {
-			if ck, err := c.Cookie(ideCookieName); err == nil {
-				tokenStr = strings.TrimSpace(ck)
-			}
-		}
-
-		if tokenStr == "" {
-			httpx.Unauthorized(c, "missing or invalid Authorization header")
-			return
-		}
-
-		claims, err := VerifyToken(tokenStr)
-		if err != nil {
-			// 固定文案：不外泄 JWT 校验内部细节（签名/解析错误等）
-			httpx.Unauthorized(c, "invalid or expired token")
-			return
-		}
-
-		// 首跳 ?token= 验证通过 → 种 cookie，让 IDE 的重定向/XHR/WebSocket 后续自动携带。
-		// HttpOnly 防 JS 读取；Path 限定仅 /api/v1/ide/；SameSite=Lax 阻跨站发送。
-		if isIDE && fromQuery {
-			http.SetCookie(c.Writer, &http.Cookie{
-				Name:     ideCookieName,
-				Value:    tokenStr,
-				Path:     ideCookiePath,
-				HttpOnly: true,
-				SameSite: http.SameSiteLaxMode,
-				MaxAge:   24 * 3600, // 与 token TTL 对齐；过期后重新从门户打开即刷新
-			})
-		}
-
 		c.Set("claims", claims)
 		c.Next()
 	}
 }
 
-// RequireRole 仅允许指定角色通过，其余 403。角色来自 JWT claims（服务端权威）。
-//
-// admin 不再隐式短路 —— 矩阵即权威：admin 若需访问某路由，必须显式列入 allowedRoles。
-// （历史版本中 admin 会在任何 RequireRole 中放行，已移除。）
+// authenticate 是两种中间件的共享内核：取凭证（头>?token=>cookie，IDE 路径）→
+// 验签 →（store 非空时）活体校验 → IDE 首跳种 cookie。失败时已写 401 响应。
+func authenticate(c *gin.Context, store UserStore) (*Claims, bool) {
+	authHeader := strings.TrimSpace(c.GetHeader("Authorization"))
+	tokenStr := ""
+	if strings.HasPrefix(authHeader, "Bearer ") {
+		tokenStr = strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+	}
+	isIDE := strings.HasPrefix(c.Request.URL.Path, "/api/v1/ide/")
+	fromQuery := false
+	if tokenStr == "" && isIDE {
+		tokenStr = strings.TrimSpace(c.Query("token"))
+		fromQuery = tokenStr != ""
+	}
+	if tokenStr == "" && isIDE {
+		if ck, err := c.Cookie(ideCookieName); err == nil {
+			tokenStr = strings.TrimSpace(ck)
+		}
+	}
+	if tokenStr == "" {
+		httpx.Unauthorized(c, "missing or invalid Authorization header")
+		return nil, false
+	}
+	claims, err := VerifyToken(tokenStr)
+	if err != nil {
+		// 固定文案：不外泄 JWT 校验内部细节（签名/解析错误等）
+		httpx.Unauthorized(c, "invalid or expired token")
+		return nil, false
+	}
+	if store != nil {
+		u, ok := store.Lookup(claims.Username)
+		if !ok || u.Status != "active" {
+			httpx.Unauthorized(c, "invalid or expired token")
+			return nil, false
+		}
+		if ver, ok := store.UserVersion(claims.Username); !ok || ver != claims.Ver {
+			httpx.Unauthorized(c, "invalid or expired token")
+			return nil, false
+		}
+	}
+	if isIDE && fromQuery {
+		http.SetCookie(c.Writer, &http.Cookie{
+			Name:     ideCookieName,
+			Value:    tokenStr,
+			Path:     ideCookiePath,
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+			MaxAge:   24 * 3600,
+		})
+	}
+	return claims, true
+}
+
 func RequireRole(allowedRoles ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		val, exists := c.Get("claims")

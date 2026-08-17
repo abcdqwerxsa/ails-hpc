@@ -45,6 +45,9 @@ export interface UserInfo {
   role: string;
   orgSlug: string;
   tenantNs: string;
+  clusterUser?: string;
+  account?: string;
+  tenantSlug?: string;
 }
 export interface LoginResponse {
   token: string;
@@ -237,6 +240,13 @@ export const slurm = {
     apiFetch<LoginResponse>("/auth/login", {
       method: "POST",
       body: JSON.stringify({ username, password, orgSlug }),
+    }),
+
+  // 自助改密（成功后本人 token 全部失效，前端应跳回登录页）
+  changePassword: (oldPassword: string, newPassword: string) =>
+    apiFetch<{ message: string }>("/auth/password", {
+      method: "POST",
+      body: JSON.stringify({ oldPassword, newPassword }),
     }),
 
   // 集群状态：200 + pings[0].ping==="UP" 即 UP；503 抛错 → 调用方按 DEGRADED 处理
