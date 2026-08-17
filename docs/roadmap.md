@@ -34,8 +34,8 @@
 
 | # | 内容 | 规模 | 状态 |
 |---|---|---|---|
-| 4.1 | 作业数组/依赖(--array/--dependency 高级选项) | M | 待做 |
-| 4.2 | 预约/QOS 管理(admin 直通 sacctmgr) | M | 待做 |
+| 4.1 | 作业数组/依赖 | submit 接受 array_spec/dependency(sbatch 语法,白名单防注入),走 CLI sbatch;表单 高级选项 折叠区。CLI 资源参数有值才附加(数组作业曾被强塞 --gres → #53 修) | M | **已完成**(PR #52/#53) |
+| 4.2 | 预约/QOS 管理 | 预约 CRUD(scontrol,缺省 nodecnt=1,stderr 经 sh -c 2>&1 回传);QOS 列表/创建/绑定租户父账号(sacctmgr);admin 页两面板 | M | **已完成**(PR #52/#53) |
 | 4.3 | 多物理节点接入(provision 泛化) | L | 待做 |
 
 ## 执行顺序
