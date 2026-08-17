@@ -52,6 +52,11 @@ const (
 	PermTenantUsersManage = "tenant:users:manage"
 	// PermTenantUsersResetPassword 本租户成员密码重置。历史矩阵：tenant_admin。
 	PermTenantUsersResetPassword = "tenant:users:reset_password"
+
+	// PermRolesManage 平台自定义角色管理与角色指派（R3）。内置矩阵：admin。
+	PermRolesManage = "roles:manage"
+	// PermTenantRolesManage 本租户自定义角色管理（R3）。内置矩阵：tenant_admin。
+	PermTenantRolesManage = "tenant:roles:manage"
 )
 
 // AllPermissions 权威权限点清单（R3 子集校验与矩阵测试对照用）。
@@ -73,6 +78,8 @@ var AllPermissions = []string{
 	PermTenantUsersRead,
 	PermTenantUsersManage,
 	PermTenantUsersResetPassword,
+	PermRolesManage,
+	PermTenantRolesManage,
 }
 
 // BuiltinRolePermissions 内置四角色 → 权限集合。与替换前的 RequireRole 路由矩阵
@@ -86,6 +93,7 @@ var BuiltinRolePermissions = map[string][]string{
 		PermClusterRead, PermNodesManage,
 		PermTenantsRead, PermTenantsManage, PermUsersCreate,
 		PermAuditRead, PermReservationsManage, PermQosManage,
+		PermRolesManage,
 	},
 	RoleOpsAdmin: {
 		PermClusterRead, PermBillingRead,
@@ -94,6 +102,7 @@ var BuiltinRolePermissions = map[string][]string{
 		PermClusterRead, PermJobsSubmit, PermJobsControl,
 		PermIdeList, PermIdeManage, PermBillingRead,
 		PermTenantUsersRead, PermTenantUsersManage, PermTenantUsersResetPassword,
+		PermTenantRolesManage,
 	},
 	RoleMember: {
 		PermClusterRead, PermJobsSubmit, PermJobsControl,

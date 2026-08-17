@@ -101,6 +101,14 @@ func NewRouter(h Handlers) *gin.Engine {
 		platformAdmin.GET("/qos", auth.RequirePermission(auth.PermQosManage), h.Admin.ListQOS)
 		platformAdmin.POST("/qos", auth.RequirePermission(auth.PermQosManage), h.Admin.CreateQOS)
 		platformAdmin.PATCH("/tenants/:slug/qos", auth.RequirePermission(auth.PermQosManage), h.Admin.SetTenantQOS)
+		// R3 角色管理：平台自定义角色 CRUD + 角色指派
+		rolesManage := auth.RequirePermission(auth.PermRolesManage)
+		platformAdmin.GET("/roles", rolesManage, h.Admin.ListPlatformRoles)
+		platformAdmin.GET("/tenants/:slug/roles", rolesManage, h.Admin.ListTenantRoles)
+		platformAdmin.POST("/roles", rolesManage, h.Admin.CreatePlatformRole)
+		platformAdmin.PATCH("/roles/:name", rolesManage, h.Admin.UpdatePlatformRole)
+		platformAdmin.DELETE("/roles/:name", rolesManage, h.Admin.DeletePlatformRole)
+		platformAdmin.PATCH("/users/:username/role", rolesManage, h.Admin.AssignPlatformRole)
 
 		// 租户管理（tenant_admin；租户归属以 claims 为权威，不信任请求体）
 		tenants := api.Group("/tenants")
@@ -108,6 +116,13 @@ func NewRouter(h Handlers) *gin.Engine {
 		tenants.POST("/me/users", auth.RequirePermission(auth.PermTenantUsersManage), h.Admin.CreateTenantUser)
 		tenants.PATCH("/me/users/:username", auth.RequirePermission(auth.PermTenantUsersManage), h.Admin.UpdateMyUser)
 		tenants.POST("/me/users/:username/password", auth.RequirePermission(auth.PermTenantUsersResetPassword), h.Admin.ResetMyUserPassword)
+		// R3 租户自定义角色 CRUD + 指派（权限 ⊆ 调用者——防提权在 service 层）
+		tenantRoles := auth.RequirePermission(auth.PermTenantRolesManage)
+		tenants.GET("/me/roles", tenantRoles, h.Admin.ListMyRoles)
+		tenants.POST("/me/roles", tenantRoles, h.Admin.CreateMyRole)
+		tenants.PATCH("/me/roles/:name", tenantRoles, h.Admin.UpdateMyRole)
+		tenants.DELETE("/me/roles/:name", tenantRoles, h.Admin.DeleteMyRole)
+		tenants.PATCH("/me/users/:username/role", auth.RequirePermission(auth.PermTenantUsersManage), h.Admin.AssignMyRole)
 
 		// Web-IDE 反向代理：/api/v1/ide/<session>/* → 计算节点上的 Jupyter/code-server
 		api.Any("/ide/:session/*any", auth.RequirePermission(auth.PermIdeManage), h.Containers.ProxyIDE)

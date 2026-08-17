@@ -68,4 +68,18 @@ type AdminStore interface {
 	WriteAudit(ctx context.Context, actor, action, target, requestID, detail string) error
 	// ListAudit 审计日志读取（时间倒序；actor/action 过滤可选；limit 1..500 默认 100）。
 	ListAudit(ctx context.Context, actor, action string, limit int) ([]AuditEntry, error)
+
+	// --- R3 角色管理（自定义角色；子集防提权校验在 service 层，store 管语法与归属） ---
+	// ListRoles 列角色（tenantSlug="" → 平台；否则该租户）。
+	ListRoles(ctx context.Context, tenantSlug string) ([]Role, error)
+	// RoleByName 按名查角色（作用域同 ListRoles）。
+	RoleByName(ctx context.Context, tenantSlug, name string) (*Role, error)
+	// CreateRole 建自定义角色（base_role 作用域规则见 roles.go）。
+	CreateRole(ctx context.Context, in NewRole) (*Role, error)
+	// UpdateRole 改权限/描述（系统角色拒绝；nil=不改）。
+	UpdateRole(ctx context.Context, roleID int64, permissions []string, desc *string) (*Role, error)
+	// DeleteRole 删自定义角色（系统角色/在用角色拒绝）。
+	DeleteRole(ctx context.Context, roleID int64) error
+	// SetUserRole 改派用户角色（角色-租户归属校验；改派即刻生效）。
+	SetUserRole(ctx context.Context, username string, roleID int64) error
 }
