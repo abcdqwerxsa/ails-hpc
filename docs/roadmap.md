@@ -16,9 +16,9 @@
 
 | # | 内容 | 说明 | 规模 | 状态 |
 |---|---|---|---|---|
-| 2.1 | 登录防爆破 | 失败计数锁定(内存+窗口)+ 失败审计 | S | 待做 |
-| 2.2 | 审计查看器 | audit_log 已写不可见;admin 页审计表格(actor/action 过滤) | S | 待做 |
-| 2.3 | 租户限额 UI | `grpTRES/fairshare` API 已有(Phase 5),admin 页补输入框 | S | 待做 |
+| 2.1 | 登录防爆破 | 失败计数锁定(内存+窗口)+ 失败审计 | S | **已完成**(PR #43) |
+| 2.2 | 审计查看器 | AdminStore.ListAudit + GET /admin/audit + 管理页审计表(倒序/actor 过滤) | S | **已完成**(PR #43) |
+| 2.3 | 租户限额 UI | 租户行"限额"按钮(prompt 输 GrpTRES→PATCH,服务端白名单) | S | **已完成**(PR #43) |
 | 2.4 | sqlite 备份 | `.backup` 到 /shared/backups 的 systemd timer | S | 待做 |
 | 2.5 | JWT key 持久化 | named volume 承载 jwt_hs256.key,消除重建换 key 的 token 重铸 | S | 待做 |
 
