@@ -25,6 +25,43 @@ const emptyForm = {
   script: '#!/bin/bash\nsleep 30\n',
 };
 
+// 常用模板（v3-P1）：一键填充表单后按需修改。模板即代码随 dist 发版，
+// 不落库不进权限面（roadmap-v3 设计决策：用户自定义模板等真实诉求出现再表化）。
+const TEMPLATES: { label: string; hint: string; form: typeof emptyForm }[] = [
+  {
+    label: 'CPU 小任务',
+    hint: 'standard（E 核）· 30 分钟 · 不申请 GPU',
+    form: {
+      ...emptyForm,
+      name: 'cpu-demo',
+      time_limit: '30',
+      script: '#!/bin/bash\n# CPU 小任务模板：E 核分区，适合编译 / 数据处理 / 轻量计算\nsrun hostname\n# python preprocess.py\n',
+    },
+  },
+  {
+    label: '单卡 PyTorch',
+    hint: 'performance（P 核）· 1 GPU · 4 小时',
+    form: {
+      ...emptyForm,
+      name: 'pytorch-train',
+      partition: 'performance',
+      gpus: '1',
+      time_limit: '240',
+      script: '#!/bin/bash\n# 单卡 PyTorch 训练模板：P 核分区 + 1 GPU\n# 数据与代码建议放 /shared（节点间可见）\ncd /shared/$USER\npython -u train.py --epochs 10 --batch-size 32\n',
+    },
+  },
+  {
+    label: '长时批处理',
+    hint: 'standard（E 核）· 24 小时 · 并发子任务',
+    form: {
+      ...emptyForm,
+      name: 'batch-sweep',
+      time_limit: '1440',
+      script: '#!/bin/bash\n# 长时 CPU 批处理模板：参数扫描 / 批量后处理\nfor i in $(seq 1 100); do\n  srun -n1 ./worker.sh $i &\ndone\nwait\n',
+    },
+  },
+];
+
 // 作业状态过滤选项（值对齐 job_state 大写形式）
 const FILTERS: { label: string; value: string }[] = [
   { label: '全部', value: 'ALL' },
@@ -155,6 +192,26 @@ function JobsPage() {
         onSubmit={submit}
         style={{ background: 'var(--bg-card,#1b1e28)', border: '1px solid var(--border-color,#2a2f3a)', borderRadius: 12, padding: '1.25rem', marginBottom: '1.5rem', display: 'grid', gap: '0.75rem', boxShadow: 'var(--shadow-card)', transition: 'box-shadow .3s ease' }}
       >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted,#94a3b8)' }}>常用模板</span>
+          {TEMPLATES.map((tpl) => (
+            <button
+              key={tpl.label}
+              type="button"
+              className="neu-btn"
+              title={tpl.hint}
+              style={{ fontSize: '0.78rem', padding: '0.3rem 0.7rem' }}
+              onClick={() => {
+                setForm(tpl.form);
+                setArraySpec('');
+                setDependency('');
+                setInfo(`已套用模板「${tpl.label}」（${tpl.hint}）——按需修改后提交`);
+              }}
+            >
+              {tpl.label}
+            </button>
+          ))}
+        </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))', gap: '0.75rem' }}>
           <Field label="作业名"><input className="form-control" value={form.name} onChange={field('name')} placeholder="my-job" /></Field>
           <Field label="分区">
