@@ -557,6 +557,79 @@ select.form-control-sm {
   padding-right: 1.7rem;
 }
 
+/* ---------- 可定制 select（Chrome 135+/Safari 26+）：展开的选项列表接管为拟物卡片 ----------
+   此前展开列表是 OS 原生渲染（color-scheme 只能整体染暗，改不了圆角/阴影/高亮）。
+   base-select 把弹出层变成页面渲染，可完全接管；不支持的浏览器回退上方原生兼容规则。
+   双箭头防护：base-select 默认仍渲染白色 ::picker-icon，须隐藏（实测 Chrome 151），
+   保留 .form-control 自带 background-image 青色 chevron。 */
+@supports (appearance: base-select) {
+  select.form-control {
+    appearance: base-select;
+  }
+
+  select.form-control::picker-icon {
+    display: none;
+  }
+
+  /* 弹出卡片：凸起拟物阴影 + 与按钮留缝 + 轻淡入 */
+  select.form-control::picker(select) {
+    background: var(--card-bg);
+    border: none;
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-card);
+    padding: 0.4rem;
+    margin-top: 0.45rem;
+    opacity: 0;
+    transition: opacity 0.15s ease, display 0.15s allow-discrete, overlay 0.15s allow-discrete;
+  }
+
+  select.form-control:open::picker(select) {
+    opacity: 1;
+    /* 弹层从 display:none 进入时无先前渲染态，@starting-style 提供入场起点；
+       不支持时直接显示（无动画），任何路径都不会卡在透明 */
+    @starting-style {
+      opacity: 0;
+    }
+  }
+
+  /* 展开时按钮描边与 :focus 一致 */
+  select.form-control:open {
+    border-color: rgba(6, 182, 212, 0.55);
+  }
+
+  select.form-control option {
+    background: transparent; /* 覆盖上方原生兼容规则的整行底色（否则圆角卡片内出直角色块） */
+    color: var(--text-main);
+    border-radius: var(--radius-sm);
+    padding: 0.5rem 0.7rem;
+    font-size: 0.875rem;
+  }
+
+  /* hover/键盘高亮：从主题文字色派生，明暗两主题均可见 */
+  select.form-control option:hover,
+  select.form-control option:focus {
+    background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+    color: var(--text-main);
+  }
+
+  select.form-control option:checked {
+    background: color-mix(in srgb, var(--accent-cyan) 14%, transparent);
+    color: var(--accent-cyan);
+    font-weight: 600;
+  }
+
+  select.form-control option:checked::checkmark {
+    color: var(--accent-cyan);
+    background-color: var(--accent-cyan);
+  }
+
+  /* 紧凑变体的选项同步缩小 */
+  select.form-control-sm option {
+    font-size: 0.8rem;
+    padding: 0.4rem 0.6rem;
+  }
+}
+
 /* ---------- Modal ---------- */
 .modal-backdrop {
   position: fixed;
