@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"ails-hpc/pkg/httpx"
 
@@ -91,7 +92,8 @@ func (h *OIDCHandler) Login(c *gin.Context) {
 }
 
 // BindLogin GET /api/v1/auth/oidc/bind（需登录）—— S4 账号关联流程：state 关联当前
-// 用户名，回调完成后绑定 sub。
+// 用户名，回调完成后绑定 sub。返回 JSON {authorizeUrl}（前端认证 XHR 取 URL 后再
+// 导航——浏览器普通导航带不上 Authorization 头）。
 func (h *OIDCHandler) BindLogin(c *gin.Context) {
 	if !OIDCEnabled() {
 		httpx.BadRequest(c, "OIDC is not configured")
@@ -102,7 +104,25 @@ func (h *OIDCHandler) BindLogin(c *gin.Context) {
 		httpx.Unauthorized(c, "login required for account binding")
 		return
 	}
-	h.beginFlow(c, BindSession(cl.Username))
+	sess := BindSession(cl.Username)
+	state, err := NewState()
+	if err != nil {
+		httpx.Internal(c, "OIDC.Bind.state", err)
+		return
+	}
+	verifier, challenge, err := NewPKCE()
+	if err != nil {
+		httpx.Internal(c, "OIDC.Bind.pkce", err)
+		return
+	}
+	sess.verifier = verifier
+	PutState(state, sess)
+	authURL, err := oidcClient.AuthCodeURL(state, challenge)
+	if err != nil {
+		httpx.BadGateway(c, "OIDC provider unreachable: "+err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"authorizeUrl": authURL})
 }
 
 // beginFlow 生成 state+PKCE 并 302 到 IdP authorize 端点。
@@ -334,6 +354,11 @@ func (h *OIDCHandler) issueAndRedirect(c *gin.Context, u *User) {
 	if err != nil {
 		h.redirectResult(c, "error", "token signing failed", "")
 		return
+	}
+	// A1 会话台账（SSO 签发路径与密码登录同账）
+	if sp, ok := h.store.(SessionSink); ok {
+		sp.RecordLogin(c.Request.Context(), fresh.Username, c.ClientIP(), c.Request.UserAgent(),
+			time.Now().Add(tokenTTL))
 	}
 	h.auditSSOPlain(c, fresh.Username, "auth.login", "user:"+fresh.Username)
 	h.redirectResult(c, "ok", "", token)

@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { slurm, oidc, oidcLoginURL, type SessionEntry } from '../services/slurm';
+import { slurm, oidc, type SessionEntry } from '../services/slurm';
 import { getStoredUser } from '../services/auth';
 
 // A1 设置页：改密（复杂度策略 + 历史 N 次不可重用）、会话台账、全设备登出、
@@ -81,6 +81,18 @@ function SettingsPage() {
     }
   };
 
+  // 绑定走认证 XHR 取 authorize URL 再整页导航（<a> 直链带不上 JWT 头）
+  const bindSSO = async () => {
+    setError('');
+    setInfo('');
+    try {
+      const r = await oidc.bind();
+      if (r.authorizeUrl) window.location.href = r.authorizeUrl;
+    } catch (err: any) {
+      setError(err?.message || String(err));
+    }
+  };
+
   const cardStyle = {
     background: 'var(--bg-card,#1b1e28)',
     border: '1px solid var(--border-color,#2a2f3a)',
@@ -133,9 +145,9 @@ function SettingsPage() {
           </p>
           <div style={{ display: 'flex', gap: '0.6rem' }}>
             {!oidcLinked ? (
-              <a className="btn-primary" href={oidcLoginURL(true)} style={{ padding: '0.5rem 1.2rem', textDecoration: 'none' }}>
+              <button className="btn-primary" onClick={bindSSO} style={{ padding: '0.5rem 1.2rem' }}>
                 绑定 SSO 身份
-              </a>
+              </button>
             ) : (
               <button
                 onClick={unlinkSSO}

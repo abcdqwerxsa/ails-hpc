@@ -33,6 +33,7 @@ func newFlowFixture(t *testing.T, store UserStore, prov OIDCProvisioner, mapping
 	r := gin.New()
 	r.GET("/api/v1/auth/oidc/login", h.Login)
 	r.GET("/api/v1/auth/oidc/callback", h.Callback)
+	r.GET("/api/v1/auth/oidc/bind", h.BindLogin)
 	r.POST("/api/v1/auth/oidc/link", h.Link)
 	r.POST("/api/v1/auth/oidc/unlink", h.Unlink)
 	return &flowFixture{r: r, idp: f, prov: prov.(*fakeProvisioner), h: h}
@@ -259,4 +260,36 @@ func TestOIDCFlow_UnlinkRequiresAuth(t *testing.T) {
 func hashFor(pw string) string {
 	h, _ := BcryptGenerateFromPassword(pw)
 	return h
+}
+
+// TestOIDCFlow_BindReturnsAuthorizeURL S4 绑定发起：认证端点返回 JSON authorizeUrl
+//（前端 XHR 取 URL 再导航——普通 <a> 带不上 JWT 头）。
+func TestOIDCFlow_BindReturnsAuthorizeURL(t *testing.T) {
+	prov := &fakeProvisioner{}
+	store := NewUserStoreFromList([]User{{Username: "alice", Role: RoleMember, TenantSlug: "hpc-lab", Status: "active"}})
+	fx := newFlowFixture(t, store, prov, OIDCMappingConfig{})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/auth/oidc/bind", nil)
+	req.Header.Set("Authorization", "Bearer bind-token-placeholder")
+	fx.r.ServeHTTP(w, req)
+	// 该最小装配无 JWT 中间件（claims 为 nil）→ 401；JSON 契约经注入 claims 验证：
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("bind without claims must 401, got %d", w.Code)
+	}
+	// 注入 claims 的装配（复刻 router 的中间件产物）
+	r2 := gin.New()
+	r2.GET("/api/v1/auth/oidc/bind", func(c *gin.Context) {
+		c.Set("claims", &Claims{Username: "alice", Role: RoleMember})
+		c.Next()
+	}, fx.h.BindLogin)
+	w2 := httptest.NewRecorder()
+	r2.ServeHTTP(w2, httptest.NewRequest(http.MethodGet, "/api/v1/auth/oidc/bind", nil))
+	if w2.Code != http.StatusOK {
+		t.Fatalf("bind with claims: %d %s", w2.Code, w2.Body.String())
+	}
+	var resp struct{ AuthorizeURL string `json:"authorizeUrl"` }
+	if err := json.Unmarshal(w2.Body.Bytes(), &resp); err != nil || resp.AuthorizeURL == "" {
+		t.Fatalf("authorizeUrl missing: %s", w2.Body.String())
+	}
 }

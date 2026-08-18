@@ -396,14 +396,18 @@ export const oidc = {
       body: JSON.stringify(payload),
     }),
 
+  // 发起账号绑定（需登录）：认证 XHR 取 authorize URL 后由前端导航
+  //（浏览器普通 <a> 导航带不上 Authorization 头）
+  bind: () => apiFetch<{ authorizeUrl: string }>("/auth/oidc/bind"),
+
   // 已登录账号解绑 SSO 身份
   unlink: () => apiFetch<{ message: string }>("/auth/oidc/unlink", { method: "POST" }),
 };
 
 // oidcLoginURL 发起 SSO 登录的完整地址（302 到 IdP；dev 走生产 apiserver，prod 同源）。
-export function oidcLoginURL(bind = false): string {
+export function oidcLoginURL(): string {
   const base = import.meta.env.DEV ? "http://192.168.20.226:8090/api/v1" : "/api/v1";
-  return `${base}/auth/oidc/${bind ? "bind" : "login"}`;
+  return `${base}/auth/oidc/login`;
 }
 
 // ideFullURL 把后端返回的相对 web_url(/api/v1/ide/<sid>/) 拼成完整 URL 并附 ?token=<JWT>。
