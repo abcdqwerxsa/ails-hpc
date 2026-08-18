@@ -401,6 +401,90 @@ function PlatformAdminPanel() {
     }
   };
 
+  // v3-U 平台用户目录（users:manage）：全量拉取 + 前端过滤（规模几十~几百）；
+  // 操作=禁用/启用、重置密码（内联）、显示名编辑、角色改派（roles:manage 门）
+  const canManageUsers = can('users:manage', getStoredUser());
+  const canAssignRoles = can('roles:manage', getStoredUser());
+  const selfName = getStoredUser()?.name;
+  const [dirUsers, setDirUsers] = useState<AdminUser[]>([]);
+  const [dirLoading, setDirLoading] = useState(true);
+  const [dirTenant, setDirTenant] = useState('');
+  const [dirQ, setDirQ] = useState('');
+  const [userResetFor, setUserResetFor] = useState('');
+  const [userResetPw, setUserResetPw] = useState('');
+  const loadDir = async () => {
+    try {
+      const r = await slurm.listPlatformUsers();
+      setDirUsers(r.users || []);
+      setError('');
+    } catch (e: any) {
+      setError(`用户目录读取失败：${e?.message || e}`);
+    } finally {
+      setDirLoading(false);
+    }
+  };
+  const toggleUser = async (u: AdminUser) => {
+    const next = (u.status || '').toLowerCase() === 'active' ? 'disabled' : 'active';
+    if (next === 'disabled' && !confirm(`禁用用户 ${u.username}？其全部在途会话将即刻失效。`)) return;
+    setActing(`user:${u.username}`);
+    setError('');
+    setInfo('');
+    try {
+      await slurm.updatePlatformUser(u.username, { status: next });
+      setInfo(`用户 ${u.username} 已${next === 'active' ? '启用' : '禁用'}`);
+      await loadDir();
+    } catch (e: any) {
+      setError(`操作失败：${e?.message || e}`);
+    } finally {
+      setActing('');
+    }
+  };
+  const submitUserReset = async (username: string) => {
+    if (!userResetPw) {
+      setError('新密码不能为空');
+      return;
+    }
+    setActing(`${username}:pw`);
+    setError('');
+    setInfo('');
+    try {
+      await slurm.resetPlatformUserPassword(username, userResetPw);
+      setInfo(`用户 ${username} 密码已重置（首登强制改密）`);
+      setUserResetFor('');
+      setUserResetPw('');
+    } catch (e: any) {
+      setError(`重置失败：${e?.message || e}`);
+    } finally {
+      setActing('');
+    }
+  };
+  const editDisplayName = async (u: AdminUser) => {
+    const v = prompt(`设置 ${u.username} 的显示名（当前：${u.displayName || '未设置'}）`, u.displayName || '');
+    if (v === null || !v.trim()) return;
+    const name = v.trim().slice(0, 64);
+    setActing(`user:${u.username}`);
+    setError('');
+    setInfo('');
+    try {
+      await slurm.updatePlatformUser(u.username, { displayName: name });
+      setInfo(`用户 ${u.username} 显示名已更新`);
+      await loadDir();
+    } catch (e: any) {
+      setError(`显示名更新失败：${e?.message || e}`);
+    } finally {
+      setActing('');
+    }
+  };
+  const dirShown = dirUsers.filter((u) => {
+    const q = dirQ.trim().toLowerCase();
+    return (
+      (!dirTenant || u.tenantSlug === dirTenant) &&
+      (!q ||
+        u.username.toLowerCase().includes(q) ||
+        (u.displayName || '').toLowerCase().includes(q))
+    );
+  });
+
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [resvForm, setResvForm] = useState({ name: '', durationMinutes: '30', users: '' });
@@ -479,6 +563,7 @@ function PlatformAdminPanel() {
     loadAudit();
     loadResv();
     loadQos();
+    if (canManageUsers) loadDir();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -575,6 +660,127 @@ function PlatformAdminPanel() {
           </div>
         )}
       </div>
+
+      {canManageUsers && (
+      <div className="table-card" style={{ marginTop: '1.5rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.75rem' }}>
+          <div style={{ fontSize: '1rem', fontWeight: 700 }}>平台用户目录</div>
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <select
+              className="form-control form-control-sm"
+              value={dirTenant}
+              onChange={(e: ChangeEvent<HTMLSelectElement>) => setDirTenant(e.target.value)}
+              style={{ width: 160 }}
+            >
+              <option value="">全部租户</option>
+              {tenants.map((t) => (
+                <option key={t.slug} value={t.slug}>{t.slug}</option>
+              ))}
+            </select>
+            <input
+              className="form-control form-control-sm"
+              placeholder="搜索用户名/显示名"
+              value={dirQ}
+              onChange={(e) => setDirQ(e.target.value)}
+              style={{ width: 180 }}
+            />
+          </div>
+        </div>
+        {dirLoading ? (
+          <div style={emptyStyle}>加载中…</div>
+        ) : dirShown.length === 0 ? (
+          <div style={emptyStyle}>无匹配用户</div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+              <thead>
+                <tr style={{ textAlign: 'left' }}>
+                  <th style={th}>用户名</th>
+                  <th style={th}>角色</th>
+                  <th style={th}>租户</th>
+                  <th style={th}>集群用户</th>
+                  <th style={th}>状态</th>
+                  <th style={th}>显示名</th>
+                  <th style={th}>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dirShown.map((u, i) => {
+                  const isLast = i === dirShown.length - 1;
+                  const active = (u.status || '').toLowerCase() === 'active';
+                  const isSelf = u.username === selfName;
+                  return (
+                    <tr key={u.username} style={{ borderBottom: isLast ? 'none' : '1px solid var(--row-line,#2a2f3a)' }}>
+                      <td style={td}>
+                        <span style={{ fontWeight: 700 }}>{u.username}</span>
+                        {isSelf && <span style={{ marginLeft: '0.4rem', fontSize: '0.72rem', color: 'var(--accent-cyan,#06B6D4)' }}>（我）</span>}
+                      </td>
+                      <td style={td}>
+                        <div>{u.roleName || u.role || '-'}</div>
+                        {u.roleName && u.roleName !== u.role && (
+                          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted,#94a3b8)' }}>基角色 {u.role}</div>
+                        )}
+                      </td>
+                      <td style={{ ...td, ...mono, color: 'var(--text-muted,#94a3b8)' }}>{u.tenantSlug || '-'}</td>
+                      <td style={{ ...td, ...mono, color: 'var(--text-muted,#94a3b8)' }}>{u.clusterUser || '-'}</td>
+                      <td style={td}><StatusBadge status={u.status} /></td>
+                      <td style={{ ...td, color: 'var(--text-muted,#94a3b8)' }}>{u.displayName || '-'}</td>
+                      <td style={{ ...td, minWidth: 260 }}>
+                        <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                          <MiniBtn
+                            disabled={acting === `user:${u.username}` || (isSelf && active)}
+                            onClick={() => toggleUser(u)}
+                          >
+                            {active ? '禁用' : '启用'}
+                          </MiniBtn>
+                          <MiniBtn
+                            disabled={acting === `user:${u.username}`}
+                            onClick={() => {
+                              setUserResetFor(userResetFor === u.username ? '' : u.username);
+                              setUserResetPw('');
+                            }}
+                          >
+                            重置密码
+                          </MiniBtn>
+                          {userResetFor === u.username && (
+                            <>
+                              <input
+                                className="form-control form-control-sm"
+                                type="password"
+                                value={userResetPw}
+                                onChange={(e) => setUserResetPw(e.target.value)}
+                                placeholder="新密码"
+                                style={{ width: 140 }}
+                              />
+                              <MiniBtn disabled={acting === `${u.username}:pw`} onClick={() => submitUserReset(u.username)}>确认</MiniBtn>
+                            </>
+                          )}
+                          <MiniBtn disabled={acting === `user:${u.username}`} onClick={() => editDisplayName(u)}>
+                            显示名
+                          </MiniBtn>
+                          {canAssignRoles && (
+                            <RoleAssignSelect
+                              username={u.username}
+                              currentRole={u.role || 'ops_admin'}
+                              currentRoleName={u.roleName}
+                              scope="platform"
+                              onDone={(m) => {
+                                setInfo(m);
+                                loadDir();
+                              }}
+                            />
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+      )}
 
       {can('users:create', getStoredUser()) && (
       <form onSubmit={submitPlatUser} style={{ ...cardStyle, marginTop: '1.5rem' }}>

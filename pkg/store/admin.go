@@ -31,6 +31,8 @@ var (
 	ErrWeakPassword = errors.New("store: password too short")
 	// ErrInvalidClusterUser clusterUser 缺失或非 unix 安全名。
 	ErrInvalidClusterUser = errors.New("store: invalid cluster user")
+	// ErrInvalidDisplayName 显示名超长（>64 字符）。
+	ErrInvalidDisplayName = errors.New("store: invalid display name")
 	// ErrInvalidAccount account 缺失或非 unix 安全名。
 	ErrInvalidAccount = errors.New("store: invalid account")
 	// ErrInvalidUID 显式指定的 uid 超出带宽 2001..2999。
@@ -285,6 +287,43 @@ func (s *sqliteStore) UpdateUserStatus(ctx context.Context, username, status str
 }
 
 // ResetUserPassword 见 policy.go（A1 起：must_change_password=1 + 旧哈希入历史）。
+
+// UpdateUserDisplayName 置显示名（v3-U4）；空串 = 清除，上限 64 字符。
+func (s *sqliteStore) UpdateUserDisplayName(ctx context.Context, username, displayName string) error {
+	if len(displayName) > 64 {
+		return fmt.Errorf("%w: too long (max 64)", ErrInvalidDisplayName)
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE users SET display_name = ?, updated_at = datetime('now') WHERE username = ?`,
+		displayName, username)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("%w: user %s", ErrNotFound, username)
+	}
+	return nil
+}
+
+// ListPlatformUsers 列出全平台用户（跨租户，v3-U1 平台目录；按 username 排序；
+// 不含密码哈希——与 ListTenantUsers 同防线）。
+func (s *sqliteStore) ListPlatformUsers(ctx context.Context) ([]auth.User, error) {
+	rows, err := s.db.QueryContext(ctx, userSelect+` ORDER BY u.username`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []auth.User{}
+	for rows.Next() {
+		u, err := scanUser(rows)
+		if err != nil {
+			return nil, err
+		}
+		u.PasswordHash = ""
+		out = append(out, *u)
+	}
+	return out, rows.Err()
+}
 
 // ListTenantUsers 列出租户全部用户（JOIN tenants by slug，按 username 排序）。
 // 返回值不含密码哈希（auth.User 对 hash 本就 json:"-"，这里再置空一道防线）。

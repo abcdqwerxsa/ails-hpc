@@ -34,6 +34,11 @@ check "member roles api denied" "403" "$(curl -s -o /dev/null -w '%{http_code}' 
 # 分区管理（partitions:manage）：member 403；admin 空体 400（无副作用——不触 scontrol）
 check "member partitions api denied" "403" "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH $API/admin/partitions/debug -H "Authorization: Bearer $MTOKEN" -H 'Content-Type: application/json' -d '{"state":"DOWN"}')"
 check "admin partitions empty update 400" "400" "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH $API/admin/partitions/debug -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{}')"
+# 平台用户生命周期（users:manage）：member 403；admin 只读目录 200；自禁用/弱重置 400（均无副作用）
+check "member users api denied" "403" "$(curl -s -o /dev/null -w '%{http_code}' $API/admin/users -H "Authorization: Bearer $MTOKEN")"
+check "admin users dir 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' $API/admin/users -H "Authorization: Bearer $TOKEN")"
+check "admin self disable 400" "400" "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH $API/admin/users/admin -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"status":"disabled"}')"
+check "admin weak reset 400" "400" "$(curl -s -o /dev/null -w '%{http_code}' -X POST $API/admin/users/member/password -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"newPassword":"weak"}')"
 
 echo "== 3) 内置角色 seed =="
 ROLES=$(curl -s $API/admin/roles -H "Authorization: Bearer $TOKEN")

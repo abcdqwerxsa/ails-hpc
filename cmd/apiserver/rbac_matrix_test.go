@@ -48,6 +48,8 @@ func TestRouteMatrix_CustomRoles(t *testing.T) {
 			http.MethodGet, "/api/v1/slurm/billing/usage", "", tadmin, "/api/v1/tenants/me", http.StatusOK},
 		{"c-audit", "puser", "puser123456", []string{auth.PermClusterRead, auth.PermAuditRead},
 			http.MethodGet, "/api/v1/admin/audit", "", padmin, "/api/v1/admin", http.StatusOK},
+		{"c-userdir", "puser", "puser123456", []string{auth.PermClusterRead, auth.PermUsersManage},
+			http.MethodGet, "/api/v1/admin/users", "", padmin, "/api/v1/admin", http.StatusOK},
 		{"c-partition", "puser", "puser123456", []string{auth.PermClusterRead, auth.PermPartitionsManage},
 			http.MethodGet, "/api/v1/admin/partitions/debug", "", padmin, "/api/v1/admin", http.StatusOK},
 		// 缺失 → 403
@@ -63,6 +65,8 @@ func TestRouteMatrix_CustomRoles(t *testing.T) {
 			http.MethodGet, "/api/v1/admin/roles", "", padmin, "/api/v1/admin", http.StatusForbidden},
 		{"x-partition", "puser", "puser123456", []string{auth.PermClusterRead},
 			http.MethodPatch, "/api/v1/admin/partitions/debug", `{"state":"DOWN"}`, padmin, "/api/v1/admin", http.StatusForbidden},
+		{"x-userdir", "puser", "puser123456", []string{auth.PermClusterRead},
+			http.MethodPatch, "/api/v1/admin/users/alice", `{"status":"disabled"}`, padmin, "/api/v1/admin", http.StatusForbidden},
 		{"x-tenantroles", "alice", "alice12345", []string{auth.PermClusterRead},
 			http.MethodGet, "/api/v1/tenants/me/roles", "", tadmin, "/api/v1/tenants/me", http.StatusForbidden},
 	}

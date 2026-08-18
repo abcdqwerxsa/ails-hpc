@@ -61,6 +61,10 @@ type AdminStore interface {
 	UpdateUserStatus(ctx context.Context, username, status string) error
 	// ResetUserPassword 重置密码哈希并 token_version+1（吊销在途令牌）。
 	ResetUserPassword(ctx context.Context, username, newHash string) error
+	// UpdateUserDisplayName 置显示名（v3-U4；空串=清除，上限 64 字符）。
+	UpdateUserDisplayName(ctx context.Context, username, displayName string) error
+	// ListPlatformUsers 全平台用户目录（v3-U1；跨租户，按 username 排序，不含哈希）。
+	ListPlatformUsers(ctx context.Context) ([]auth.User, error)
 	// ListTenantUsers 列出租户全部用户（按 username 排序；不含密码哈希）。
 	ListTenantUsers(ctx context.Context, tenantSlug string) ([]auth.User, error)
 	// NextUID 分配下一个 uid（max(uid)+1，带宽 2001..2999 避让节点既存账号；满则错误）。

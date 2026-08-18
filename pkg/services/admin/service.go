@@ -30,6 +30,8 @@ var (
 	ErrReservationNotFound = errors.New("admin: reservation not found")
 	// ErrPartitionNotFound 分区不存在（scontrol show partition 无该名字）。
 	ErrPartitionNotFound = errors.New("admin: partition not found")
+	// ErrSelfDisable 自禁用守卫：平台管理员不可禁用自己的账号（防自锁门外）。
+	ErrSelfDisable = errors.New("admin: cannot disable your own account")
 )
 
 // SlurmProvisioner 是 Slurm 侧供给面（默认 sacctmgr via docker exec；测试注入假实现）。
@@ -187,6 +189,55 @@ func (s *Service) CreatePlatformUser(ctx context.Context, actor string, nu store
 	return u, nil
 }
 
+// ListPlatformUsers 全平台用户目录（v3-U1；跨租户，yaml 模式 503——目录依赖用户库）。
+func (s *Service) ListPlatformUsers(ctx context.Context) ([]auth.User, error) {
+	if err := s.ensure(); err != nil {
+		return nil, err
+	}
+	return s.st.ListPlatformUsers(ctx)
+}
+
+// UpdatePlatformUser 平台改用户（v3-U2/U4：显示名与/或状态；空串=不变更）。
+// 自禁用拒绝（防自锁）；禁用即 token_version+1 吊销在途令牌（store 语义）。
+func (s *Service) UpdatePlatformUser(ctx context.Context, actor, username, displayName, status, rid string) error {
+	if err := s.ensure(); err != nil {
+		return err
+	}
+	if status == "disabled" && actor == username {
+		return ErrSelfDisable
+	}
+	if status != "" {
+		if err := s.st.UpdateUserStatus(ctx, username, status); err != nil {
+			return err
+		}
+	}
+	if displayName != "" {
+		if err := s.st.UpdateUserDisplayName(ctx, username, displayName); err != nil {
+			return err
+		}
+	}
+	_ = s.st.WriteAudit(ctx, actor, "user.update", "user:"+username, rid,
+		`{"status":"`+status+`","displayName":"`+displayName+`"}`)
+	return nil
+}
+
+// ResetPlatformUserPassword 平台重置任意用户密码（v3-U3——tenant_admin 忘密时无人可解的
+// 死锁由此消除）。重置后强制首登改密 + 在途令牌全部吊销（ResetUserPassword 语义）。
+func (s *Service) ResetPlatformUserPassword(ctx context.Context, actor, username, newPassword, rid string) error {
+	if err := s.ensure(); err != nil {
+		return err
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	if err := s.st.ResetUserPassword(ctx, username, string(hash)); err != nil {
+		return err
+	}
+	_ = s.st.WriteAudit(ctx, actor, "user.reset_password", "user:"+username, rid, "{}")
+	return nil
+}
+
 // ListAudit 审计日志（admin）。
 func (s *Service) ListAudit(ctx context.Context, actor, action string, limit int) ([]store.AuditEntry, error) {
 	if err := s.ensure(); err != nil {
@@ -249,8 +300,14 @@ func (s *Service) UpdateMyUser(ctx context.Context, actor, tenantSlug, username,
 			return err
 		}
 	}
-	_ = displayName // Phase 3 仅状态；显示名编辑随后续需要落 store
-	_ = s.st.WriteAudit(ctx, actor, "user.update", "user:"+username, rid, `{"status":"`+status+`"}`)
+	// v3-U4：显示名落地（空串=不变更——与 status 同语义）
+	if displayName != "" {
+		if err := s.st.UpdateUserDisplayName(ctx, username, displayName); err != nil {
+			return err
+		}
+	}
+	_ = s.st.WriteAudit(ctx, actor, "user.update", "user:"+username, rid,
+		`{"status":"`+status+`","displayName":"`+displayName+`"}`)
 	return nil
 }
 
@@ -277,5 +334,9 @@ func (s *Service) ResetMyUserPassword(ctx context.Context, actor, tenantSlug, us
 	if err != nil {
 		return err
 	}
-	return s.st.ResetUserPassword(ctx, username, string(hash))
+	if err := s.st.ResetUserPassword(ctx, username, string(hash)); err != nil {
+		return err
+	}
+	_ = s.st.WriteAudit(ctx, actor, "user.reset_password", "user:"+username, rid, "{}")
+	return nil
 }

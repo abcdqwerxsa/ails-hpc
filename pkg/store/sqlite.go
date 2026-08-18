@@ -52,7 +52,7 @@ func (s *sqliteStore) Close() error { return s.db.Close() }
 // R2 起 LEFT JOIN roles：role_id/实际角色名/权限点（role_id NULL 或角色缺失时回退内置映射）。
 const userSelect = `
 SELECT u.username, u.password_hash, u.role, t.slug,
-       u.cluster_user, u.uid, u.gid, u.account, u.status, u.token_version,
+       u.cluster_user, u.uid, u.gid, u.account, u.display_name, u.status, u.token_version,
        u.role_id, COALESCE(r.name, u.role), r.permissions,
        u.auth_source, COALESCE(u.oidc_sub, ''), u.must_change_password
 FROM users u JOIN tenants t ON t.id = u.tenant_id
@@ -65,7 +65,7 @@ func scanUser(row interface{ Scan(...any) error }) (*auth.User, error) {
 	var permsJSON sql.NullString
 	var mustChange bool
 	if err := row.Scan(&u.Username, &u.PasswordHash, &u.Role, &u.TenantSlug,
-		&u.ClusterUser, &u.UID, &u.GID, &u.Account, &u.Status, &u.TokenVersion,
+		&u.ClusterUser, &u.UID, &u.GID, &u.Account, &u.DisplayName, &u.Status, &u.TokenVersion,
 		&roleID, &roleName, &permsJSON, &u.AuthSource, &u.OIDCSub, &mustChange); err != nil {
 		return nil, err
 	}

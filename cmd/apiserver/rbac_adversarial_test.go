@@ -410,3 +410,118 @@ func TestRBAC_PartitionManageGate(t *testing.T) {
 		t.Fatalf("audit = %+v, want one partition:debug entry", entries)
 	}
 }
+
+// TestRBAC_PlatformUserLifecycle v3-U 平台用户生命周期：
+//   - member 对目录/状态/重置三面 403
+//   - admin：目录 200（跨租户 + tenant 过滤）；自禁用 400（防自锁）；
+//     禁用 alice → 在途 token 即刻 401、登录被拒；启用后旧 token 仍 401（版本不回退）
+//   - 重置：弱密码 400；合法 200 → 旧 token 吊销、新密码登录 200 且强制首登改密
+//   - displayName 平台写入 → 租户成员列表可见（stub 转正）
+//   - 审计 user.update / user.reset_password 落库
+func TestRBAC_PlatformUserLifecycle(t *testing.T) {
+	r, st, _ := setupRBACStack(t)
+	padmin := loginViaAPI(t, r, "padmin", "platform123")
+	tadmin := loginViaAPI(t, r, "tadmin", "tenant12345")
+	alice := loginViaAPI(t, r, "alice", "alice12345")
+
+	// 1) member 三面 403（目录读/状态写/重置写）
+	for _, m := range []struct{ method, path, body string }{
+		{http.MethodGet, "/api/v1/admin/users", ""},
+		{http.MethodPatch, "/api/v1/admin/users/alice", `{"status":"disabled"}`},
+		{http.MethodPost, "/api/v1/admin/users/alice/password", `{"newPassword":"NewPass123!"}`},
+	} {
+		if c := doRequest(r, m.method, m.path, m.body, alice); c != http.StatusForbidden {
+			t.Errorf("member %s %s: want 403 got %d", m.method, m.path, c)
+		}
+	}
+
+	// 2) admin 目录：跨租户全量 + tenant 过滤
+	code, body := doAuth(r, http.MethodGet, "/api/v1/admin/users", "", padmin)
+	if code != http.StatusOK {
+		t.Fatalf("admin users dir: %d %s", code, body)
+	}
+	for _, want := range []string{`"username":"alice"`, `"username":"biomember"`, `"tenantSlug":"bio-lab"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("users dir missing %s: %s", want, body)
+		}
+	}
+	if c, b := doAuth(r, http.MethodGet, "/api/v1/admin/users?tenant=hpc-lab", "", padmin); c != http.StatusOK || strings.Contains(b, "biomember") {
+		t.Errorf("tenant filter: %d %s", c, b)
+	}
+
+	// 3) 自禁用 400（防自锁）；状态枚举外 400
+	if c, _ := doAuth(r, http.MethodPatch, "/api/v1/admin/users/padmin", `{"status":"disabled"}`, padmin); c != http.StatusBadRequest {
+		t.Errorf("self disable: want 400 got %d", c)
+	}
+	if c, _ := doAuth(r, http.MethodPatch, "/api/v1/admin/users/alice", `{"status":"paused"}`, padmin); c != http.StatusBadRequest {
+		t.Errorf("invalid status: want 400 got %d", c)
+	}
+
+	// 4) 禁用 alice → 在途 token 即刻 401、登录被拒；重新启用后旧 token 仍 401、新登录 200
+	if c, b := doAuth(r, http.MethodPatch, "/api/v1/admin/users/alice", `{"status":"disabled"}`, padmin); c != http.StatusOK {
+		t.Fatalf("disable alice: %d %s", c, b)
+	}
+	if c := doRequest(r, http.MethodGet, "/api/v1/auth/me", "", alice); c != http.StatusUnauthorized {
+		t.Errorf("disabled alice in-flight token: want 401 got %d", c)
+	}
+	if c, _ := doAuth(r, http.MethodPost, "/api/v1/auth/login",
+		`{"username":"alice","password":"alice12345"}`, ""); c != http.StatusUnauthorized {
+		t.Errorf("disabled alice login: want 401 got %d", c)
+	}
+	if c, _ := doAuth(r, http.MethodPatch, "/api/v1/admin/users/alice", `{"status":"active"}`, padmin); c != http.StatusOK {
+		t.Fatalf("re-enable alice: got %d", c)
+	}
+	if c := doRequest(r, http.MethodGet, "/api/v1/auth/me", "", alice); c != http.StatusUnauthorized {
+		t.Errorf("old token after re-enable must stay revoked: want 401 got %d", c)
+	}
+	alice = loginViaAPI(t, r, "alice", "alice12345")
+
+	// 5) 平台重置密码（U3 死锁消除）：弱 400；合法 200 → 重置者改密令 alice 刚换的新令牌也吊销；
+	//    新密码登录 200 且 mustChangePassword=true
+	if c, _ := doAuth(r, http.MethodPost, "/api/v1/admin/users/alice/password",
+		`{"newPassword":"weak"}`, padmin); c != http.StatusBadRequest {
+		t.Errorf("weak reset: want 400 got %d", c)
+	}
+	if c, b := doAuth(r, http.MethodPost, "/api/v1/admin/users/alice/password",
+		`{"newPassword":"NewPass123!"}`, padmin); c != http.StatusOK {
+		t.Fatalf("reset: %d %s", c, b)
+	}
+	if c := doRequest(r, http.MethodGet, "/api/v1/auth/me", "", alice); c != http.StatusUnauthorized {
+		t.Errorf("token must be revoked by reset: want 401 got %d", c)
+	}
+	alice = loginViaAPI(t, r, "alice", "NewPass123!")
+	_, me := doAuth(r, http.MethodGet, "/api/v1/auth/me", "", alice)
+	if !strings.Contains(me, "mustChangePassword") {
+		t.Errorf("reset login should carry mustChangePassword: %s", me)
+	}
+
+	// 6) displayName：平台写（U4）→ 租户成员列表可见（此前前端恒显示 '-' 的 stub 转正）
+	if c, b := doAuth(r, http.MethodPatch, "/api/v1/admin/users/alice",
+		`{"displayName":"Alice A."}`, padmin); c != http.StatusOK {
+		t.Fatalf("set displayName: %d %s", c, b)
+	}
+	_, tb := doAuth(r, http.MethodGet, "/api/v1/tenants/me/users", "", tadmin)
+	if !strings.Contains(tb, `"displayName":"Alice A."`) {
+		t.Errorf("tenant member list missing displayName: %s", tb)
+	}
+
+	// 7) 审计落库
+	for _, w := range []struct{ action, target string }{
+		{"user.update", "user:alice"}, {"user.reset_password", "user:alice"},
+	} {
+		entries, err := st.ListAudit(t.Context(), "padmin", w.action, 20)
+		if err != nil {
+			t.Fatalf("ListAudit %s: %v", w.action, err)
+		}
+		found := false
+		for _, e := range entries {
+			if e.Target == w.target {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("audit %s %s missing (entries=%+v)", w.action, w.target, entries)
+		}
+	}
+}

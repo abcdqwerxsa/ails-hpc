@@ -10,7 +10,7 @@ import { slurm } from './slurm';
 export const BUILTIN_ROLE_PERMISSIONS: Record<string, string[]> = {
   admin: [
     'cluster:read', 'nodes:manage',
-    'tenants:read', 'tenants:manage', 'users:create',
+    'tenants:read', 'tenants:manage', 'users:create', 'users:manage',
     'audit:read', 'reservations:manage', 'qos:manage', 'partitions:manage', 'roles:manage',
   ],
   ops_admin: ['cluster:read', 'billing:read'],

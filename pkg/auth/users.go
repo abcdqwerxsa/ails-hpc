@@ -37,6 +37,8 @@ type User struct {
 	Account      string `yaml:"account"       json:"account"`
 	// TenantSlug 所属租户（多租户 Phase 1）：DB 库映射 tenants.slug；yaml 库 = OrgSlug。
 	TenantSlug string `yaml:"tenantSlug,omitempty" json:"tenantSlug"`
+	// DisplayName 显示名（v3-U4 贯通：目录展示与行内编辑；空 = 未设置）。
+	DisplayName string `yaml:"displayName,omitempty" json:"displayName,omitempty"`
 	// Status 账号状态（active|disabled）；yaml 库恒 active。
 	Status string `yaml:"status,omitempty" json:"status,omitempty"`
 	// TokenVersion 令牌版本：改密/禁用 +1 → 在途 JWT 即刻失效（中间件按请求比对 claims.Ver）。
