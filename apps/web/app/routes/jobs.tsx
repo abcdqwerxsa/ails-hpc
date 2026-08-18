@@ -380,6 +380,67 @@ function JobsPage() {
           </table>
         </div>
       )}
+
+      {/* 作业详情弹窗（roadmap 1.2 的"sacct 生命期 + 输出 tail-200 弹窗"——JSX 此前
+          从未落地（与预约/QOS/审计面板同类缺口），v4 审计后补建） */}
+      {(detail || detailLoading || detailErr) && (
+        <div
+          onClick={() => { setDetail(null); setDetailErr(''); setDetailLoading(false); }}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1.5rem' }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ background: 'var(--bg-card,#1b1e28)', border: '1px solid var(--border-color,#2a2f3a)', borderRadius: 12, boxShadow: 'var(--shadow-card)', maxWidth: 720, width: '100%', maxHeight: '85vh', overflowY: 'auto', padding: '1.25rem' }}
+          >
+            {detailLoading && <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted,#94a3b8)' }}>详情加载中…</div>}
+            {detailErr && <Notice color="#f43f5e" bg="rgba(239,68,68,.1)">{detailErr}</Notice>}
+            {detail && (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.9rem' }}>
+                  <div style={{ fontSize: '1.05rem', fontWeight: 700 }}>
+                    作业 #{detail.job_id} · {detail.name}
+                    <span style={{ marginLeft: '0.6rem', padding: '0.15rem 0.5rem', borderRadius: 6, fontSize: '0.72rem', fontWeight: 700, color: '#fff', background: jobStateColor(detail.state) }}>
+                      {detail.state}
+                    </span>
+                  </div>
+                  <MiniBtn onClick={() => setDetail(null)}>关闭</MiniBtn>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))', gap: '0.6rem', marginBottom: '0.9rem' }}>
+                  <DetailKV k="属主" v={detail.owner} />
+                  <DetailKV k="账户" v={detail.account} />
+                  <DetailKV k="分区" v={detail.partition} />
+                  <DetailKV k="耗时" v={detail.elapsed_sec != null ? `${Math.floor(detail.elapsed_sec / 60)}m${detail.elapsed_sec % 60}s` : undefined} />
+                  <DetailKV k="退出码" v={detail.exit_code} />
+                  <DetailKV k="提交" v={detail.submit} />
+                  <DetailKV k="开始" v={detail.start} />
+                  <DetailKV k="结束" v={detail.end} />
+                </div>
+                <div style={{ fontSize: '0.85rem', fontWeight: 700, marginBottom: '0.4rem' }}>输出（末 200 行）</div>
+                <pre
+                  style={{
+                    margin: 0, padding: '0.75rem', borderRadius: 8, fontSize: '0.78rem', lineHeight: 1.5,
+                    fontFamily: "'JetBrains Mono', monospace", whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                    background: 'var(--bg-card-hover,#222632)', color: 'var(--text-main,#f1f5f9)',
+                    maxHeight: 320, overflowY: 'auto', boxShadow: 'var(--shadow-inset-deep)',
+                  }}
+                >
+                  {detail.stdout_tail || '（暂无输出——作业可能尚未运行或输出为空）'}
+                </pre>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// DetailKV 详情弹窗的键值小格（值空显示 '-'，灰调弱化）。
+function DetailKV({ k, v }: { k: string; v?: string }) {
+  return (
+    <div>
+      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted,#94a3b8)' }}>{k}</div>
+      <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.8rem', color: 'var(--text-main,#f1f5f9)' }}>{v || '-'}</div>
     </div>
   );
 }
