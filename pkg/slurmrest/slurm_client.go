@@ -27,22 +27,25 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-// RunInSlurmctld 在 slurmctld 容器内执行给定命令：使用 docker exec slurmctld。
-func RunInSlurmctld(args ...string) ([]byte, error) {
-	execArgs := append([]string{"exec", slurmctldService}, args...)
+// RunInContainer 在指定容器内执行命令（docker exec 泛化面；RunInSlurmctld 的底层）。
+func RunInContainer(container string, args ...string) ([]byte, error) {
+	execArgs := append([]string{"exec", container}, args...)
 	out, err := exec.Command("docker", execArgs...).Output()
 	if err == nil {
 		return out, nil
 	}
-
-	// 备选退路：docker compose
-	localArgs := append([]string{"compose", "-f", composeFile, "exec", "-T", slurmctldService}, args...)
+	// 备选退路：docker compose（容器名即 compose service 名）
+	localArgs := append([]string{"compose", "-f", composeFile, "exec", "-T", container}, args...)
 	out, err = exec.Command("docker", localArgs...).Output()
 	if err == nil {
 		return out, nil
 	}
+	return nil, fmt.Errorf("run in %s (%s) failed: %w", container, strings.Join(args, " "), err)
+}
 
-	return nil, fmt.Errorf("run in slurmctld (%s) failed: %w", strings.Join(args, " "), err)
+// RunInSlurmctld 在 slurmctld 容器内执行给定命令：使用 docker exec slurmctld。
+func RunInSlurmctld(args ...string) ([]byte, error) {
+	return RunInContainer(slurmctldService, args...)
 }
 
 // mintToken 在 slurmctld 容器内为指定用户铸造 slurmrestd JWT（scontrol token username=<u>），

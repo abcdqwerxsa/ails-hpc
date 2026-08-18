@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"ails-hpc/pkg/auth"
 	"ails-hpc/pkg/slurmrest"
@@ -38,8 +39,10 @@ var (
 type SlurmProvisioner interface {
 	// ProvisionAccount 建账号（租户父账号 / 用户叶子账号；幂等）。
 	ProvisionAccount(account, parentAccount string) error
-	// ProvisionUser 建用户叶子账号（parent=租户父账号）+ association。
-	ProvisionUser(clusterUser, account, parentAccount string) error
+	// ProvisionUser 建用户叶子账号（parent=租户父账号）+ association + POSIX 账号
+	// （slurmctld 与全部计算节点 useradd——sudo -u sbatch 与 sacct 都要容器内
+	// 系统账号；entrypoint 只在容器启动时按 seed 文件建，API 建号必须在线补）。
+	ProvisionUser(clusterUser string, uid, gid int, account, parentAccount string) error
 	// SetAccountLimits 设置账号级限额（如 "GrpTRES=cpu=4" / "Fairshare=10"；幂等）。
 	SetAccountLimits(account, setting string) error
 }
@@ -59,11 +62,32 @@ func (sacctmgrProvisioner) ProvisionAccount(account, parentAccount string) error
 	return err
 }
 
-func (sacctmgrProvisioner) ProvisionUser(clusterUser, account, parentAccount string) error {
-	_, err := slurmrest.RunInSlurmctld("sh", "-c",
+func (sacctmgrProvisioner) ProvisionUser(clusterUser string, uid, gid int, account, parentAccount string) error {
+	if _, err := slurmrest.RunInSlurmctld("sh", "-c",
 		fmt.Sprintf("sacctmgr -i add account %s parent=%s || true; sacctmgr -i add user %s account=%s || true",
-			account, parentAccount, clusterUser, account))
-	return err
+			account, parentAccount, clusterUser, account)); err != nil {
+		return err
+	}
+	// POSIX 账号：slurmctld（CLI sbatch/sacct 面）+ 全部计算节点（作业执行面）。
+	// 节点清单从 sinfo 枚举（单一真源——不与部署拓扑硬编码耦合）。幂等（useradd || true）。
+	nodes, err := slurmrest.RunInSlurmctld("sinfo", "-N", "-h", "-o", "%N")
+	if err != nil {
+		nodes = nil // sinfo 失败不阻断建号——POSIX 补齐退化为仅 slurmctld（可重试）
+	}
+	targets := []string{"slurmctld"}
+	for _, n := range strings.Fields(string(nodes)) {
+		if n = strings.TrimSpace(n); n != "" {
+			targets = append(targets, n)
+		}
+	}
+	useradd := fmt.Sprintf("groupadd -g %d ailshpc 2>/dev/null; useradd -m -u %d -g %d %s 2>/dev/null || true",
+		gid, uid, gid, clusterUser)
+	for _, t := range targets {
+		if _, err := slurmrest.RunInContainer(t, "sh", "-c", useradd); err != nil {
+			return fmt.Errorf("posix provision on %s: %w", t, err)
+		}
+	}
+	return nil
 }
 
 func (sacctmgrProvisioner) SetAccountLimits(account, setting string) error {
@@ -93,7 +117,7 @@ func (s *Service) provisionUser(ctx context.Context, u *auth.User) error {
 	if err != nil {
 		return fmt.Errorf("%w: resolve tenant %s: %v", ErrProvisionFailed, u.TenantSlug, err)
 	}
-	if err := s.provision.ProvisionUser(u.ClusterUser, u.Account, t.ParentAccount); err != nil {
+	if err := s.provision.ProvisionUser(u.ClusterUser, u.UID, u.GID, u.Account, t.ParentAccount); err != nil {
 		return fmt.Errorf("%w: %v", ErrProvisionFailed, err)
 	}
 	return nil

@@ -27,21 +27,24 @@ echo "$ME" | grep -q '"authSource"' && ok "me authSource" || bad "me authSource"
 curl -s -o /dev/null -w '%{http_code}' $API/auth/me/sessions -H "Authorization: Bearer $TOKEN" | grep -q 200 && ok "sessions endpoint" || bad "sessions endpoint"
 
 echo "== 2) 权限门（member vs admin 面）=="
-MTOKEN=$(curl -s -X POST $API/auth/login -H 'Content-Type: application/json' -d '{"username":"member","password":"member123"}' | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token",""))')
-check "member nodes read" "200" "$(curl -s -o /dev/null -w '%{http_code}' $API/slurm/nodes -H "Authorization: Bearer $MTOKEN")"
-check "member drain denied" "403" "$(curl -s -o /dev/null -w '%{http_code}' -X POST $API/slurm/nodes/node1/state -H "Authorization: Bearer $MTOKEN" -H 'Content-Type: application/json' -d '{"state":"DRAIN"}')"
-check "member roles api denied" "403" "$(curl -s -o /dev/null -w '%{http_code}' $API/admin/roles -H "Authorization: Bearer $MTOKEN")"
+# 探针账号 verify（member 角色）：人工测试会改 member 的密码（密码历史禁止改回），
+# 依赖真实 member 账号会让脚本凭证漂移。引导（一次性）：admin API 建号后
+# UPDATE users SET must_change_password=0 WHERE username='verify'（清首登强制改密）。
+MTOKEN=$(curl -s -X POST $API/auth/login -H 'Content-Type: application/json' -d '{"username":"verify","password":"Verify2026!"}' | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token",""))')
+check "probe-member nodes read" "200" "$(curl -s -o /dev/null -w '%{http_code}' $API/slurm/nodes -H "Authorization: Bearer $MTOKEN")"
+check "probe-member drain denied" "403" "$(curl -s -o /dev/null -w '%{http_code}' -X POST $API/slurm/nodes/node1/state -H "Authorization: Bearer $MTOKEN" -H 'Content-Type: application/json' -d '{"state":"DRAIN"}')"
+check "probe-member roles api denied" "403" "$(curl -s -o /dev/null -w '%{http_code}' $API/admin/roles -H "Authorization: Bearer $MTOKEN")"
 # 分区管理（partitions:manage）：member 403；admin 空体 400（无副作用——不触 scontrol）
-check "member partitions api denied" "403" "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH $API/admin/partitions/debug -H "Authorization: Bearer $MTOKEN" -H 'Content-Type: application/json' -d '{"state":"DOWN"}')"
+check "probe-member partitions api denied" "403" "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH $API/admin/partitions/debug -H "Authorization: Bearer $MTOKEN" -H 'Content-Type: application/json' -d '{"state":"DOWN"}')"
 check "admin partitions empty update 400" "400" "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH $API/admin/partitions/debug -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{}')"
 # 平台用户生命周期（users:manage）：member 403；admin 只读目录 200；自禁用/弱重置 400（均无副作用）
-check "member users api denied" "403" "$(curl -s -o /dev/null -w '%{http_code}' $API/admin/users -H "Authorization: Bearer $MTOKEN")"
+check "probe-member users api denied" "403" "$(curl -s -o /dev/null -w '%{http_code}' $API/admin/users -H "Authorization: Bearer $MTOKEN")"
 check "admin users dir 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' $API/admin/users -H "Authorization: Bearer $TOKEN")"
 check "admin self disable 400" "400" "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH $API/admin/users/admin -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"status":"disabled"}')"
 check "admin weak reset 400" "400" "$(curl -s -o /dev/null -w '%{http_code}' -X POST $API/admin/users/member/password -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"newPassword":"weak"}')"
 # v4：费率透出（usage 响应含 rates）+ 配额双入口（member billing 面 200 / admin 平台面 200；均只读）
 curl -s "$API/slurm/billing/usage" -H "Authorization: Bearer $MTOKEN" | grep -q '"rates"' && ok "billing usage carries rates" || bad "billing rates"
-check "member billing quota 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' $API/slurm/billing/quota -H "Authorization: Bearer $MTOKEN")"
+check "probe-member billing quota 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' $API/slurm/billing/quota -H "Authorization: Bearer $MTOKEN")"
 check "admin platform quotas 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' $API/admin/tenants/quotas -H "Authorization: Bearer $TOKEN")"
 
 echo "== 3) 内置角色 seed =="
