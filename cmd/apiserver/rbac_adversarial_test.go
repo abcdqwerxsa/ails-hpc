@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"ails-hpc/pkg/auth"
@@ -38,7 +39,8 @@ func (noopProvisioner) ProvisionUser(cu, account, parentAccount string) error { 
 func (noopProvisioner) SetAccountLimits(account, setting string) error        { return nil }
 
 // setupRBACStack 全栈夹具：sqlite 库（system/hpc-lab/bio-lab + 种子用户）+ 生产路由表。
-func setupRBACStack(t *testing.T) (*gin.Engine, store.AdminStore) {
+// 返回的 *admin.Service 供测试注入集群命令执行面（SetClusterRunner——分区/预约直通面）。
+func setupRBACStack(t *testing.T) (*gin.Engine, store.AdminStore, *admin.Service) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	auth.SetSecret([]byte("rbac-adversarial-secret"))
@@ -81,6 +83,14 @@ func setupRBACStack(t *testing.T) (*gin.Engine, store.AdminStore) {
 	authHandler := auth.NewAuthHandler(st)
 	authHandler.SetAuditSink(st) // A2：登录审计出口（生产同装配）
 
+	adminSvc := admin.NewService(st, noopProvisioner{})
+	// 集群直通面默认罐头（分区端点在无 docker 的测试环境确定性返回；具体测试可再覆写）
+	adminSvc.SetClusterRunner(func(args ...string) ([]byte, error) {
+		if len(args) > 2 && args[0] == "scontrol" && args[1] == "show" {
+			return []byte("PartitionName=debug\n   Default=YES MaxTime=UNLIMITED State=UP Nodes=c1\n"), nil
+		}
+		return []byte(""), nil
+	})
 	h := Handlers{
 		Auth:       authHandler,
 		Cluster:    cluster.NewClusterHandler(cluster.NewClusterService(slurmClient)),
@@ -88,10 +98,10 @@ func setupRBACStack(t *testing.T) (*gin.Engine, store.AdminStore) {
 		Jobs:       jobs.NewJobHandlerScoped(jobs.NewJobService(slurmClient), tenantMembers),
 		Containers: containers.NewContainerHandlerScoped(containers.NewContainerService(slurmClient), tenantMembers),
 		Billing:    billing.NewBillingHandlerWithScope(billingService, tenantMembers),
-		Admin:      admin.NewAdminHandler(admin.NewService(st, noopProvisioner{})),
+		Admin:      admin.NewAdminHandler(adminSvc),
 		Audit:      st, // A2：/slurm/** 变更操作审计出口
 	}
-	return NewRouter(h), st
+	return NewRouter(h), st, adminSvc
 }
 
 // loginViaAPI 走真实登录端点取 token（签发路径全量参与）。
@@ -112,7 +122,7 @@ func loginViaAPI(t *testing.T, r *gin.Engine, username, password string) string 
 // TestRBAC_EscalationOnCreate 提权攻击：tenant_admin/低权角色建角色时请求超出父集的
 // 权限 → 400；角色链（被授予角色管理权的自定义角色）再建角色同样不可越界。
 func TestRBAC_EscalationOnCreate(t *testing.T) {
-	r, _ := setupRBACStack(t)
+	r, _, _ := setupRBACStack(t)
 	tok := loginViaAPI(t, r, "tadmin", "tenant12345")
 
 	// 1) tenant_admin 直接要 nodes:manage → 400
@@ -146,7 +156,7 @@ func TestRBAC_EscalationOnCreate(t *testing.T) {
 // TestRBAC_ForgedClaimsForgedNoMore 伪造令牌攻击：手工铸造携带 Perms=["nodes:manage"]
 // 的 token——带 store 的中间件每请求按库覆写 claims.Perms，伪造面被丢弃 → 403。
 func TestRBAC_ForgedClaimsForgedNoMore(t *testing.T) {
-	r, st := setupRBACStack(t)
+	r, st, _ := setupRBACStack(t)
 	_ = st
 
 	// alice 是 member（无 nodes:manage）；伪造 token 宣称持有全部权限
@@ -170,7 +180,7 @@ func TestRBAC_ForgedClaimsForgedNoMore(t *testing.T) {
 // TestRBAC_CustomRoleEnforcement 自定义角色的权限面被路由逐点执行：
 // dev=[cluster:read,jobs:submit]——可提交；不可 DRAIN/不可 IDE/不可计费。
 func TestRBAC_CustomRoleEnforcement(t *testing.T) {
-	r, _ := setupRBACStack(t)
+	r, _, _ := setupRBACStack(t)
 	tok := loginViaAPI(t, r, "tadmin", "tenant12345")
 
 	if c, b := doAuth(r, http.MethodPost, "/api/v1/tenants/me/roles",
@@ -217,7 +227,7 @@ func TestRBAC_CustomRoleEnforcement(t *testing.T) {
 // TestRBAC_ReassignmentImmediate 角色改派即刻生效：alice 在途 token 不重登，改派到
 // viewer（只有 cluster:read）后提交立即 403；改回 dev 后立即 200。
 func TestRBAC_ReassignmentImmediate(t *testing.T) {
-	r, _ := setupRBACStack(t)
+	r, _, _ := setupRBACStack(t)
 	tok := loginViaAPI(t, r, "tadmin", "tenant12345")
 
 	doAuth(r, http.MethodPost, "/api/v1/tenants/me/roles", `{"name":"dev","permissions":["cluster:read","jobs:submit"]}`, tok)
@@ -245,7 +255,7 @@ func TestRBAC_ReassignmentImmediate(t *testing.T) {
 
 // TestRBAC_CrossTenantAndDeleteDisposition 跨租户读写（404）+ 在用角色删除处置。
 func TestRBAC_CrossTenantAndDeleteDisposition(t *testing.T) {
-	r, st := setupRBACStack(t)
+	r, st, _ := setupRBACStack(t)
 	ctx := t.Context()
 	tok := loginViaAPI(t, r, "tadmin", "tenant12345")
 
@@ -294,7 +304,7 @@ func TestRBAC_CrossTenantAndDeleteDisposition(t *testing.T) {
 // TestRBAC_PlatformRoleIsolation 平台自定义角色不可触租户作用域，反之亦然；
 // 且 admin 无 jobs:submit——平台侧也无法铸造可提交作业的平台角色。
 func TestRBAC_PlatformRoleIsolation(t *testing.T) {
-	r, _ := setupRBACStack(t)
+	r, _, _ := setupRBACStack(t)
 	padmin := loginViaAPI(t, r, "padmin", "platform123")
 	tadmin := loginViaAPI(t, r, "tadmin", "tenant12345")
 
@@ -315,5 +325,88 @@ func TestRBAC_PlatformRoleIsolation(t *testing.T) {
 	// admin 不可触租户角色端点（无 tenant:roles:manage）→ 403
 	if c := doRequest(r, http.MethodGet, "/api/v1/tenants/me/roles", "", padmin); c != http.StatusForbidden {
 		t.Errorf("admin on /tenants/me/roles: want 403 got %d", c)
+	}
+}
+
+// TestRBAC_PartitionManageGate 分区管理权限门（v2 增量 partitions:manage）：
+//   - 内置 member/tenant_admin 的 GET 与 PATCH 全 403（伪造 token 的 Perms 声明同样被覆写）
+//   - admin：GET 解析视图 200 / PATCH 空体 400 / 枚举外值 400 / 合法修改 200 且
+//     scontrol 直通命令语法正确、audit_log 落 partition.update
+func TestRBAC_PartitionManageGate(t *testing.T) {
+	r, st, adminSvc := setupRBACStack(t)
+
+	var gotCmd string
+	adminSvc.SetClusterRunner(func(args ...string) ([]byte, error) {
+		gotCmd = strings.Join(args, " ")
+		if len(args) > 2 && args[0] == "scontrol" && args[1] == "show" {
+			return []byte("PartitionName=debug\n   Default=YES MaxTime=UNLIMITED State=UP Nodes=c1\n"), nil
+		}
+		return []byte(""), nil
+	})
+
+	padmin := loginViaAPI(t, r, "padmin", "platform123")
+	alice := loginViaAPI(t, r, "alice", "alice12345")
+	tadmin := loginViaAPI(t, r, "tadmin", "tenant12345")
+
+	// 1) 无 partitions:manage 的内置角色：GET/PATCH 双 403
+	for _, tok := range []string{alice, tadmin} {
+		if c := doRequest(r, http.MethodGet, "/api/v1/admin/partitions/debug", "", tok); c != http.StatusForbidden {
+			t.Errorf("non-admin GET partition: want 403 got %d", c)
+		}
+		if c := doRequest(r, http.MethodPatch, "/api/v1/admin/partitions/debug", `{"state":"DOWN"}`, tok); c != http.StatusForbidden {
+			t.Errorf("non-admin PATCH partition: want 403 got %d", c)
+		}
+	}
+
+	// 2) 伪造 token 宣称 partitions:manage（member 身份）→ 中间件按库覆写 → 403
+	forged, err := auth.GenerateTokenClaims(auth.Claims{
+		Username: "alice", Role: auth.RoleMember, OrgSlug: "hpc-lab", TenantNS: "default",
+		ClusterUser: "alice", Account: "alice", TID: "hpc-lab", Ver: 0,
+		Perms:       []string{auth.PermPartitionsManage},
+	})
+	if err != nil {
+		t.Fatalf("mint forged: %v", err)
+	}
+	if c := doRequest(r, http.MethodPatch, "/api/v1/admin/partitions/debug", `{"state":"DOWN"}`, forged); c != http.StatusForbidden {
+		t.Errorf("forged partitions:manage: want 403 got %d", c)
+	}
+
+	// 3) admin GET → 200 + scontrol show 解析视图
+	code, body := doAuth(r, http.MethodGet, "/api/v1/admin/partitions/debug", "", padmin)
+	if code != http.StatusOK {
+		t.Fatalf("admin GET partition: want 200 got %d body=%s", code, body)
+	}
+	for _, want := range []string{`"name":"debug"`, `"state":"UP"`, `"default":"YES"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("GET partition body missing %s: %s", want, body)
+		}
+	}
+
+	// 4) admin PATCH 校验面：空体 400（无字段可改）；枚举外值 400（不触 scontrol）
+	if c, b := doAuth(r, http.MethodPatch, "/api/v1/admin/partitions/debug", `{}`, padmin); c != http.StatusBadRequest {
+		t.Errorf("empty updates: want 400 got %d body=%s", c, b)
+	}
+	if c, b := doAuth(r, http.MethodPatch, "/api/v1/admin/partitions/debug", `{"state":"SIDEWAYS"}`, padmin); c != http.StatusBadRequest {
+		t.Errorf("invalid state: want 400 got %d body=%s", c, b)
+	}
+
+	// 5) admin PATCH 合法修改 → 200 + scontrol update 直通语法
+	gotCmd = ""
+	if c, b := doAuth(r, http.MethodPatch, "/api/v1/admin/partitions/debug",
+		`{"state":"DOWN","maxTime":"1-00:00:00"}`, padmin); c != http.StatusOK {
+		t.Fatalf("admin PATCH partition: want 200 got %d body=%s", c, b)
+	}
+	wantCmd := `sh -c scontrol update 'partition=debug' 'State=DOWN' 'MaxTime=1-00:00:00' 2>&1`
+	if gotCmd != wantCmd {
+		t.Errorf("scontrol cmd:\n got  %s\n want %s", gotCmd, wantCmd)
+	}
+
+	// 6) 审计落库：partition.update / actor=padmin / target=partition:debug
+	entries, err := st.ListAudit(t.Context(), "padmin", "partition.update", 10)
+	if err != nil {
+		t.Fatalf("ListAudit: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Target != "partition:debug" {
+		t.Fatalf("audit = %+v, want one partition:debug entry", entries)
 	}
 }

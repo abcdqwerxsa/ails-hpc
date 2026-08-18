@@ -325,6 +325,28 @@ export interface QOSInfo {
   max_tres?: string;
   max_wall?: string;
 }
+// 分区管理（scontrol show/update partition 解析视图；空串=未设置/不变更）
+export interface PartitionDetail {
+  name: string;
+  state: string;
+  default: string;
+  maxTime: string;
+  defMemPerCPU: string;
+  nodes: string;
+  overSubscribe: string;
+  allowAccounts: string;
+  allowGroups: string;
+}
+export interface UpdatePartitionRequest {
+  state?: string;
+  default?: string;
+  maxTime?: string;
+  defMemPerCPU?: string;
+  overSubscribe?: string;
+  nodes?: string;
+  allowAccounts?: string;
+  allowGroups?: string;
+}
 export interface AuditEntry {
   id: number;
   actor: string;
@@ -543,6 +565,14 @@ export const slurm = {
     apiFetch<{ message: string }>(`/admin/tenants/${encodeURIComponent(slug)}/qos`, {
       method: "PATCH",
       body: JSON.stringify({ name }),
+    }),
+  // 分区管理（partitions:manage；编辑弹层当前值 + 属性修改，留空字段不变更）
+  getPartition: (name: string) =>
+    apiFetch<{ partition: PartitionDetail }>(`/admin/partitions/${encodeURIComponent(name)}`),
+  updatePartition: (name: string, payload: UpdatePartitionRequest) =>
+    apiFetch<{ message: string }>(`/admin/partitions/${encodeURIComponent(name)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
     }),
   listAudit: (actor?: string, action?: string, limit?: number) => {
     const q = new URLSearchParams();

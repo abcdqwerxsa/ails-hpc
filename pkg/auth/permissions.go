@@ -45,6 +45,9 @@ const (
 	PermReservationsManage = "reservations:manage"
 	// PermQosManage QOS 查看/创建/绑定（admin 直通 sacctmgr）。历史矩阵：admin 独占。
 	PermQosManage = "qos:manage"
+	// PermPartitionsManage 分区属性查看/修改（admin 直通 scontrol update partition）。
+	// 历史矩阵：admin 独占（v2 后新增权限点，非 R1 翻译——无历史对照行）。
+	PermPartitionsManage = "partitions:manage"
 
 	// PermTenantUsersRead 本租户成员查看。历史矩阵：tenant_admin。
 	PermTenantUsersRead = "tenant:users:read"
@@ -75,6 +78,7 @@ var AllPermissions = []string{
 	PermAuditRead,
 	PermReservationsManage,
 	PermQosManage,
+	PermPartitionsManage,
 	PermTenantUsersRead,
 	PermTenantUsersManage,
 	PermTenantUsersResetPassword,
@@ -92,7 +96,7 @@ var BuiltinRolePermissions = map[string][]string{
 	RoleSystemAdmin: {
 		PermClusterRead, PermNodesManage,
 		PermTenantsRead, PermTenantsManage, PermUsersCreate,
-		PermAuditRead, PermReservationsManage, PermQosManage,
+		PermAuditRead, PermReservationsManage, PermQosManage, PermPartitionsManage,
 		PermRolesManage,
 	},
 	RoleOpsAdmin: {

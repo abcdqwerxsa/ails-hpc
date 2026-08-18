@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -16,7 +17,13 @@ import (
 // clusterRunner 是集群管理命令执行面（scontrol/sacctmgr）。
 type clusterRunner func(args ...string) ([]byte, error)
 
+// ClusterRunner 是 clusterRunner 的导出别名——cmd/apiserver 测试装配可注入假实现。
+type ClusterRunner = clusterRunner
+
 var defaultClusterRunner clusterRunner = slurmrest.RunInSlurmctld
+
+// SetClusterRunner 注入集群命令执行面（测试装配用；生产默认 slurmctld CLI）。
+func (s *Service) SetClusterRunner(r ClusterRunner) { s.runner = r }
 
 // Reservation 是一条 Slurm 预约（scontrol show reserv 解析）。
 type Reservation struct {
@@ -215,4 +222,167 @@ func (s *Service) runCluster(args ...string) ([]byte, error) {
 		r = defaultClusterRunner
 	}
 	return r(args...)
+}
+
+// --- 分区管理（v2 增量）：scontrol show/update partition 直通（partitions:manage）。
+// 与预约/QOS 同教义：21.08 slurmrestd 无分区写端点，CLI 是唯一通路；编辑弹层的
+// 当前值同样取自 CLI（slurmrestd 分区视图只富化了 5 个字段，嵌套 schema 不可考）。
+
+// PartitionDetail 是 scontrol show partition <name> 的解析视图（编辑弹层当前值来源）。
+type PartitionDetail struct {
+	Name           string `json:"name"`
+	State          string `json:"state"`
+	Default        string `json:"default"`
+	MaxTime        string `json:"maxTime"`
+	DefMemPerCPU   string `json:"defMemPerCPU"`
+	Nodes          string `json:"nodes"`
+	OverSubscribe  string `json:"overSubscribe"`
+	AllowAccounts  string `json:"allowAccounts"`
+	AllowGroups    string `json:"allowGroups"`
+}
+
+// PartitionUpdates 是分区可修改字段白名单（空串=不变更；值合法性由 handler 层
+// partitionValueREs 校验——同 UpdateTenant 的 limitRE 前置教义）。
+type PartitionUpdates struct {
+	State         string `json:"state"`
+	Default       string `json:"default"`
+	MaxTime       string `json:"maxTime"`
+	DefMemPerCPU  string `json:"defMemPerCPU"`
+	Nodes         string `json:"nodes"`
+	OverSubscribe string `json:"overSubscribe"`
+	AllowAccounts string `json:"allowAccounts"`
+	AllowGroups   string `json:"allowGroups"`
+}
+
+// partitionValueREs 逐字段值白名单（防注入 scontrol）：
+//   - State/Default/OverSubscribe：Slurm 枚举（OverSubscribe 含 FORCE:n 计数形式）
+//   - MaxTime：UNLIMITED 或 分钟[[:ss]][-[dd-]hh:mm[:ss]] 复合时限字符集
+//   - DefMemPerCPU：UNLIMITED 或 裸数/带 K/M/G/T 后缀
+//   - Nodes：hostlist 表达式（c1,c2[3-5]）
+//   - AllowAccounts/AllowGroups：逗号清单
+var partitionValueREs = map[string]*regexp.Regexp{
+	"State":         regexp.MustCompile(`(?i)^(UP|DOWN|DRAIN|INACTIVE)$`),
+	"Default":       regexp.MustCompile(`(?i)^(YES|NO)$`),
+	"MaxTime":       regexp.MustCompile(`(?i)^(UNLIMITED|[0-9][0-9:?-]{0,31})$`),
+	"DefMemPerCPU":  regexp.MustCompile(`(?i)^(UNLIMITED|[0-9]+[KMGT]?)$`),
+	"OverSubscribe": regexp.MustCompile(`(?i)^(YES|NO|EXCLUSIVE|FORCE(:[0-9]+)?)$`),
+	"Nodes":         regexp.MustCompile(`^[0-9A-Za-z,\[\]-]{1,512}$`),
+	"AllowAccounts": regexp.MustCompile(`^[0-9A-Za-z,_-]{1,256}$`),
+	"AllowGroups":   regexp.MustCompile(`^[0-9A-Za-z,_-]{1,256}$`),
+}
+
+// partitionFields 是 PartitionUpdates 字段 → scontrol 键的有序映射（构建命令与校验共用）。
+var partitionFields = []struct {
+	Key    string // scontrol 键（= 结构体字段名）
+	Get    func(PartitionUpdates) string
+}{
+	{"State", func(u PartitionUpdates) string { return u.State }},
+	{"Default", func(u PartitionUpdates) string { return u.Default }},
+	{"MaxTime", func(u PartitionUpdates) string { return u.MaxTime }},
+	{"DefMemPerCPU", func(u PartitionUpdates) string { return u.DefMemPerCPU }},
+	{"OverSubscribe", func(u PartitionUpdates) string { return u.OverSubscribe }},
+	{"Nodes", func(u PartitionUpdates) string { return u.Nodes }},
+	{"AllowAccounts", func(u PartitionUpdates) string { return u.AllowAccounts }},
+	{"AllowGroups", func(u PartitionUpdates) string { return u.AllowGroups }},
+}
+
+// ValidatePartitionUpdates 字段白名单校验（handler 前置调用，非法值 → 400 文案）。
+// 至少一个非空字段，否则拒绝（防空 PATCH 直通 scontrol 报晦涩错）。
+func ValidatePartitionUpdates(u PartitionUpdates) error {
+	set := 0
+	for _, f := range partitionFields {
+		v := f.Get(u)
+		if v == "" {
+			continue
+		}
+		set++
+		if !partitionValueREs[f.Key].MatchString(v) {
+			return fmt.Errorf("invalid %s value %q", f.Key, v)
+		}
+	}
+	if set == 0 {
+		return fmt.Errorf("no partition fields to update")
+	}
+	return nil
+}
+
+// GetPartition scontrol show partition <name>（编辑弹层当前值）。
+func (s *Service) GetPartition(ctx context.Context, name string) (*PartitionDetail, error) {
+	if !nameRE.MatchString(name) {
+		return nil, fmt.Errorf("invalid partition name")
+	}
+	out, err := s.runCluster("scontrol", "show", "partition", name)
+	if err != nil {
+		return nil, fmt.Errorf("scontrol show partition: %w", err)
+	}
+	d := parsePartitionDetail(string(out))
+	if d == nil {
+		return nil, ErrPartitionNotFound
+	}
+	return d, nil
+}
+
+// UpdatePartition scontrol update partition=<name> K=V...（值白名单在 handler 校验，
+// 这里只复查名字与字段集）。成功后写 audit_log（st 为 nil 的 yaml 模式跳过——与
+// 预约/QOS 一致，纯集群操作不依赖用户库）。
+func (s *Service) UpdatePartition(ctx context.Context, actor, name string, u PartitionUpdates, rid string) error {
+	if !nameRE.MatchString(name) {
+		return fmt.Errorf("invalid partition name")
+	}
+	if err := ValidatePartitionUpdates(u); err != nil {
+		return err
+	}
+	spec := []string{"partition=" + name}
+	for _, f := range partitionFields {
+		if v := f.Get(u); v != "" {
+			spec = append(spec, f.Key+"="+v)
+		}
+	}
+	quoted := make([]string, len(spec))
+	for i, kv := range spec {
+		quoted[i] = "'" + kv + "'"
+	}
+	out, err := s.runCluster("sh", "-c", "scontrol update "+strings.Join(quoted, " ")+" 2>&1")
+	if err != nil {
+		return fmt.Errorf("scontrol update partition: %w", err)
+	}
+	if strings.Contains(strings.ToUpper(string(out)), "ERROR") {
+		return fmt.Errorf("scontrol update partition: %s", strings.TrimSpace(string(out)))
+	}
+	if s.st != nil {
+		if detail, err := json.Marshal(u); err == nil {
+			_ = s.st.WriteAudit(ctx, actor, "partition.update", "partition:"+name, rid, string(detail))
+		}
+	}
+	return nil
+}
+
+// parsePartitionDetail 解析 scontrol show partition 输出（与 parseReservations 同手法：
+// 逐行 Fields 按 "=" 切 kv；输出无 PartitionName= → nil）。
+func parsePartitionDetail(out string) *PartitionDetail {
+	if !strings.Contains(out, "PartitionName=") {
+		return nil
+	}
+	kv := map[string]string{}
+	for _, ln := range strings.Split(out, "\n") {
+		for _, f := range strings.Fields(ln) {
+			if i := strings.Index(f, "="); i > 0 {
+				kv[f[:i]] = f[i+1:]
+			}
+		}
+	}
+	if kv["PartitionName"] == "" {
+		return nil
+	}
+	return &PartitionDetail{
+		Name:          kv["PartitionName"],
+		State:         kv["State"],
+		Default:       kv["Default"],
+		MaxTime:       kv["MaxTime"],
+		DefMemPerCPU:  kv["DefMemPerCPU"],
+		Nodes:         kv["Nodes"],
+		OverSubscribe: kv["OverSubscribe"],
+		AllowAccounts: kv["AllowAccounts"],
+		AllowGroups:   kv["AllowGroups"],
+	}
 }

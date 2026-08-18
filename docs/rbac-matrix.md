@@ -7,7 +7,7 @@
 `cmd/apiserver/rbac_adversarial_test.go`（自定义角色执行/越权）。
 **改矩阵必须同步本文档与三处测试。**
 
-## 1. 权限点词汇表（18 项）
+## 1. 权限点词汇表（19 项）
 
 | 权限点 | 语义 | 典型持有者 |
 |---|---|---|
@@ -24,6 +24,7 @@
 | `audit:read` | 平台审计日志查看 | admin |
 | `reservations:manage` | 预约查看/创建/删除 | admin |
 | `qos:manage` | QOS 查看/创建/绑定 | admin |
+| `partitions:manage` | 分区属性查看/修改（scontrol 直通） | admin |
 | `roles:manage` | 平台自定义角色 CRUD + 指派 | admin |
 | `tenant:users:read` | 本租户成员查看 | tenant_admin |
 | `tenant:users:manage` | 本租户成员创建/修改/角色改派 | tenant_admin |
@@ -47,6 +48,7 @@
 | audit:read | ✓ | | | |
 | reservations:manage | ✓ | | | |
 | qos:manage | ✓ | | | |
+| partitions:manage | ✓ | | | |
 | roles:manage | ✓ | | | |
 | tenant:users:read | | | ✓ | |
 | tenant:users:manage | | | ✓ | |
@@ -73,6 +75,7 @@ R1 等价性测试锁定）；ops_admin 是计费观测角色；作业与 IDE �
 | GET /admin/audit | audit:read |
 | GET·POST·DELETE /admin/reservations* | reservations:manage |
 | GET·POST /admin/qos · PATCH /admin/tenants/:slug/qos | qos:manage |
+| GET·PATCH /admin/partitions/:name | partitions:manage |
 | GET·POST /admin/roles · PATCH·DELETE /admin/roles/:name · GET /admin/tenants/:slug/roles · PATCH /admin/users/:username/role | roles:manage |
 | GET /tenants/me/users | tenant:users:read |
 | POST /tenants/me/users · PATCH /tenants/me/users/:username | tenant:users:manage |
