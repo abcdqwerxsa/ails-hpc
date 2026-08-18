@@ -239,12 +239,12 @@ function TenantUsersPanel() {
                           {resetFor === u.username && (
                             <>
                               <input
-                                className="form-control"
+                                className="form-control form-control-sm"
                                 type="password"
                                 value={resetPw}
                                 onChange={(e) => setResetPw(e.target.value)}
                                 placeholder="新密码"
-                                style={{ width: 140, padding: '0.3rem 0.6rem', fontSize: '0.8rem' }}
+                                style={{ width: 140 }}
                               />
                               <MiniBtn disabled={acting === `${u.username}:pw`} onClick={() => submitReset(u.username)}>确认</MiniBtn>
                             </>

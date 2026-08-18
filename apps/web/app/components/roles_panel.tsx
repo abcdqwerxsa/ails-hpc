@@ -270,10 +270,10 @@ export function RoleAssignSelect({
   return (
     <div style={{ display: 'inline-flex', gap: '0.35rem', alignItems: 'center' }}>
       <select
-        className="form-control"
+        className="form-control form-control-sm"
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        style={{ width: 150, padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
+        style={{ width: 150 }}
       >
         {roles.map((r) => (
           <option key={r.id} value={r.name}>{r.name}</option>

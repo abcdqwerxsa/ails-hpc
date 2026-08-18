@@ -11,6 +11,10 @@
 
 /* ---------- Light theme (default — matches React's data-theme="light") ---------- */
 :root {
+  /* Native 表单部件（select 弹出列表/数字步进器/滚动条）跟随页面主题，
+     否则深色模式下下拉弹层是操作系统默认的亮色 */
+  color-scheme: light;
+
   /* Soft neumorphic surface palette (方案 B 明色软质贴合) */
   --bg-main: #F0F3F8;
   --bg-sidebar: #E9EEF5;
@@ -67,6 +71,9 @@
 
 /* ---------- Dark theme override ---------- */
 :root[data-theme="dark"] {
+  /* 下拉弹出列表/原生滚动条等 OS 渲染部件切到暗色 */
+  color-scheme: dark;
+
   /* 方案 A 像素级统一暗色色盘 */
   --bg-main: #14161E;
   --bg-sidebar: #161821;
@@ -536,6 +543,18 @@ select.form-control {
 select.form-control option {
   background-color: var(--card-bg);
   color: var(--text-main);
+}
+
+/* 紧凑变体：表格行内控件（角色改派下拉 / 行内重置密码输入），高度对齐 MiniBtn */
+.form-control-sm {
+  padding: 0.3rem 0.55rem;
+  font-size: 0.8rem;
+}
+
+select.form-control-sm {
+  background-position: right 7px center;
+  background-size: 13px;
+  padding-right: 1.7rem;
 }
 
 /* ---------- Modal ---------- */
