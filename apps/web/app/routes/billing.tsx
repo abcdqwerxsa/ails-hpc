@@ -1,14 +1,31 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useEffect, useState, type ChangeEvent, type ReactNode } from 'react';
 import { can } from '../services/auth';
-import { slurm, type BillingUsage, type BreakdownRow } from '../services/slurm';
+import { slurm, type BillingUsage, type BreakdownRow, type TenantQuota } from '../services/slurm';
 
 export const Route = createFileRoute('/billing')({ component: BillingPage });
+
+// 解析 sacctmgr GrpTRES 串为展示片段（"cpu=32,mem=64G,gres/gpu=2" → 友好文案）
+function describeTres(tres: string): string {
+  if (!tres) return '未设限（集群默认）';
+  const parts: string[] = [];
+  for (const kv of tres.split(',')) {
+    const [k, v] = kv.split('=');
+    if (!k || !v) continue;
+    if (k === 'cpu') parts.push(`CPU ${v} 核`);
+    else if (k === 'mem') parts.push(`内存 ${v}`);
+    else if (k === 'gres/gpu' || k === 'gpu') parts.push(`GPU ${v} 卡`);
+    else if (k === 'node') parts.push(`节点 ${v}`);
+    else parts.push(`${k}=${v}`);
+  }
+  return parts.length ? parts.join(' · ') : tres;
+}
 
 function BillingPage() {
   const [user, setUser] = useState('');
   const [project, setProject] = useState('');
   const [data, setData] = useState<BillingUsage | null>(null);
+  const [quota, setQuota] = useState<TenantQuota[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
@@ -27,9 +44,12 @@ function BillingPage() {
     }
   };
 
+  // v4-W3：配额卡（scope 内——member/tenant_admin 本租户，ops 全部；失败静默不阻塞计费）
   useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    slurm
+      .getBillingQuota()
+      .then((r) => setQuota(r.quotas || []))
+      .catch(() => {});
   }, []);
 
   const exportJSON = async () => {
@@ -88,6 +108,27 @@ function BillingPage() {
 
       {data && (
         <>
+          {quota && quota.length > 0 && (
+            <div
+              style={{
+                display: 'flex', flexWrap: 'wrap', gap: '0.4rem 1.4rem', alignItems: 'center',
+                padding: '0.7rem 1rem', marginBottom: '1rem', fontSize: '0.85rem',
+                background: 'var(--bg-card,#1b1e28)', border: '1px solid var(--border-color,#2a2f3a)',
+                borderRadius: 10, color: 'var(--text-muted,#94a3b8)',
+              }}
+            >
+              <span style={{ fontWeight: 700, color: 'var(--text-main,#f1f5f9)' }}>
+                {quota.length === 1 ? '本租户并发资源上限' : '租户并发资源上限（scope 内全部）'}
+              </span>
+              {(quota.length === 1
+                ? [`${quota[0].tenantSlug}：${describeTres(quota[0].grpTres || '')}`]
+                : quota.map((q) => `${q.tenantSlug}：${describeTres(q.grpTres || '')}`)
+              ).map((s) => (
+                <span key={s} style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.8rem' }}>{s}</span>
+              ))}
+              <span style={{ fontSize: '0.75rem' }}>（GrpTRES=并发上限，非累计用量）</span>
+            </div>
+          )}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(180px,1fr))', gap: '1rem' }}>
             <Stat label="CPU 小时" value={data.total_cpu_hours.toFixed(2)} color="#3b82f6" />
             <Stat label="内存 GB·小时" value={data.total_memory_gb_hours.toFixed(2)} color="#10b981" />
@@ -97,6 +138,17 @@ function BillingPage() {
           </div>
           <div style={{ marginTop: '1rem', fontSize: '0.85rem', color: 'var(--text-muted,#94a3b8)', marginBottom: '1.5rem' }}>
             范围：用户 {data.user || '(全部)'}{data.project ? ` · 项目 ${data.project}` : ''}
+            {data.rates && (
+              <>
+                {' '}· 费率：CPU ¥{data.rates.cpu}/核时 · 内存 ¥{data.rates.mem}/GB时 · GPU ¥{data.rates.gpu}/卡时
+                {' '}· 估算费用 ¥
+                {(
+                  data.total_cpu_hours * data.rates.cpu +
+                  data.total_memory_gb_hours * data.rates.mem +
+                  data.total_gpu_hours * data.rates.gpu
+                ).toFixed(2)}
+              </>
+            )}
           </div>
           <BreakdownTable rows={data.breakdown || []} />
         </>

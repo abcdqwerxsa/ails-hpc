@@ -256,7 +256,20 @@ export interface BillingUsage {
   total_gpu_hours: number;
   job_count: number;
   container_count: number;
+  rates?: BillingRates; // 当前生效费率（v4-W1 计价透明；旧后端无此字段）
   breakdown?: BreakdownRow[];
+}
+// 费率（CNY/时：cpu=核·时 mem=GB·时 gpu=卡·时）
+export interface BillingRates {
+  cpu: number;
+  mem: number;
+  gpu: number;
+}
+// 租户配额（v4-W3；grpTres 为 sacctmgr 原始串，如 "cpu=32,mem=64G"，空=未设限）
+export interface TenantQuota {
+  tenantSlug: string;
+  parentAccount: string;
+  grpTres?: string;
 }
 export interface BillingExportJSON {
   format: string;
@@ -531,6 +544,8 @@ export const slurm = {
     const s = q.toString();
     return apiFetch<BillingUsage>(`/slurm/billing/usage${s ? "?" + s : ""}`);
   },
+  // 租户配额（v4-W3；scope 内：member/tenant_admin=本租户，ops=全部）
+  getBillingQuota: () => apiFetch<{ quotas: TenantQuota[] }>("/slurm/billing/quota"),
   exportBillingJSON: (user?: string, project?: string) => {
     const q = new URLSearchParams({ format: "json" });
     if (user) q.set("user", user);
