@@ -183,3 +183,50 @@ func TestUpdatePartition_Audit(t *testing.T) {
 		t.Errorf("audit detail should carry updates JSON, got %q", e.Detail)
 	}
 }
+
+// TestClusterAdminAudit_X1 v3-X1：预约/QOS 四个写操作全部落审计
+// （reservations.create/delete、qos.create、tenant.qos——此前管理面审计缺口）。
+func TestClusterAdminAudit_X1(t *testing.T) {
+	s, st := newPartitionService(t, func(args ...string) ([]byte, error) {
+		return []byte(""), nil // 全部命令空输出=成功（scontrol/sacctmgr 报错都走 stderr→sh 2>&1）
+	})
+	ctx := context.Background()
+	if _, err := st.CreateTenant(ctx, "hpc-lab", ""); err != nil {
+		t.Fatalf("seed tenant: %v", err)
+	}
+
+	if _, err := s.CreateReservation(ctx, "padmin", "maint", "", 30, "", "u1", "", "rid-1"); err != nil {
+		t.Fatalf("CreateReservation: %v", err)
+	}
+	if err := s.DeleteReservation(ctx, "padmin", "maint", "rid-2"); err != nil {
+		t.Fatalf("DeleteReservation: %v", err)
+	}
+	if _, err := s.CreateQOS(ctx, "padmin", "qos-a", "", "rid-3"); err != nil {
+		t.Fatalf("CreateQOS: %v", err)
+	}
+	if err := s.SetTenantQOS(ctx, "padmin", "hpc-lab", "qos-a", "rid-4"); err != nil {
+		t.Fatalf("SetTenantQOS: %v", err)
+	}
+
+	for _, w := range []struct{ action, target, rid string }{
+		{"reservations.create", "reservation:maint", "rid-1"},
+		{"reservations.delete", "reservation:maint", "rid-2"},
+		{"qos.create", "qos:qos-a", "rid-3"},
+		{"tenant.qos", "tenant:hpc-lab", "rid-4"},
+	} {
+		entries, err := st.ListAudit(ctx, "padmin", w.action, 10)
+		if err != nil {
+			t.Fatalf("ListAudit %s: %v", w.action, err)
+		}
+		found := false
+		for _, e := range entries {
+			if e.Target == w.target && e.RequestID == w.rid {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("audit %s %s (rid=%s) missing; entries=%+v", w.action, w.target, w.rid, entries)
+		}
+	}
+}

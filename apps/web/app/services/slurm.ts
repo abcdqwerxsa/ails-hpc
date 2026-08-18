@@ -592,6 +592,25 @@ export const slurm = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  // v3-U 平台用户生命周期（users:manage）：目录（tenant 精确 / q 子串过滤服务端做）、
+  // 状态+显示名、密码重置（重置后强制首登改密）
+  listPlatformUsers: (tenant?: string, q?: string) => {
+    const query = new URLSearchParams();
+    if (tenant) query.set("tenant", tenant);
+    if (q) query.set("q", q);
+    const s = query.toString();
+    return apiFetch<{ users: AdminUser[] }>(`/admin/users${s ? "?" + s : ""}`);
+  },
+  updatePlatformUser: (username: string, payload: { displayName?: string; status?: string }) =>
+    apiFetch<{ message: string }>(`/admin/users/${encodeURIComponent(username)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  resetPlatformUserPassword: (username: string, newPassword: string) =>
+    apiFetch<{ message: string }>(`/admin/users/${encodeURIComponent(username)}/password`, {
+      method: "POST",
+      body: JSON.stringify({ newPassword }),
+    }),
 
   // —— 租户管理员（tenant_admin，仅本租户）——
   listMyTenantUsers: () => apiFetch<TenantUsersResponse>("/tenants/me/users"),

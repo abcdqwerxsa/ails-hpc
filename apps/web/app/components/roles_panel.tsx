@@ -16,6 +16,7 @@ export const PERMISSION_LABELS: Record<string, string> = {
   'tenants:read': '平台租户查看',
   'tenants:manage': '平台租户管理',
   'users:create': '平台用户创建',
+  'users:manage': '平台用户管理(目录/禁用/重置)',
   'audit:read': '审计日志查看',
   'reservations:manage': '预约管理',
   'qos:manage': 'QOS 管理',

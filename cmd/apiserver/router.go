@@ -111,6 +111,11 @@ func NewRouter(h Handlers) *gin.Engine {
 		platformAdmin.PATCH("/tenants/:slug", auth.RequirePermission(auth.PermTenantsManage), h.Admin.UpdateTenant)
 		platformAdmin.GET("/tenants/:slug/users", auth.RequirePermission(auth.PermTenantsRead), h.Admin.ListTenantUsers)
 		platformAdmin.POST("/users", auth.RequirePermission(auth.PermUsersCreate), h.Admin.CreatePlatformUser)
+		// v3-U 平台用户生命周期：目录/状态/显示名/重置（users:manage——与建号 users:create 分权）
+		usersManage := auth.RequirePermission(auth.PermUsersManage)
+		platformAdmin.GET("/users", usersManage, h.Admin.ListPlatformUsers)
+		platformAdmin.PATCH("/users/:username", usersManage, h.Admin.UpdatePlatformUser)
+		platformAdmin.POST("/users/:username/password", usersManage, h.Admin.ResetPlatformUserPassword)
 		platformAdmin.GET("/audit", auth.RequirePermission(auth.PermAuditRead), h.Admin.ListAudit)
 		// 4.2 预约 / QOS 管理（admin 直通 scontrol/sacctmgr）
 		platformAdmin.GET("/reservations", auth.RequirePermission(auth.PermReservationsManage), h.Admin.ListReservations)

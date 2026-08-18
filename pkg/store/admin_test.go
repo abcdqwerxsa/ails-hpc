@@ -531,3 +531,68 @@ func TestForeignKeyBlocksOrphanUser(t *testing.T) {
 		t.Fatal("FK not enforced: orphan tenant_id insert must fail")
 	}
 }
+
+// TestUpdateUserDisplayNameAndListPlatformUsers v3-U：显示名写入/清除/超长，
+// 与全平台目录（跨租户、含显示名、不含哈希）。
+func TestUpdateUserDisplayNameAndListPlatformUsers(t *testing.T) {
+	ctx := context.Background()
+	admin := newAdminStore(t)
+	for _, slug := range []string{"hpc-lab", "bio-lab"} {
+		if _, err := admin.CreateTenant(ctx, slug, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := admin.CreateUser(ctx, NewUser{
+		Username: "alice", Password: "password123", Role: auth.RoleMember, TenantSlug: "hpc-lab",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := admin.CreateUser(ctx, NewUser{
+		Username: "bob", Password: "password123", Role: auth.RoleMember, TenantSlug: "bio-lab",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 写入 → ListTenantUsers/ListPlatformUsers 都能看到
+	if err := admin.UpdateUserDisplayName(ctx, "alice", "Alice Zhang"); err != nil {
+		t.Fatalf("set display name: %v", err)
+	}
+	tusers, err := admin.ListTenantUsers(ctx, "hpc-lab")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tusers) != 1 || tusers[0].DisplayName != "Alice Zhang" {
+		t.Errorf("tenant users after rename = %+v", tusers)
+	}
+
+	// 全平台目录：跨租户、按 username 排序、哈希清空
+	all, err := admin.ListPlatformUsers(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 || all[0].Username != "alice" || all[1].Username != "bob" {
+		t.Fatalf("platform users = %+v", all)
+	}
+	if all[0].DisplayName != "Alice Zhang" || all[0].TenantSlug != "hpc-lab" || all[1].TenantSlug != "bio-lab" {
+		t.Errorf("platform rows = %+v", all)
+	}
+	for _, u := range all {
+		if u.PasswordHash != "" {
+			t.Errorf("platform directory leaked hash for %s", u.Username)
+		}
+	}
+
+	// 超长 → ErrInvalidDisplayName；不存在 → ErrNotFound；清除（空串）
+	if err := admin.UpdateUserDisplayName(ctx, "alice", strings.Repeat("x", 65)); !errors.Is(err, ErrInvalidDisplayName) {
+		t.Errorf("oversize display name: want ErrInvalidDisplayName, got %v", err)
+	}
+	if err := admin.UpdateUserDisplayName(ctx, "ghost", "x"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("unknown user: want ErrNotFound, got %v", err)
+	}
+	if err := admin.UpdateUserDisplayName(ctx, "alice", ""); err != nil {
+		t.Fatalf("clear display name: %v", err)
+	}
+	if all, _ = admin.ListPlatformUsers(ctx); all[0].DisplayName != "" {
+		t.Errorf("clear display name failed: %+v", all[0])
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"ails-hpc/pkg/auth"
 	"ails-hpc/pkg/httpx"
@@ -59,7 +60,8 @@ func mapErr(c *gin.Context, err error, op string) {
 	case errors.Is(err, ErrProvisionFailed):
 		// DB 已提交、Slurm 供给失败：502 + 明确文案（重试幂等）
 		httpx.Error(c, http.StatusBadGateway, err.Error())
-	case errors.Is(err, ErrRoleNotAllowed), errors.Is(err, ErrRoleEscalation):
+	case errors.Is(err, ErrRoleNotAllowed), errors.Is(err, ErrRoleEscalation),
+		errors.Is(err, ErrSelfDisable):
 		httpx.BadRequest(c, err.Error())
 	case errors.Is(err, store.ErrNotFound):
 		httpx.NotFound(c, "not found")
@@ -71,6 +73,7 @@ func mapErr(c *gin.Context, err error, op string) {
 		httpx.Error(c, http.StatusConflict, err.Error())
 	case errors.Is(err, store.ErrInvalidUsername), errors.Is(err, store.ErrInvalidSlug),
 		errors.Is(err, store.ErrInvalidRole), errors.Is(err, store.ErrInvalidStatus),
+		errors.Is(err, store.ErrInvalidDisplayName),
 		errors.Is(err, store.ErrRoleTenantMismatch), errors.Is(err, store.ErrWeakPassword),
 		errors.Is(err, store.ErrInvalidClusterUser), errors.Is(err, store.ErrInvalidAccount),
 		errors.Is(err, store.ErrInvalidUID), errors.Is(err, store.ErrInvalidHash),
@@ -195,6 +198,84 @@ func (h *AdminHandler) CreatePlatformUser(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"user": u})
 }
 
+// --- v3-U 平台用户生命周期（users:manage） ---
+
+// ListPlatformUsers GET /api/v1/admin/users?tenant=&q= —— 平台用户目录（跨租户）。
+// tenant=精确过滤；q=子串命中 username 或显示名（目录规模几十~几百，内存过滤足够）。
+func (h *AdminHandler) ListPlatformUsers(c *gin.Context) {
+	us, err := h.service.ListPlatformUsers(c.Request.Context())
+	if err != nil {
+		mapErr(c, err, "admin.ListPlatformUsers")
+		return
+	}
+	if tenant, q := c.Query("tenant"), strings.ToLower(c.Query("q")); tenant != "" || q != "" {
+		out := make([]auth.User, 0, len(us))
+		for _, u := range us {
+			if tenant != "" && u.TenantSlug != tenant {
+				continue
+			}
+			if q != "" && !strings.Contains(strings.ToLower(u.Username), q) &&
+				!strings.Contains(strings.ToLower(u.DisplayName), q) {
+				continue
+			}
+			out = append(out, u)
+		}
+		us = out
+	}
+	c.JSON(http.StatusOK, gin.H{"users": us})
+}
+
+// UpdatePlatformUser PATCH /api/v1/admin/users/:username {displayName?,status?}
+// 显示名编辑（U4）与禁用/启用（U2）；空串=不变更；自禁用 400（防自锁）。
+func (h *AdminHandler) UpdatePlatformUser(c *gin.Context) {
+	var req struct {
+		DisplayName string `json:"displayName"`
+		Status      string `json:"status"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.BadRequest(c, "invalid payload")
+		return
+	}
+	if req.Status != "" && req.Status != "active" && req.Status != "disabled" {
+		httpx.BadRequest(c, "status must be active or disabled")
+		return
+	}
+	if len(req.DisplayName) > 64 {
+		httpx.BadRequest(c, "displayName too long (max 64)")
+		return
+	}
+	actor, _ := actorAndTenant(c)
+	if err := h.service.UpdatePlatformUser(c.Request.Context(), actor, c.Param("username"),
+		req.DisplayName, req.Status, requestID(c)); err != nil {
+		mapErr(c, err, "admin.UpdatePlatformUser")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "user updated"})
+}
+
+// ResetPlatformUserPassword POST /api/v1/admin/users/:username/password {newPassword}
+// 平台重置（U3）：策略校验同建号；重置后强制首登改密+在途令牌吊销。
+func (h *AdminHandler) ResetPlatformUserPassword(c *gin.Context) {
+	var req struct {
+		NewPassword string `json:"newPassword" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.BadRequest(c, "newPassword is required")
+		return
+	}
+	if err := auth.ValidatePasswordPolicy(req.NewPassword); err != nil {
+		httpx.BadRequest(c, err.Error())
+		return
+	}
+	actor, _ := actorAndTenant(c)
+	if err := h.service.ResetPlatformUserPassword(c.Request.Context(), actor, c.Param("username"),
+		req.NewPassword, requestID(c)); err != nil {
+		mapErr(c, err, "admin.ResetPlatformUserPassword")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "password reset; must change on next login"})
+}
+
 // --- 4.2 预约 / QOS ---
 
 // ListReservations GET /api/v1/admin/reservations
@@ -208,6 +289,7 @@ func (h *AdminHandler) ListReservations(c *gin.Context) {
 }
 
 // CreateReservation POST /api/v1/admin/reservations {name,startTime,durationMinutes,nodes,users,partition}
+// v3-X1：成功经 service 落审计（reservations.create）。
 func (h *AdminHandler) CreateReservation(c *gin.Context) {
 	var req struct {
 		Name            string `json:"name" binding:"required"`
@@ -221,7 +303,8 @@ func (h *AdminHandler) CreateReservation(c *gin.Context) {
 		httpx.BadRequest(c, "name and durationMinutes are required")
 		return
 	}
-	r, err := h.service.CreateReservation(c.Request.Context(), req.Name, req.StartTime, req.DurationMinutes, req.Nodes, req.Users, req.Partition)
+	actor, _ := actorAndTenant(c)
+	r, err := h.service.CreateReservation(c.Request.Context(), actor, req.Name, req.StartTime, req.DurationMinutes, req.Nodes, req.Users, req.Partition, requestID(c))
 	if err != nil {
 		httpx.BadRequest(c, err.Error())
 		return
@@ -231,7 +314,8 @@ func (h *AdminHandler) CreateReservation(c *gin.Context) {
 
 // DeleteReservation DELETE /api/v1/admin/reservations/:name
 func (h *AdminHandler) DeleteReservation(c *gin.Context) {
-	if err := h.service.DeleteReservation(c.Request.Context(), c.Param("name")); err != nil {
+	actor, _ := actorAndTenant(c)
+	if err := h.service.DeleteReservation(c.Request.Context(), actor, c.Param("name"), requestID(c)); err != nil {
 		httpx.Internal(c, "admin.DeleteReservation", err)
 		return
 	}
@@ -258,7 +342,8 @@ func (h *AdminHandler) CreateQOS(c *gin.Context) {
 		httpx.BadRequest(c, "name is required")
 		return
 	}
-	q, err := h.service.CreateQOS(c.Request.Context(), req.Name, req.GrpTRES)
+	actor, _ := actorAndTenant(c)
+	q, err := h.service.CreateQOS(c.Request.Context(), actor, req.Name, req.GrpTRES, requestID(c))
 	if err != nil {
 		httpx.BadRequest(c, err.Error())
 		return
@@ -275,7 +360,8 @@ func (h *AdminHandler) SetTenantQOS(c *gin.Context) {
 		httpx.BadRequest(c, "name is required")
 		return
 	}
-	if err := h.service.SetTenantQOS(c.Request.Context(), c.Param("slug"), req.Name); err != nil {
+	actor, _ := actorAndTenant(c)
+	if err := h.service.SetTenantQOS(c.Request.Context(), actor, c.Param("slug"), req.Name, requestID(c)); err != nil {
 		httpx.BadRequest(c, err.Error())
 		return
 	}

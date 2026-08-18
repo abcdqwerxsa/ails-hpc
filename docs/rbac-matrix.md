@@ -7,7 +7,7 @@
 `cmd/apiserver/rbac_adversarial_test.go`（自定义角色执行/越权）。
 **改矩阵必须同步本文档与三处测试。**
 
-## 1. 权限点词汇表（19 项）
+## 1. 权限点词汇表（20 项）
 
 | 权限点 | 语义 | 典型持有者 |
 |---|---|---|
@@ -21,6 +21,7 @@
 | `tenants:read` | 平台租户清单/租户成员查看 | admin |
 | `tenants:manage` | 平台租户创建/修改/QOS 绑定 | admin |
 | `users:create` | 平台用户创建 | admin |
+| `users:manage` | 平台用户目录/禁用/密码重置/显示名（v3-U；与建号分权） | admin |
 | `audit:read` | 平台审计日志查看 | admin |
 | `reservations:manage` | 预约查看/创建/删除 | admin |
 | `qos:manage` | QOS 查看/创建/绑定 | admin |
@@ -45,6 +46,7 @@
 | tenants:read | ✓ | | | |
 | tenants:manage | ✓ | | | |
 | users:create | ✓ | | | |
+| users:manage | ✓ | | | |
 | audit:read | ✓ | | | |
 | reservations:manage | ✓ | | | |
 | qos:manage | ✓ | | | |
@@ -72,6 +74,7 @@ R1 等价性测试锁定）；ops_admin 是计费观测角色；作业与 IDE �
 | GET /admin/tenants · /admin/tenants/:slug/users | tenants:read |
 | POST /admin/tenants · PATCH /admin/tenants/:slug | tenants:manage |
 | POST /admin/users | users:create |
+| GET /admin/users · PATCH /admin/users/:username · POST /admin/users/:username/password | users:manage |
 | GET /admin/audit | audit:read |
 | GET·POST·DELETE /admin/reservations* | reservations:manage |
 | GET·POST /admin/qos · PATCH /admin/tenants/:slug/qos | qos:manage |

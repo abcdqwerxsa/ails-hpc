@@ -39,6 +39,9 @@ const (
 	PermTenantsManage = "tenants:manage"
 	// PermUsersCreate 平台用户创建。历史矩阵：admin 独占。
 	PermUsersCreate = "users:create"
+	// PermUsersManage 平台用户目录/禁用/密码重置（v3-U）。建号与治理分权：
+	// users:create 只管建号，users:manage 管生命周期。内置矩阵：admin 独占。
+	PermUsersManage = "users:manage"
 	// PermAuditRead 平台审计日志查看。历史矩阵：admin 独占。
 	PermAuditRead = "audit:read"
 	// PermReservationsManage 预约查看/创建/删除（admin 直通 scontrol）。历史矩阵：admin 独占。
@@ -75,6 +78,7 @@ var AllPermissions = []string{
 	PermTenantsRead,
 	PermTenantsManage,
 	PermUsersCreate,
+	PermUsersManage,
 	PermAuditRead,
 	PermReservationsManage,
 	PermQosManage,
@@ -95,7 +99,7 @@ var AllPermissions = []string{
 var BuiltinRolePermissions = map[string][]string{
 	RoleSystemAdmin: {
 		PermClusterRead, PermNodesManage,
-		PermTenantsRead, PermTenantsManage, PermUsersCreate,
+		PermTenantsRead, PermTenantsManage, PermUsersCreate, PermUsersManage,
 		PermAuditRead, PermReservationsManage, PermQosManage, PermPartitionsManage,
 		PermRolesManage,
 	},

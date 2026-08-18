@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -60,7 +61,8 @@ func (s *Service) ListReservations(ctx context.Context) ([]Reservation, error) {
 }
 
 // CreateReservation scontrol create reservation。startTime 为 "YYYY-MM-DDTHH:MM" 或空=now+1min。
-func (s *Service) CreateReservation(ctx context.Context, name, startTime string, durationMin int, nodes, users, partition string) (*Reservation, error) {
+// v3-X1：成功后落审计（st 为 nil 的 yaml 模式跳过——纯集群操作不依赖用户库）。
+func (s *Service) CreateReservation(ctx context.Context, actor, name, startTime string, durationMin int, nodes, users, partition, rid string) (*Reservation, error) {
 	if !nameRE.MatchString(name) || durationMin <= 0 || durationMin > 30*24*60 {
 		return nil, fmt.Errorf("invalid reservation name/duration")
 	}
@@ -89,19 +91,30 @@ func (s *Service) CreateReservation(ctx context.Context, name, startTime string,
 	if out, err := s.runCluster("sh", "-c", "scontrol create reservation "+strings.Join(quoted, " ")+" 2>&1"); err != nil || strings.Contains(strings.ToUpper(string(out)), "ERROR") {
 		return nil, fmt.Errorf("scontrol create reservation: %s", strings.TrimSpace(string(out)))
 	}
+	s.clusterAudit(ctx, actor, "reservations.create", "reservation:"+name, rid,
+		fmt.Sprintf(`{"duration":%d,"users":%q}`, durationMin, users))
 	res, _ := s.findReservation(ctx, name)
 	return res, nil
 }
 
-// DeleteReservation scontrol delete reservation <name>。
-func (s *Service) DeleteReservation(ctx context.Context, name string) error {
+// DeleteReservation scontrol delete reservation <name>（v3-X1：成功后落审计）。
+func (s *Service) DeleteReservation(ctx context.Context, actor, name, rid string) error {
 	if !nameRE.MatchString(name) {
 		return fmt.Errorf("invalid reservation name")
 	}
 	if out, err := s.runCluster("sh", "-c", "scontrol delete reservation="+name+" 2>&1"); err != nil || strings.Contains(strings.ToUpper(string(out)), "ERROR") {
 		return fmt.Errorf("scontrol delete reservation: %s", strings.TrimSpace(string(out)))
 	}
+	s.clusterAudit(ctx, actor, "reservations.delete", "reservation:"+name, rid, "{}")
 	return nil
+}
+
+// clusterAudit 落集群管理面审计（预约/QOS/分区共用；st nil=yaml 模式静默跳过）。
+func (s *Service) clusterAudit(ctx context.Context, actor, action, target, rid, detail string) {
+	if s.st == nil {
+		return
+	}
+	_ = s.st.WriteAudit(ctx, actor, action, target, rid, detail)
 }
 
 func (s *Service) findReservation(ctx context.Context, name string) (*Reservation, error) {
@@ -179,8 +192,8 @@ func (s *Service) ListQOS(ctx context.Context) ([]QOS, error) {
 	return qos, nil
 }
 
-// CreateQOS sacctmgr add qos <name>（可选直接带 GrpTRES）。幂等。
-func (s *Service) CreateQOS(ctx context.Context, name, grpTRES string) (*QOS, error) {
+// CreateQOS sacctmgr add qos <name>（可选直接带 GrpTRES）。幂等。v3-X1：成功后落审计。
+func (s *Service) CreateQOS(ctx context.Context, actor, name, grpTRES, rid string) (*QOS, error) {
 	if !nameRE.MatchString(name) {
 		return nil, fmt.Errorf("invalid qos name")
 	}
@@ -191,6 +204,7 @@ func (s *Service) CreateQOS(ctx context.Context, name, grpTRES string) (*QOS, er
 	if _, err := s.runCluster(args...); err != nil {
 		return nil, fmt.Errorf("sacctmgr add qos: %w", err)
 	}
+	s.clusterAudit(ctx, actor, "qos.create", "qos:"+name, rid, `{"grpTRES":`+strconv.Quote(grpTRES)+`}`)
 	qos, _ := s.ListQOS(ctx)
 	for i := range qos {
 		if qos[i].Name == name {
@@ -201,7 +215,8 @@ func (s *Service) CreateQOS(ctx context.Context, name, grpTRES string) (*QOS, er
 }
 
 // SetTenantQOS 把 QOS 绑到租户父账号（sacctmgr modify account <parent> set qos=...）。
-func (s *Service) SetTenantQOS(ctx context.Context, tenantSlug, qosName string) error {
+// v3-X1：成功后落审计。
+func (s *Service) SetTenantQOS(ctx context.Context, actor, tenantSlug, qosName, rid string) error {
 	if !nameRE.MatchString(qosName) {
 		return fmt.Errorf("invalid qos name")
 	}
@@ -212,6 +227,7 @@ func (s *Service) SetTenantQOS(ctx context.Context, tenantSlug, qosName string) 
 	if _, err := s.runCluster("sacctmgr", "-i", "modify", "account", t.ParentAccount, "set", "qos="+qosName); err != nil {
 		return fmt.Errorf("sacctmgr modify account qos: %w", err)
 	}
+	s.clusterAudit(ctx, actor, "tenant.qos", "tenant:"+tenantSlug, rid, `{"qos":`+strconv.Quote(qosName)+`}`)
 	return nil
 }
 
@@ -351,7 +367,7 @@ func (s *Service) UpdatePartition(ctx context.Context, actor, name string, u Par
 	}
 	if s.st != nil {
 		if detail, err := json.Marshal(u); err == nil {
-			_ = s.st.WriteAudit(ctx, actor, "partition.update", "partition:"+name, rid, string(detail))
+			s.clusterAudit(ctx, actor, "partition.update", "partition:"+name, rid, string(detail))
 		}
 	}
 	return nil
