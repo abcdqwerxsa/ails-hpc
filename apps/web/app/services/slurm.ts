@@ -42,12 +42,17 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
 // --- 类型（字段对齐 Go 后端 types） ---
 export interface UserInfo {
   username: string;
-  role: string;
+  role: string; // 基角色（scope 语义）
+  roleName?: string; // 实际角色名（自定义角色 ≠ role）
+  permissions?: string[]; // 权限点清单（能力驱动）
   orgSlug: string;
   tenantNs: string;
   clusterUser?: string;
   account?: string;
   tenantSlug?: string;
+  mustChangePassword?: boolean; // A1：首登/被重置后强制改密
+  authSource?: string; // local | oidc
+  oidcLinked?: boolean; // S4：是否已绑定 SSO 身份
 }
 export interface LoginResponse {
   token: string;
@@ -284,7 +289,9 @@ export interface UpdateTenantRequest {
 }
 export interface AdminUser {
   username: string;
-  role: string; // admin | ops_admin | tenant_admin | member
+  role: string; // 基角色 admin | ops_admin | tenant_admin | member
+  roleName?: string; // 实际角色名（自定义角色 ≠ role）
+  permissions?: string[];
   clusterUser?: string; // Slurm 集群映射用户（开通后回填）
   uid?: number;
   account?: string;
@@ -333,6 +340,76 @@ export interface CreateTenantUserRequest {
   role: string; // member | tenant_admin
 }
 
+// 角色管理（R3 自定义角色；字段对齐 pkg/store/roles.go Role）
+export interface RoleInfo {
+  id: number;
+  name: string;
+  description: string;
+  permissions: string[];
+  baseRole: string;
+  isSystem: boolean;
+  tenantSlug?: string;
+  userCount: number;
+}
+export interface RolesListResponse {
+  roles: RoleInfo[];
+}
+export interface CreateRoleRequest {
+  name: string;
+  description?: string;
+  permissions: string[];
+  baseRole?: string;
+}
+export interface UpdateRoleRequest {
+  description?: string;
+  permissions?: string[];
+}
+
+// 会话台账行（A1；对齐后端 auth.SessionEntry）
+export interface SessionEntry {
+  id: number;
+  issuedAt: string;
+  expiresAt: string;
+  ip: string;
+  userAgent: string;
+}
+
+// --- OIDC SSO（S1/S3/S4） ---
+export interface OidcConfig {
+  enabled: boolean;
+  issuer?: string;
+}
+export interface OidcLinkResponse {
+  token: string;
+  username: string;
+  roleName?: string;
+}
+
+export const oidc = {
+  // 公开配置端点：有 OIDC 配置才显示 SSO 按钮（无需鉴权）
+  config: () => apiFetch<OidcConfig>("/auth/oidc/config"),
+
+  // 撞名确认（回调 status=link 后，用户输本地密码完成关联并领取门户 token）
+  confirmLink: (payload: { linkToken: string; username: string; password: string }) =>
+    apiFetch<OidcLinkResponse>("/auth/oidc/link", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  // 发起账号绑定（需登录）：认证 XHR 取 authorize URL 后由前端导航
+  //（浏览器普通 <a> 导航带不上 Authorization 头）
+  bind: () => apiFetch<{ authorizeUrl: string }>("/auth/oidc/bind"),
+
+  // 已登录账号解绑 SSO 身份
+  unlink: () => apiFetch<{ message: string }>("/auth/oidc/unlink", { method: "POST" }),
+};
+
+// oidcLoginURL 发起 SSO 登录的完整地址（302 到 IdP；dev 走生产 apiserver，prod 同源）。
+export function oidcLoginURL(): string {
+  const base = import.meta.env.DEV ? "http://192.168.20.226:8090/api/v1" : "/api/v1";
+  return `${base}/auth/oidc/login`;
+}
+
 // ideFullURL 把后端返回的相对 web_url(/api/v1/ide/<sid>/) 拼成完整 URL 并附 ?token=<JWT>。
 // 浏览器导航/iframe 无法带 Authorization 头，/ide/ 反代接受 ?token= 兜底（见 auth 中间件）。
 export function ideFullURL(webUrl: string): string {
@@ -358,6 +435,13 @@ export const slurm = {
       method: "POST",
       body: JSON.stringify({ oldPassword, newPassword }),
     }),
+
+  // 权限自描述（R4 能力驱动数据源：角色 + 权限清单 + 集群身份）
+  getMe: () => apiFetch<LoginResponse>("/auth/me"),
+
+  // A1 会话策略：会话台账 + 全设备登出（token_version+1，全部在途 token 失效）
+  getMySessions: () => apiFetch<{ sessions: SessionEntry[] }>("/auth/me/sessions"),
+  logoutAll: () => apiFetch<{ message: string }>("/auth/logout-all", { method: "POST" }),
 
   // 集群状态：200 + pings[0].ping==="UP" 即 UP；503 抛错 → 调用方按 DEGRADED 处理
   getClusterStatus: () => apiFetch<PingResponse>("/slurm/ping"),
@@ -495,5 +579,46 @@ export const slurm = {
     apiFetch<{ message: string }>(`/tenants/me/users/${encodeURIComponent(username)}/password`, {
       method: "POST",
       body: JSON.stringify({ newPassword }),
+    }),
+
+  // —— 角色管理（R3；admin 平台 + tenant_admin 本租户）——
+  listPlatformRoles: () => apiFetch<RolesListResponse>("/admin/roles"),
+  listTenantRolesOf: (slug: string) =>
+    apiFetch<RolesListResponse>(`/admin/tenants/${encodeURIComponent(slug)}/roles`),
+  createPlatformRole: (payload: CreateRoleRequest) =>
+    apiFetch<{ role: RoleInfo }>("/admin/roles", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updatePlatformRole: (name: string, payload: UpdateRoleRequest) =>
+    apiFetch<{ role: RoleInfo }>(`/admin/roles/${encodeURIComponent(name)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deletePlatformRole: (name: string) =>
+    apiFetch<{ message: string }>(`/admin/roles/${encodeURIComponent(name)}`, { method: "DELETE" }),
+  assignPlatformRole: (username: string, role: string) =>
+    apiFetch<{ message: string }>(`/admin/users/${encodeURIComponent(username)}/role`, {
+      method: "PATCH",
+      body: JSON.stringify({ role }),
+    }),
+
+  listMyRoles: () => apiFetch<RolesListResponse>("/tenants/me/roles"),
+  createMyRole: (payload: CreateRoleRequest) =>
+    apiFetch<{ role: RoleInfo }>("/tenants/me/roles", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateMyRole: (name: string, payload: UpdateRoleRequest) =>
+    apiFetch<{ role: RoleInfo }>(`/tenants/me/roles/${encodeURIComponent(name)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deleteMyRole: (name: string) =>
+    apiFetch<{ message: string }>(`/tenants/me/roles/${encodeURIComponent(name)}`, { method: "DELETE" }),
+  assignMyRole: (username: string, role: string) =>
+    apiFetch<{ message: string }>(`/tenants/me/users/${encodeURIComponent(username)}/role`, {
+      method: "PATCH",
+      body: JSON.stringify({ role }),
     }),
 };

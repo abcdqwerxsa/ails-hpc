@@ -1,5 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useCallback, useEffect, useState, type ChangeEvent, type ReactNode } from 'react';
+import { can } from '../services/auth';
 import { slurm, ideFullURL, type ContainerInstance } from '../services/slurm';
 
 export const Route = createFileRoute('/webide')({ component: WebIDEPage });
@@ -140,9 +141,11 @@ function WebIDEPage() {
             <option value="720">720（上限）</option>
           </select>
         </label>
-        <button className="btn-primary" onClick={launch} disabled={launching} style={{ padding: '0.5rem 1.5rem' }}>
-          {launching ? '启动中…' : '启动 IDE 会话'}
-        </button>
+        {can('ide:manage') && (
+          <button className="btn-primary" onClick={launch} disabled={launching} style={{ padding: '0.5rem 1.5rem' }}>
+            {launching ? '启动中…' : '启动 IDE 会话'}
+          </button>
+        )}
       </div>
 
       <h3 style={{ margin: '0 0 0.75rem', fontSize: '1.05rem' }}>活跃会话</h3>
@@ -183,37 +186,43 @@ function WebIDEPage() {
                   <span style={{ padding: '0.2rem 0.6rem', borderRadius: 6, fontSize: '0.72rem', fontWeight: 700, color: '#fff', background: running ? '#10b981' : '#f59e0b' }}>
                     {s.status}
                   </span>
-                  <button
-                    className="btn-primary"
-                    disabled={!running}
-                    onClick={() => window.open(ideFullURL(s.web_url), '_blank')}
-                    style={{ padding: '0.35rem 1rem' }}
-                  >
-                    打开 IDE
-                  </button>
-                  <button
-                    className="neu-btn"
-                    onClick={() => extend(s.container_id)}
-                    disabled={!!acting || !running}
-                  >
-                    续期
-                  </button>
-                  <button
-                    onClick={() => recycle(s.container_id)}
-                    disabled={!!acting}
-                    style={{
-                      padding: '0.4rem 0.9rem',
-                      borderRadius: 8,
-                      border: 'none',
-                      background: 'var(--card-bg)',
-                      boxShadow: 'var(--shadow-btn)',
-                      color: 'var(--accent-rose)',
-                      cursor: 'pointer',
-                      transition: 'box-shadow .2s ease',
-                    }}
-                  >
-                    回收
-                  </button>
+                  {can('ide:manage') && (
+                    <button
+                      className="btn-primary"
+                      disabled={!running}
+                      onClick={() => window.open(ideFullURL(s.web_url), '_blank')}
+                      style={{ padding: '0.35rem 1rem' }}
+                    >
+                      打开 IDE
+                    </button>
+                  )}
+                  {can('ide:manage') && (
+                    <>
+                      <button
+                        className="neu-btn"
+                        onClick={() => extend(s.container_id)}
+                        disabled={!!acting || !running}
+                      >
+                        续期
+                      </button>
+                      <button
+                        onClick={() => recycle(s.container_id)}
+                        disabled={!!acting}
+                        style={{
+                          padding: '0.4rem 0.9rem',
+                          borderRadius: 8,
+                          border: 'none',
+                          background: 'var(--card-bg)',
+                          boxShadow: 'var(--shadow-btn)',
+                          color: 'var(--accent-rose)',
+                          cursor: 'pointer',
+                          transition: 'box-shadow .2s ease',
+                        }}
+                      >
+                        回收
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             );

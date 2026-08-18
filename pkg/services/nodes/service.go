@@ -99,9 +99,15 @@ func (s *nodeServiceImpl) refreshLocked() error {
 					if !existing.UserDrained || st == "DRAIN" {
 						existing.State = st
 					}
-					if sn.CPUs > 0 { existing.CPUs = sn.CPUs }
-					if sn.RealMemory > 0 { existing.RealMemory = sn.RealMemory }
-					if sn.Cores > 0 { existing.Cores = sn.Cores }
+					if sn.CPUs > 0 {
+						existing.CPUs = sn.CPUs
+					}
+					if sn.RealMemory > 0 {
+						existing.RealMemory = sn.RealMemory
+					}
+					if sn.Cores > 0 {
+						existing.Cores = sn.Cores
+					}
 					existing.AllocCPUs = sn.AllocCPUs
 					existing.AllocMemory = sn.AllocMemory
 					existing.Gpus = parseGpuGres(sn.Gres)
@@ -139,11 +145,17 @@ func (s *nodeServiceImpl) refreshLocked() error {
 						gpus = parseGpuGres(strings.TrimSpace(parts[4]))
 					}
 
-					if cpus <= 0 { cpus = 8 }
-					if mem <= 0 { mem = 3000 }
+					if cpus <= 0 {
+						cpus = 8
+					}
+					if mem <= 0 {
+						mem = 3000
+					}
 
 					if existing, ok := s.nodes[name]; ok {
-						if existing.State != "DRAIN" { existing.State = state }
+						if existing.State != "DRAIN" {
+							existing.State = state
+						}
 						existing.CPUs = cpus
 						existing.RealMemory = mem
 						existing.Gpus = gpus

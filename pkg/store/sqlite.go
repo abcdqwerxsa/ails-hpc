@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 
 	"ails-hpc/pkg/auth"
@@ -46,22 +47,43 @@ func Open(path string) (Store, error) {
 
 func (s *sqliteStore) Close() error { return s.db.Close() }
 
-// userRow 是 users ⨝ tenants 的读投影；tenant_slug 同时填充 auth.User.OrgSlug
+// userRow 是 users ⨝ tenants ⨝ roles 的读投影；tenant_slug 同时填充 auth.User.OrgSlug
 // （兼容既有 tenantResolver/claims 路径——它们以 orgSlug 为租户标识直至 Phase 2 的 tid）。
+// R2 起 LEFT JOIN roles：role_id/实际角色名/权限点（role_id NULL 或角色缺失时回退内置映射）。
 const userSelect = `
 SELECT u.username, u.password_hash, u.role, t.slug,
-       u.cluster_user, u.uid, u.gid, u.account, u.status, u.token_version
-FROM users u JOIN tenants t ON t.id = u.tenant_id`
+       u.cluster_user, u.uid, u.gid, u.account, u.status, u.token_version,
+       u.role_id, COALESCE(r.name, u.role), r.permissions,
+       u.auth_source, COALESCE(u.oidc_sub, ''), u.must_change_password
+FROM users u JOIN tenants t ON t.id = u.tenant_id
+LEFT JOIN roles r ON r.id = u.role_id`
 
 func scanUser(row interface{ Scan(...any) error }) (*auth.User, error) {
 	var u auth.User
+	var roleID sql.NullInt64
+	var roleName string
+	var permsJSON sql.NullString
+	var mustChange bool
 	if err := row.Scan(&u.Username, &u.PasswordHash, &u.Role, &u.TenantSlug,
-		&u.ClusterUser, &u.UID, &u.GID, &u.Account, &u.Status, &u.TokenVersion); err != nil {
+		&u.ClusterUser, &u.UID, &u.GID, &u.Account, &u.Status, &u.TokenVersion,
+		&roleID, &roleName, &permsJSON, &u.AuthSource, &u.OIDCSub, &mustChange); err != nil {
 		return nil, err
 	}
+	u.MustChangePassword = mustChange
 	u.OrgSlug = u.TenantSlug // 兼容：迁移期租户标识 = orgSlug
 	if u.Status == "" {
 		u.Status = "active"
+	}
+	if u.AuthSource == "" {
+		u.AuthSource = "local"
+	}
+	u.RoleID = roleID.Int64
+	if roleID.Valid && roleName != "" && roleName != u.Role {
+		u.RoleName = roleName // 自定义角色名（内置角色名与 u.Role 相同，不重复携带）
+	}
+	if permsJSON.Valid && permsJSON.String != "" {
+		// 角色权限 JSON 损坏不致命：留空 → 解析器回退 BuiltinRolePermissions[u.Role]
+		_ = json.Unmarshal([]byte(permsJSON.String), &u.Permissions)
 	}
 	return &u, nil
 }
@@ -130,6 +152,15 @@ func (s *sqliteStore) UserVersion(username string) (int, bool) {
 		return 0, false
 	}
 	return ver, true
+}
+
+// UserByOIDCSub 按绑定的 SSO 身份查用户（S1 回落路径；auth.OIDCProvisioner 面）。
+func (s *sqliteStore) UserByOIDCSub(sub string) (*auth.User, bool) {
+	u, err := scanUser(s.db.QueryRow(userSelect+` WHERE u.oidc_sub = ?`, sub))
+	if err != nil {
+		return nil, false
+	}
+	return u, true
 }
 
 // Tenants 列出全部租户。

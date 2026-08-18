@@ -12,9 +12,9 @@ var (
 	// ErrGPUPartition GPU 作业必须提交到 performance 分区（唯一 GPU 节点 node1 所在）。
 	ErrGPUPartition = errors.New("GPU jobs require the performance partition")
 	// ErrInvalidSpec 数组/依赖等高级选项语法非法（白名单外字符）。
-	ErrInvalidSpec = errors.New("invalid array/dependency spec")
-	ErrJobNotFound          = errors.New("Job not found")
-	ErrCannotHoldCancelled  = errors.New("Cannot hold cancelled job")
+	ErrInvalidSpec         = errors.New("invalid array/dependency spec")
+	ErrJobNotFound         = errors.New("Job not found")
+	ErrCannotHoldCancelled = errors.New("Cannot hold cancelled job")
 )
 
 // FlexTimeLimit 支持 JSON 解包时兼容 string ("3600") 和 int (3600)
@@ -48,7 +48,7 @@ type SubmitJobRequest struct {
 	// ArraySpec 作业数组（4.1）：sbatch --array 语法，如 "1-4"、"1-10%2"。非空走 CLI。
 	ArraySpec string `json:"array_spec"`
 	// Dependency 依赖（4.1）：sbatch --dependency 语法，如 "afterok:123"、"afterany:120:121"。非空走 CLI。
-	Dependency string `json:"dependency"`
+	Dependency              string        `json:"dependency"`
 	Name                    string        `json:"name"`
 	Partition               string        `json:"partition"`
 	Nodes                   int           `json:"nodes"`

@@ -41,6 +41,24 @@ type User struct {
 	Status string `yaml:"status,omitempty" json:"status,omitempty"`
 	// TokenVersion 令牌版本：改密/禁用 +1 → 在途 JWT 即刻失效（中间件按请求比对 claims.Ver）。
 	TokenVersion int `yaml:"-" json:"-"`
+
+	// --- R2 角色表化（yaml/内存库为零值，语义见各字段注释） ---
+	// RoleID 实际角色 id（roles.id）；0 = 未指派（旧数据/内存库），按 Role 内置映射回退。
+	RoleID int64 `yaml:"-" json:"-"`
+	// RoleName 实际角色名（自定义角色 ≠ Role）；空 = 内置角色（RoleName == Role）。
+	RoleName string `yaml:"roleName,omitempty" json:"roleName,omitempty"`
+	// Permissions 角色权限点清单（DB 库由 roles.permissions JSON 解析）；空 = 回退
+	// BuiltinRolePermissions[Role]（内存/yaml 库与迁移期旧数据）。
+	Permissions []string `yaml:"-" json:"permissions,omitempty"`
+
+	// AuthSource 凭证来源（local|ldap|oidc）；OIDC 账号无本地密码（哈希为随机值）。
+	AuthSource string `yaml:"-" json:"authSource,omitempty"`
+	// OIDCSub SSO 身份标识（IdP sub claim）；S4 绑定/解绑与 S1 回落查找用。
+	OIDCSub string `yaml:"-" json:"-"`
+
+	// MustChangePassword 首次登录/被重置后须改密（A1）；中间件放行面仅限自助改密
+	// 相关端点，改密成功后清除。
+	MustChangePassword bool `yaml:"-" json:"mustChangePassword,omitempty"`
 }
 
 // CompareHashAndPassword 是 bcrypt 校验的薄导出（pkg/store 等同面实现复用）。

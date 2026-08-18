@@ -68,7 +68,6 @@ func (h *JobHandler) forbidIfNotOwner(c *gin.Context, jobID int) bool {
 	return false
 }
 
-
 // controlActAs 决定控制操作的下发身份（L4 控制鉴权）：member 用自己的 clusterUser
 // （Slurm 层强制令牌身份==作业属主，apiserver 校验之外的第二道门）；tenant_admin
 // 越权与管理性操作走 root（actAs=""）。

@@ -20,7 +20,7 @@ var jwtSecret []byte
 var tokenTTL = 24 * time.Hour
 
 const (
-	jwtIssuer  = "ails-hpc"
+	jwtIssuer   = "ails-hpc"
 	jwtAudience = "ails-hpc"
 )
 
@@ -52,9 +52,16 @@ type Claims struct {
 	// Ver token_version：签发时用户库中的版本号。改密/禁用会 bump，中间件按请求比对，
 	// 使在途 token 即刻失效（不必等 24h TTL）。旧 token 无此字段=0。
 	Ver int `json:"ver,omitempty"`
-	Iss         string `json:"iss"`
-	Aud         string `json:"aud"`
-	Exp         int64  `json:"exp"`
+	// Rid 实际角色 id（R2 角色表化起签发；0=旧令牌，中间件按用户库刷新）。
+	Rid int64 `json:"rid,omitempty"`
+	// Rn 实际角色名（自定义角色 ≠ Role；空=内置角色）。带 store 的中间件每请求按库刷新。
+	Rn string `json:"rn,omitempty"`
+	// Perms 权限点快照（签发时来自角色表；带 store 的中间件每请求按库刷新——角色
+	// 权限调整即刻生效）。空 = 回退 BuiltinRolePermissions[Role]（旧令牌/内存库）。
+	Perms []string `json:"perms,omitempty"`
+	Iss   string   `json:"iss"`
+	Aud   string   `json:"aud"`
+	Exp   int64    `json:"exp"`
 }
 
 // GenerateToken 用当前 tokenTTL 签发一个新的 access token（兼容包装，不带 tid/ver）。

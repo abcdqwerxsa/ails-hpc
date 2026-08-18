@@ -66,7 +66,6 @@ func (h *ContainerHandler) forbidIfNotSessionOwner(c *gin.Context, id string) bo
 	return false
 }
 
-
 // controlActAs 决定回收操作的下发身份（L4）：member 用自己的 clusterUser（Slurm 层
 // 强制令牌身份==会话作业属主）；tenant_admin 越权走 root。
 func controlActAs(c *gin.Context) string {

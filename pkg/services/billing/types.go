@@ -36,9 +36,9 @@ type UsageBreakdown struct {
 
 // ExportQueryParam contains query parameters for /api/v1/slurm/billing/export
 type ExportQueryParam struct {
-	Format  string `form:"format"` // "json" or "chart"
-	User    string `form:"user"`
-	Project string `form:"project"`
+	Format       string   `form:"format"` // "json" or "chart"
+	User         string   `form:"user"`
+	Project      string   `form:"project"`
 	AllowedUsers []string // 多租户 scope：租户成员后过滤（透传 GetUsage）
 }
 

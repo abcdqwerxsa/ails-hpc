@@ -74,6 +74,9 @@ type NewUser struct {
 	Account     string // 空则 = ClusterUser
 	DisplayName string
 	Email       string
+	// MustChangePassword 初始密码是否强制首登改密（A1；API 建户置 true，
+	// yaml 导入/bootstrap 置 false）。
+	MustChangePassword bool
 }
 
 // compile-time：sqliteStore 实现完整写面（yaml 种子库不实现——管理 API 须 db 模式）。
@@ -234,12 +237,14 @@ func (s *sqliteStore) CreateUser(ctx context.Context, in NewUser) (*auth.User, e
 		}
 
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO users (username, password_hash, role, tenant_id, cluster_user,
-			                   uid, gid, account, display_name, email, status)
-			SELECT ?, ?, ?, t.id, ?, ?, ?, ?, ?, ?, 'active'
-			FROM tenants t WHERE t.slug = ?`,
+			INSERT INTO users (username, password_hash, role, role_id, tenant_id, cluster_user,
+			                   uid, gid, account, display_name, email, status, must_change_password)
+			SELECT ?, ?, ?, r.id, t.id, ?, ?, ?, ?, ?, ?, 'active', ?
+			FROM tenants t
+			CROSS JOIN (SELECT id FROM roles WHERE name = ? AND tenant_id IS NULL) r
+			WHERE t.slug = ?`,
 			in.Username, string(hash), in.Role, clusterUser, uid, gid, account,
-			in.DisplayName, in.Email, in.TenantSlug); err != nil {
+			in.DisplayName, in.Email, in.MustChangePassword, in.Role, in.TenantSlug); err != nil {
 			return fmt.Errorf("store: insert user %s: %w", in.Username, err)
 		}
 
@@ -279,23 +284,7 @@ func (s *sqliteStore) UpdateUserStatus(ctx context.Context, username, status str
 	return nil
 }
 
-// ResetUserPassword 以调用方生成好的 bcrypt 哈希替换密码并 token_version+1（吊销在途
-// 令牌）。自助改密走 auth.UserStore.SetPassword，本方法供管理员重置。
-func (s *sqliteStore) ResetUserPassword(ctx context.Context, username, newHash string) error {
-	if !strings.HasPrefix(newHash, "$2") { // $2a$/$2b$/$2y$
-		return fmt.Errorf("%w: %q is not a bcrypt hash", ErrInvalidHash, newHash)
-	}
-	res, err := s.db.ExecContext(ctx, `
-		UPDATE users SET password_hash = ?, token_version = token_version + 1, updated_at = datetime('now')
-		WHERE username = ?`, newHash, username)
-	if err != nil {
-		return err
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return fmt.Errorf("%w: user %s", ErrNotFound, username)
-	}
-	return nil
-}
+// ResetUserPassword 见 policy.go（A1 起：must_change_password=1 + 旧哈希入历史）。
 
 // ListTenantUsers 列出租户全部用户（JOIN tenants by slug，按 username 排序）。
 // 返回值不含密码哈希（auth.User 对 hash 本就 json:"-"，这里再置空一道防线）。

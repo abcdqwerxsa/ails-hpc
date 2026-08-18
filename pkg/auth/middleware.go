@@ -89,6 +89,22 @@ func authenticate(c *gin.Context, store UserStore) (*Claims, bool) {
 			httpx.Unauthorized(c, "invalid or expired token")
 			return nil, false
 		}
+		// R2 角色表化：按库内当前值刷新角色面（角色改派/角色权限调整即刻生效，无需
+		// 重登）。Role 恒为"基角色"（scope 推导）；Rn/Perms/Rid 携带实际角色信息。
+		// 内存/yaml 库这些字段为零值 → 刷新为空 → 解析器回退内置映射，行为不变。
+		claims.Role = u.Role
+		claims.Rn = u.RoleName
+		claims.Perms = u.Permissions
+		claims.Rid = u.RoleID
+
+		// A1 强制改密：must_change_password=1 时只放行自助面（改密/自描述/登出全部/
+		// SSO 关联），其余业务端点一律 403——防初始/被重置密码被长期使用。
+		if u.MustChangePassword && !mustChangeAllowed(c.Request.URL.Path) {
+			httpx.Error(c, http.StatusForbidden,
+				"password change required before using this service",
+				httpx.Extra{"code": "must_change_password"})
+			return nil, false
+		}
 	}
 	if isIDE && fromQuery {
 		http.SetCookie(c.Writer, &http.Cookie{
@@ -103,6 +119,25 @@ func authenticate(c *gin.Context, store UserStore) (*Claims, bool) {
 	return claims, true
 }
 
+// mustChangeAllowed 是 must_change_password=1 时的端点白名单（自助面）。
+func mustChangeAllowed(path string) bool {
+	for _, p := range []string{
+		"/api/v1/auth/password",
+		"/api/v1/auth/me",
+		"/api/v1/auth/logout-all",
+		"/api/v1/auth/oidc/",
+	} {
+		if strings.HasPrefix(path, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// RequireRole 按角色白名单放行（R1 前的路由门面）。
+//
+// Deprecated: 生产路由已全部切换到 RequirePermission（权限点为权威，角色是权限的命名
+// 集合——自定义角色时代按角色名放行无法表达）。保留供旧测试装配与迁移期引用。
 func RequireRole(allowedRoles ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		val, exists := c.Get("claims")

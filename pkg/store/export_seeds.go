@@ -23,12 +23,12 @@ type SeedTenant struct {
 }
 
 type SeedUser struct {
-	Username   string `json:"username"`
+	Username    string `json:"username"`
 	ClusterUser string `json:"clusterUser"`
-	UID        int    `json:"uid"`
-	GID        int    `json:"gid"`
-	Account    string `json:"account"`
-	TenantSlug string `json:"tenantSlug"`
+	UID         int    `json:"uid"`
+	GID         int    `json:"gid"`
+	Account     string `json:"account"`
+	TenantSlug  string `json:"tenantSlug"`
 }
 
 // ExportSeeds 把用户库导出为集群供给种子 JSON（幂等快照；db 为真相源时的重建路径）。

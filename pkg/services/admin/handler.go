@@ -59,19 +59,23 @@ func mapErr(c *gin.Context, err error, op string) {
 	case errors.Is(err, ErrProvisionFailed):
 		// DB 已提交、Slurm 供给失败：502 + 明确文案（重试幂等）
 		httpx.Error(c, http.StatusBadGateway, err.Error())
-	case errors.Is(err, ErrRoleNotAllowed):
+	case errors.Is(err, ErrRoleNotAllowed), errors.Is(err, ErrRoleEscalation):
 		httpx.BadRequest(c, err.Error())
 	case errors.Is(err, store.ErrNotFound):
 		httpx.NotFound(c, "not found")
 	case errors.Is(err, store.ErrTenantExists), errors.Is(err, store.ErrDuplicateUser),
 		errors.Is(err, store.ErrTenantReserved), errors.Is(err, store.ErrTenantSuspended),
-		errors.Is(err, store.ErrUIDExhausted):
+		errors.Is(err, store.ErrUIDExhausted),
+		errors.Is(err, store.ErrRoleExists), errors.Is(err, store.ErrRoleSystem),
+		errors.Is(err, store.ErrRoleInUse):
 		httpx.Error(c, http.StatusConflict, err.Error())
 	case errors.Is(err, store.ErrInvalidUsername), errors.Is(err, store.ErrInvalidSlug),
 		errors.Is(err, store.ErrInvalidRole), errors.Is(err, store.ErrInvalidStatus),
 		errors.Is(err, store.ErrRoleTenantMismatch), errors.Is(err, store.ErrWeakPassword),
 		errors.Is(err, store.ErrInvalidClusterUser), errors.Is(err, store.ErrInvalidAccount),
-		errors.Is(err, store.ErrInvalidUID), errors.Is(err, store.ErrInvalidHash):
+		errors.Is(err, store.ErrInvalidUID), errors.Is(err, store.ErrInvalidHash),
+		errors.Is(err, store.ErrRoleReserved), errors.Is(err, store.ErrInvalidPermission),
+		errors.Is(err, store.ErrInvalidBaseRole):
 		httpx.BadRequest(c, err.Error())
 	default:
 		httpx.Internal(c, op, err)
@@ -125,10 +129,10 @@ func (h *AdminHandler) CreateTenant(c *gin.Context) {
 // UpdateTenant PATCH /api/v1/admin/tenants/:slug {name?,status?}
 func (h *AdminHandler) UpdateTenant(c *gin.Context) {
 	var req struct {
-		Name       string `json:"name"`
-		Status     string `json:"status"`
-		GrpTRES    string `json:"grpTRES"`
-		Fairshare  string `json:"fairshare"`
+		Name      string `json:"name"`
+		Status    string `json:"status"`
+		GrpTRES   string `json:"grpTRES"`
+		Fairshare string `json:"fairshare"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		httpx.BadRequest(c, "invalid payload")
@@ -175,9 +179,14 @@ func (h *AdminHandler) CreatePlatformUser(c *gin.Context) {
 		httpx.BadRequest(c, "username, role, tenantSlug, password are required")
 		return
 	}
+	if err := auth.ValidatePasswordPolicy(req.Password); err != nil {
+		httpx.BadRequest(c, err.Error())
+		return
+	}
 	actor, _ := actorAndTenant(c)
 	u, err := h.service.CreatePlatformUser(c.Request.Context(), actor, store.NewUser{
 		Username: req.Username, Password: req.Password, Role: req.Role, TenantSlug: req.TenantSlug,
+		MustChangePassword: true, // A1：初始密码首登强制改密
 	}, requestID(c))
 	if err != nil {
 		mapErr(c, err, "admin.CreatePlatformUser")
@@ -201,12 +210,12 @@ func (h *AdminHandler) ListReservations(c *gin.Context) {
 // CreateReservation POST /api/v1/admin/reservations {name,startTime,durationMinutes,nodes,users,partition}
 func (h *AdminHandler) CreateReservation(c *gin.Context) {
 	var req struct {
-		Name           string `json:"name" binding:"required"`
-		StartTime      string `json:"startTime"` // 空=now+1min；YYYY-MM-DDTHH:MM
-		DurationMinutes int   `json:"durationMinutes" binding:"required"`
-		Nodes          string `json:"nodes"`
-		Users          string `json:"users"`
-		Partition      string `json:"partition"`
+		Name            string `json:"name" binding:"required"`
+		StartTime       string `json:"startTime"` // 空=now+1min；YYYY-MM-DDTHH:MM
+		DurationMinutes int    `json:"durationMinutes" binding:"required"`
+		Nodes           string `json:"nodes"`
+		Users           string `json:"users"`
+		Partition       string `json:"partition"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		httpx.BadRequest(c, "name and durationMinutes are required")
@@ -308,9 +317,14 @@ func (h *AdminHandler) CreateTenantUser(c *gin.Context) {
 		httpx.BadRequest(c, "username, password, role are required")
 		return
 	}
+	if err := auth.ValidatePasswordPolicy(req.Password); err != nil {
+		httpx.BadRequest(c, err.Error())
+		return
+	}
 	actor, tenant := actorAndTenant(c)
 	u, err := h.service.CreateTenantUser(c.Request.Context(), actor, tenant, store.NewUser{
 		Username: req.Username, Password: req.Password, Role: req.Role,
+		MustChangePassword: true, // A1：初始密码首登强制改密
 	}, requestID(c))
 	if err != nil {
 		mapErr(c, err, "admin.CreateTenantUser")
@@ -350,8 +364,8 @@ func (h *AdminHandler) ResetMyUserPassword(c *gin.Context) {
 		httpx.BadRequest(c, "newPassword is required")
 		return
 	}
-	if len(req.NewPassword) < 8 {
-		httpx.BadRequest(c, "newPassword must be at least 8 characters")
+	if err := auth.ValidatePasswordPolicy(req.NewPassword); err != nil {
+		httpx.BadRequest(c, err.Error())
 		return
 	}
 	actor, tenant := actorAndTenant(c)
@@ -364,3 +378,191 @@ func (h *AdminHandler) ResetMyUserPassword(c *gin.Context) {
 
 // limitRE 限额值白名单：TRES（cpu=4,mem=2g,gres/gpu=1 逗号分隔）或 Fairshare 数字。
 var limitRE = regexp.MustCompile(`^[0-9A-Za-z/=,:+. _-]{1,64}$`)
+
+// --- 角色管理（R3 自定义角色；子集防提权校验在 service 层） ---
+
+// roleRequest 是建/改角色的请求体。baseRole 缺省按作用域取最小面（平台=ops_admin、
+// 租户=member）；permissions 为白名单词汇表内的子集（服务端校验 ⊆ 调用者权限）。
+type roleRequest struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Permissions []string `json:"permissions"`
+	BaseRole    string   `json:"baseRole"`
+}
+
+// actorPermissions 从 claims 取调用者有效权限集合（中间件已按库刷新——DB 权威）。
+func actorPermissions(c *gin.Context) []string {
+	return auth.SortedPermissions(auth.PermissionsOf(auth.ClaimsFromCtx(c)))
+}
+
+// ListPlatformRoles GET /api/v1/admin/roles —— 平台角色（内置+自定义）。
+func (h *AdminHandler) ListPlatformRoles(c *gin.Context) {
+	rs, err := h.service.ListRoles(c.Request.Context(), "")
+	if err != nil {
+		mapErr(c, err, "admin.ListPlatformRoles")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"roles": rs})
+}
+
+// ListTenantRoles GET /api/v1/admin/tenants/:slug/roles —— 某租户的自定义角色（admin 查看）。
+func (h *AdminHandler) ListTenantRoles(c *gin.Context) {
+	rs, err := h.service.ListRoles(c.Request.Context(), c.Param("slug"))
+	if err != nil {
+		mapErr(c, err, "admin.ListTenantRoles")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"roles": rs})
+}
+
+// CreatePlatformRole POST /api/v1/admin/roles —— 建平台自定义角色（admin）。
+func (h *AdminHandler) CreatePlatformRole(c *gin.Context) {
+	var req roleRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.Name == "" {
+		httpx.BadRequest(c, "name is required")
+		return
+	}
+	if req.BaseRole == "" {
+		req.BaseRole = auth.RoleOpsAdmin // 平台默认基角色（scope=all 的最小面）
+	}
+	actor, _ := actorAndTenant(c)
+	r, err := h.service.CreateRole(c.Request.Context(), actor, actorPermissions(c), store.NewRole{
+		Name: req.Name, Description: req.Description,
+		Permissions: req.Permissions, BaseRole: req.BaseRole, TenantSlug: "",
+	}, requestID(c))
+	if err != nil {
+		mapErr(c, err, "admin.CreatePlatformRole")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"role": r})
+}
+
+// UpdatePlatformRole PATCH /api/v1/admin/roles/:name {description?, permissions?}
+func (h *AdminHandler) UpdatePlatformRole(c *gin.Context) {
+	var req struct {
+		Description *string  `json:"description"`
+		Permissions []string `json:"permissions"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.BadRequest(c, "invalid payload")
+		return
+	}
+	actor, _ := actorAndTenant(c)
+	r, err := h.service.UpdateRole(c.Request.Context(), actor, actorPermissions(c), "",
+		c.Param("name"), req.Permissions, req.Description, requestID(c))
+	if err != nil {
+		mapErr(c, err, "admin.UpdatePlatformRole")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"role": r})
+}
+
+// DeletePlatformRole DELETE /api/v1/admin/roles/:name（系统角色/在用角色 → 409）。
+func (h *AdminHandler) DeletePlatformRole(c *gin.Context) {
+	actor, _ := actorAndTenant(c)
+	if err := h.service.DeleteRole(c.Request.Context(), actor, "", c.Param("name"), requestID(c)); err != nil {
+		mapErr(c, err, "admin.DeletePlatformRole")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "role deleted"})
+}
+
+// AssignPlatformRole PATCH /api/v1/admin/users/:username/role {role}
+func (h *AdminHandler) AssignPlatformRole(c *gin.Context) {
+	var req struct {
+		Role string `json:"role" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.BadRequest(c, "role is required")
+		return
+	}
+	actor, _ := actorAndTenant(c)
+	if err := h.service.AssignRole(c.Request.Context(), actor, "", c.Param("username"), req.Role, requestID(c)); err != nil {
+		mapErr(c, err, "admin.AssignPlatformRole")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "role assigned"})
+}
+
+// --- 租户级角色管理（tenant_admin，仅本租户） ---
+
+// ListMyRoles GET /api/v1/tenants/me/roles —— 本租户的自定义角色。
+func (h *AdminHandler) ListMyRoles(c *gin.Context) {
+	_, tenant := actorAndTenant(c)
+	rs, err := h.service.ListRoles(c.Request.Context(), tenant)
+	if err != nil {
+		mapErr(c, err, "admin.ListMyRoles")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"roles": rs})
+}
+
+// CreateMyRole POST /api/v1/tenants/me/roles —— 建本租户自定义角色（权限 ⊆ 自身）。
+func (h *AdminHandler) CreateMyRole(c *gin.Context) {
+	var req roleRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.Name == "" {
+		httpx.BadRequest(c, "name is required")
+		return
+	}
+	if req.BaseRole == "" {
+		req.BaseRole = auth.RoleMember // 租户默认基角色（scope=self）
+	}
+	actor, tenant := actorAndTenant(c)
+	r, err := h.service.CreateRole(c.Request.Context(), actor, actorPermissions(c), store.NewRole{
+		Name: req.Name, Description: req.Description,
+		Permissions: req.Permissions, BaseRole: req.BaseRole, TenantSlug: tenant,
+	}, requestID(c))
+	if err != nil {
+		mapErr(c, err, "admin.CreateMyRole")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"role": r})
+}
+
+// UpdateMyRole PATCH /api/v1/tenants/me/roles/:name（跨租户同名角色不可达 → 404）。
+func (h *AdminHandler) UpdateMyRole(c *gin.Context) {
+	var req struct {
+		Description *string  `json:"description"`
+		Permissions []string `json:"permissions"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.BadRequest(c, "invalid payload")
+		return
+	}
+	actor, tenant := actorAndTenant(c)
+	r, err := h.service.UpdateRole(c.Request.Context(), actor, actorPermissions(c), tenant,
+		c.Param("name"), req.Permissions, req.Description, requestID(c))
+	if err != nil {
+		mapErr(c, err, "admin.UpdateMyRole")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"role": r})
+}
+
+// DeleteMyRole DELETE /api/v1/tenants/me/roles/:name（在用 → 409 须先改派）。
+func (h *AdminHandler) DeleteMyRole(c *gin.Context) {
+	actor, tenant := actorAndTenant(c)
+	if err := h.service.DeleteRole(c.Request.Context(), actor, tenant, c.Param("name"), requestID(c)); err != nil {
+		mapErr(c, err, "admin.DeleteMyRole")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "role deleted"})
+}
+
+// AssignMyRole PATCH /api/v1/tenants/me/users/:username/role {role}
+// 角色解析限本租户作用域（+内置 member/tenant_admin）；跨租户角色不可达。
+func (h *AdminHandler) AssignMyRole(c *gin.Context) {
+	var req struct {
+		Role string `json:"role" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.BadRequest(c, "role is required")
+		return
+	}
+	actor, tenant := actorAndTenant(c)
+	if err := h.service.AssignRole(c.Request.Context(), actor, tenant, c.Param("username"), req.Role, requestID(c)); err != nil {
+		mapErr(c, err, "admin.AssignMyRole")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "role assigned"})
+}

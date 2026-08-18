@@ -158,17 +158,17 @@ func TestChangePassword_Handler(t *testing.T) {
 		return w.Code
 	}
 
-	if c := call(`{"oldPassword":"wrong","newPassword":"newpass99"}`); c != 401 {
+	if c := call(`{"oldPassword":"wrong","newPassword":"Newpass#99"}`); c != 401 {
 		t.Errorf("wrong old: want 401 got %d", c)
 	}
 	if c := call(`{"oldPassword":"member123","newPassword":"short"}`); c != 400 {
 		t.Errorf("weak new: want 400 got %d", c)
 	}
-	if c := call(`{"oldPassword":"member123","newPassword":"newpass99"}`); c != 200 {
+	if c := call(`{"oldPassword":"member123","newPassword":"Newpass#99"}`); c != 200 {
 		t.Errorf("valid change: want 200 got %d", c)
 	}
 	// 新密码可登录、旧密码失效；版本已 bump（旧令牌吊销）
-	if _, err := store.Verify("member", "newpass99"); err != nil {
+	if _, err := store.Verify("member", "Newpass#99"); err != nil {
 		t.Errorf("login with new password: %v", err)
 	}
 	if _, err := store.Verify("member", "member123"); err == nil {

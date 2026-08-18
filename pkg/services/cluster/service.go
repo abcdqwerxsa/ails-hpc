@@ -27,13 +27,13 @@ type ClusterService interface {
 
 // Partition 是面向前端的分区视图（slurmrest 分区记录 + 富化字段）。
 type Partition struct {
-	Name         string `json:"name"`
-	Nodes        string `json:"nodes"`
-	TotalCPUs    int    `json:"total_cpus"`
-	TotalNodes   int    `json:"total_nodes"`
-	TotalMemoryMB int  `json:"total_memory_mb"` // 分区 TRES mem=（成员节点 RealMemory 合计）
-	Gpus         int    `json:"gpus"`           // 成员节点 GRES gpu 合计
-	AllocGpus    int    `json:"alloc_gpus"`     // 已占 GPU 合计
+	Name          string `json:"name"`
+	Nodes         string `json:"nodes"`
+	TotalCPUs     int    `json:"total_cpus"`
+	TotalNodes    int    `json:"total_nodes"`
+	TotalMemoryMB int    `json:"total_memory_mb"` // 分区 TRES mem=（成员节点 RealMemory 合计）
+	Gpus          int    `json:"gpus"`            // 成员节点 GRES gpu 合计
+	AllocGpus     int    `json:"alloc_gpus"`      // 已占 GPU 合计
 }
 
 // PartitionsResponse GET /api/v1/slurm/partitions 响应。

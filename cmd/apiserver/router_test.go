@@ -55,6 +55,7 @@ func (f *captureFetcher) Query(ctx context.Context, user string, start, end time
 // setupTestRouter 构造一个接入真实 NewRouter 的测试路由：
 //   - 内存四角色用户库（admin/member/tenant_admin/ops，明文 *123）
 //   - common.MockSlurmServer 承载 slurmrestd v0.0.37 调用
+//
 // 该测试驱动的是生产路由表本身，而非 test/e2e 的内存平行实现。
 func setupTestRouter(t *testing.T) (*gin.Engine, *common.MockSlurmServer) {
 	t.Helper()
@@ -98,7 +99,7 @@ func setupTestRouter(t *testing.T) (*gin.Engine, *common.MockSlurmServer) {
 		Nodes:      nodes.NewNodeHandler(nodes.NewNodeServiceWithApplier(slurmClient, func(string, string, string) error { return nil })),
 		Jobs:       jobs.NewJobHandlerScoped(jobs.NewJobService(slurmClient), tenantMembers(store)),
 		Containers: containers.NewContainerHandlerScoped(containers.NewContainerService(slurmClient), tenantMembers(store)),
-				Billing: billing.NewBillingHandlerWithScope(billingService, func(tenant string) ([]string, error) {
+		Billing: billing.NewBillingHandlerWithScope(billingService, func(tenant string) ([]string, error) {
 			var members []string
 			for _, u := range store.ListUsers() {
 				if u.OrgSlug == tenant {
@@ -124,10 +125,10 @@ func tokenFor(t *testing.T, role string) string {
 	// WithStore 活体校验要求用户在 store 中；clusterUser 一并对齐 store 的 ails* 命名，
 	// 使租户成员解析（按 orgSlug 派生 clusterUser 清单）能命中提交者身份。
 	userOf := map[string][2]string{
-		auth.RoleSystemAdmin:  {"admin", "ailsadmin"},
-		auth.RoleTenantAdmin:  {"tenantadmin", "ailstadmin"},
-		auth.RoleMember:       {"member", "ailsmember"},
-		auth.RoleOpsAdmin:     {"ops", "ailsops"},
+		auth.RoleSystemAdmin: {"admin", "ailsadmin"},
+		auth.RoleTenantAdmin: {"tenantadmin", "ailstadmin"},
+		auth.RoleMember:      {"member", "ailsmember"},
+		auth.RoleOpsAdmin:    {"ops", "ailsops"},
 	}
 	pair, ok := userOf[role]
 	if !ok {
@@ -175,7 +176,9 @@ func TestRouter_JobOwnership(t *testing.T) {
 		if code != http.StatusOK {
 			t.Fatalf("submit: want 200 got %d body=%s", code, body)
 		}
-		var resp struct{ JobID int `json:"job_id"` }
+		var resp struct {
+			JobID int `json:"job_id"`
+		}
 		_ = json.Unmarshal([]byte(body), &resp)
 		return resp.JobID
 	}
@@ -233,7 +236,6 @@ func TestRouter_PerUserSubmitIdentity(t *testing.T) {
 	}
 }
 
-
 // TestRouter_L4ControlAuthz 控制操作的下发身份（L4）：member 取消自己的作业时，
 // 到 slurmrestd 的请求必须以其 clusterUser 执行（"member"）；tenant_admin 越权取消
 // 走 root（"root"）。mock 按 Slurm 语义执法（非属主非 root → 403）。
@@ -247,7 +249,9 @@ func TestRouter_L4ControlAuthz(t *testing.T) {
 		if code != http.StatusOK {
 			t.Fatalf("submit: want 200 got %d body=%s", code, body)
 		}
-		var resp struct{ JobID int `json:"job_id"` }
+		var resp struct {
+			JobID int `json:"job_id"`
+		}
 		_ = json.Unmarshal([]byte(body), &resp)
 		return resp.JobID
 	}
@@ -274,7 +278,6 @@ func TestRouter_L4ControlAuthz(t *testing.T) {
 		t.Errorf("override control acting user = %q, want \"root\"", got)
 	}
 }
-
 
 // TestRouter_BillingScope 多租户 Phase 0：计费读按登录者收口。
 //   - member 带 ?user=他人 → 无视 query，强制本人（修复"可读任意用户账单"漏洞）
@@ -331,7 +334,6 @@ func indexOf(s, sub string) int {
 	return -1
 }
 
-
 // TestRouter_PasswordChange 自助改密端到端：登录→改密→旧 token 即刻 401（ver 吊销）→
 // 新密码可登录。中间件为 WithStore 形态（活体校验）。
 func TestRouter_PasswordChange(t *testing.T) {
@@ -346,11 +348,11 @@ func TestRouter_PasswordChange(t *testing.T) {
 	}
 
 	// 无鉴权调改密 → 401
-	if c := doRequest(r, http.MethodPost, "/api/v1/auth/password", `{"oldPassword":"member123","newPassword":"changed99"}`, ""); c != http.StatusUnauthorized {
+	if c := doRequest(r, http.MethodPost, "/api/v1/auth/password", `{"oldPassword":"member123","newPassword":"Changed#99"}`, ""); c != http.StatusUnauthorized {
 		t.Errorf("no-token change: want 401 got %d", c)
 	}
 	// 带令牌改密成功
-	if c, b := doAuth(r, http.MethodPost, "/api/v1/auth/password", `{"oldPassword":"member123","newPassword":"changed99"}`, login.Token); c != http.StatusOK {
+	if c, b := doAuth(r, http.MethodPost, "/api/v1/auth/password", `{"oldPassword":"member123","newPassword":"Changed#99"}`, login.Token); c != http.StatusOK {
 		t.Fatalf("change with token: want 200 got %d body=%s", c, b)
 	}
 	// 旧 token 已被吊销（对任意受保护路由 401）
@@ -361,11 +363,10 @@ func TestRouter_PasswordChange(t *testing.T) {
 	if c, _ := doAuth(r, http.MethodPost, "/api/v1/auth/login", `{"username":"member","password":"member123"}`, ""); c != http.StatusUnauthorized {
 		t.Errorf("old password must be rejected, got %d", c)
 	}
-	if c, b := doAuth(r, http.MethodPost, "/api/v1/auth/login", `{"username":"member","password":"changed99"}`, ""); c != http.StatusOK {
+	if c, b := doAuth(r, http.MethodPost, "/api/v1/auth/login", `{"username":"member","password":"Changed#99"}`, ""); c != http.StatusOK {
 		t.Fatalf("new password login: want 200 got %d body=%s", c, b)
 	}
 }
-
 
 // TestRouter_TenantScoping 多租户 Phase 4：作业/会话列表与控制按租户收口。
 //   - 跨租户 member 的作业：本租户 member 不可控（403）、tenant_admin 不可控（403）
@@ -375,7 +376,7 @@ func TestRouter_TenantScoping(t *testing.T) {
 	r, _ := setupTestRouter(t)
 	// 跨租户 member：bio-lab 租户（store 无此租户成员清单 → 解析为空）
 	bioTok, _ := auth.GenerateToken("biomember", auth.RoleMember, "bio-lab", "default", "ailsmember2", "ailsmember2")
-	hpTok := tokenFor(t, auth.RoleMember)   // clusterUser=ailsmember @ hpc-lab
+	hpTok := tokenFor(t, auth.RoleMember) // clusterUser=ailsmember @ hpc-lab
 	taTok := tokenFor(t, auth.RoleTenantAdmin)
 	opsTok := tokenFor(t, auth.RoleOpsAdmin)
 
@@ -385,7 +386,9 @@ func TestRouter_TenantScoping(t *testing.T) {
 		if code != http.StatusOK {
 			t.Fatalf("submit: %d %s", code, body)
 		}
-		var resp struct{ JobID int `json:"job_id"` }
+		var resp struct {
+			JobID int `json:"job_id"`
+		}
 		_ = json.Unmarshal([]byte(body), &resp)
 		return resp.JobID
 	}
@@ -406,7 +409,7 @@ func TestRouter_TenantScoping(t *testing.T) {
 	}
 
 	bioJob := subNamed(bioTok, "sc-bio") // bio-lab 的作业（owner=ailsmember2）
-	hpJob := subNamed(hpTok, "sc-hp")   // hpc-lab member 的作业（owner=ailsmember）
+	hpJob := subNamed(hpTok, "sc-hp")    // hpc-lab member 的作业（owner=ailsmember）
 
 	// 1) hpc-lab member 不能控 bio 的作业
 	if c := cancel(bioJob, hpTok); c != http.StatusForbidden {
@@ -583,7 +586,8 @@ func TestRouter_ErrorEnvelope(t *testing.T) {
 		t.Errorf("auto-generated request_id missing/empty: %v", body2)
 	}
 
-	// 语义 extra：member 调 admin 独占路由 → 403 体应含 required:["admin"]
+	// 语义 extra：member 调 admin 独占路由 → 403 体应含 required:["nodes:manage"]
+	// （R1 起门面为权限点；四角色鉴权结果与 RequireRole 时代一致）
 	drainReq, _ := http.NewRequest(http.MethodPost, "/api/v1/slurm/nodes/node1/state", bytes.NewBufferString(`{"state":"DRAIN"}`))
 	drainReq.Header.Set("Content-Type", "application/json")
 	drainReq.Header.Set("Authorization", "Bearer "+tokenFor(t, auth.RoleMember))
@@ -597,8 +601,8 @@ func TestRouter_ErrorEnvelope(t *testing.T) {
 		t.Fatalf("unmarshal 403 body: %v body=%s", err, w3.Body.String())
 	}
 	required, ok := body3["required"].([]any)
-	if !ok || len(required) == 0 || required[0] != auth.RoleSystemAdmin {
-		t.Errorf("403 required = %v, want [%q] (semantic extra lost)", body3["required"], auth.RoleSystemAdmin)
+	if !ok || len(required) == 0 || required[0] != auth.PermNodesManage {
+		t.Errorf("403 required = %v, want [%q] (semantic extra lost)", body3["required"], auth.PermNodesManage)
 	}
 }
 
@@ -666,4 +670,49 @@ func doRequestWithBody(r *gin.Engine, method, path, body string) (int, string) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	return w.Code, w.Body.String()
+}
+
+// TestRouter_AuthMe R4 权限自描述：/auth/me 返回基角色+权限点清单+集群身份；
+// 无 token → 401。内存库用户 → 权限回退内置映射（与登录响应一致）。
+func TestRouter_AuthMe(t *testing.T) {
+	r, _ := setupTestRouter(t)
+
+	// 无 token
+	if c := doRequest(r, http.MethodGet, "/api/v1/auth/me", "", ""); c != http.StatusUnauthorized {
+		t.Fatalf("no token: want 401 got %d", c)
+	}
+	// member：基角色 member + 内置权限集
+	code, body := doAuth(r, http.MethodGet, "/api/v1/auth/me", "", tokenFor(t, auth.RoleMember))
+	if code != http.StatusOK {
+		t.Fatalf("member me: want 200 got %d body=%s", code, body)
+	}
+	var resp auth.LoginResponse
+	if err := json.Unmarshal([]byte(body), &resp); err != nil {
+		t.Fatalf("unmarshal: %v body=%s", err, body)
+	}
+	if resp.User.Username != "member" || resp.User.Role != auth.RoleMember {
+		t.Errorf("user = %+v", resp.User)
+	}
+	permSet := map[string]bool{}
+	for _, p := range resp.User.Permissions {
+		permSet[p] = true
+	}
+	for _, want := range []string{auth.PermClusterRead, auth.PermJobsSubmit, auth.PermIdeList, auth.PermBillingRead} {
+		if !permSet[want] {
+			t.Errorf("member /auth/me missing %q (has %v)", want, resp.User.Permissions)
+		}
+	}
+	if permSet[auth.PermNodesManage] {
+		t.Errorf("member /auth/me must not hold nodes:manage (has %v)", resp.User.Permissions)
+	}
+	// admin：平台权限集（无 jobs/ide/billing——纯监控）
+	_, body = doAuth(r, http.MethodGet, "/api/v1/auth/me", "", tokenFor(t, auth.RoleSystemAdmin))
+	_ = json.Unmarshal([]byte(body), &resp)
+	permSet = map[string]bool{}
+	for _, p := range resp.User.Permissions {
+		permSet[p] = true
+	}
+	if !permSet[auth.PermRolesManage] || permSet[auth.PermJobsSubmit] {
+		t.Errorf("admin /auth/me perms wrong: %v", resp.User.Permissions)
+	}
 }

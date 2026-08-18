@@ -13,14 +13,14 @@ import (
 // --- fakes ---
 
 type fakeJobsAPI struct {
-	lastSubmit *slurmrest.SlurmJobSubmitReq
-	lastActAs  string
-	submitResp *slurmrest.SlurmJobSubmitResp
-	submitErr  error
-	jobs       *slurmrest.JobsResponse
-	cancelled  []int
+	lastSubmit  *slurmrest.SlurmJobSubmitReq
+	lastActAs   string
+	submitResp  *slurmrest.SlurmJobSubmitResp
+	submitErr   error
+	jobs        *slurmrest.JobsResponse
+	cancelled   []int
 	cancelActAs string
-	cancelErr  error
+	cancelErr   error
 }
 
 func (f *fakeJobsAPI) SubmitJobAs(req *slurmrest.SlurmJobSubmitReq, actAs string) (*slurmrest.SlurmJobSubmitResp, error) {
@@ -63,7 +63,7 @@ func (f *fakeMeta) Delete(sid string) error {
 
 // jrow + jobsResp 构造 *slurmrest.JobsResponse（元素匿名结构须与 slurmrest 一致）
 type jrow struct {
-	id, cpus int
+	id, cpus           int
 	name, state, nodes string
 	submit             int64
 }

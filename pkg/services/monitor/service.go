@@ -50,8 +50,8 @@ type sample struct {
 type serviceImpl struct {
 	nodes   nodeProvider
 	disk    diskProvider
-	pending func() int     // 队列深度来源（nil=恒 0；生产=REST jobs 计数）
-	persist persistence    // 采样持久化（nil=纯内存；生产=sqlite monitor.db）
+	pending func() int  // 队列深度来源（nil=恒 0；生产=REST jobs 计数）
+	persist persistence // 采样持久化（nil=纯内存；生产=sqlite monitor.db）
 
 	// mu 保护 samples（采样 goroutine 写、History 读）。
 	mu         sync.Mutex

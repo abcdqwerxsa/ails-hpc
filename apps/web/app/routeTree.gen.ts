@@ -17,6 +17,8 @@ import { Route as HistoryImport } from './routes/history'
 import { Route as JobsImport } from './routes/jobs'
 import { Route as NodesImport } from './routes/nodes'
 import { Route as LoginImport } from './routes/login'
+import { Route as SettingsImport } from './routes/settings'
+import { Route as LoginOidcCallbackImport } from './routes/login.oidc.callback'
 import { Route as IndexImport } from './routes/index'
 
 const PartitionsRoute = PartitionsImport.update({ id: '/partitions', path: '/partitions', getParentRoute: () => rootRoute } as any)
@@ -28,12 +30,16 @@ const WebIDERoute = WebIDEImport.update({ id: '/webide', path: '/webide', getPar
 const JobsRoute = JobsImport.update({ id: '/jobs', path: '/jobs', getParentRoute: () => rootRoute } as any)
 const NodesRoute = NodesImport.update({ id: '/nodes', path: '/nodes', getParentRoute: () => rootRoute } as any)
 const LoginRoute = LoginImport.update({ id: '/login', path: '/login', getParentRoute: () => rootRoute } as any)
+const LoginOidcCallbackRoute = LoginOidcCallbackImport.update({ id: '/login/oidc/callback', path: '/login/oidc/callback', getParentRoute: () => rootRoute } as any)
+const SettingsRoute = SettingsImport.update({ id: '/settings', path: '/settings', getParentRoute: () => rootRoute } as any)
 const IndexRoute = IndexImport.update({ id: '/', path: '/', getParentRoute: () => rootRoute } as any)
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
     '/': { id: '/'; path: '/'; fullPath: '/'; preLoaderRoute: typeof IndexImport; parentRoute: typeof rootRoute }
     '/login': { id: '/login'; path: '/login'; fullPath: '/login'; preLoaderRoute: typeof LoginImport; parentRoute: typeof rootRoute }
+    '/login/oidc/callback': { id: '/login/oidc/callback'; path: '/login/oidc/callback'; fullPath: '/login/oidc/callback'; preLoaderRoute: typeof LoginOidcCallbackImport; parentRoute: typeof rootRoute }
+    '/settings': { id: '/settings'; path: '/settings'; fullPath: '/settings'; preLoaderRoute: typeof SettingsImport; parentRoute: typeof rootRoute }
     '/nodes': { id: '/nodes'; path: '/nodes'; fullPath: '/nodes'; preLoaderRoute: typeof NodesImport; parentRoute: typeof rootRoute }
     '/jobs': { id: '/jobs'; path: '/jobs'; fullPath: '/jobs'; preLoaderRoute: typeof JobsImport; parentRoute: typeof rootRoute }
     '/webide': { id: '/webide'; path: '/webide'; fullPath: '/webide'; preLoaderRoute: typeof WebIDEImport; parentRoute: typeof rootRoute }
@@ -48,6 +54,8 @@ declare module '@tanstack/react-router' {
 export const routeTree = rootRoute.addChildren([
   IndexRoute,
   LoginRoute,
+  LoginOidcCallbackRoute,
+  SettingsRoute,
   NodesRoute,
   JobsRoute,
   WebIDERoute,

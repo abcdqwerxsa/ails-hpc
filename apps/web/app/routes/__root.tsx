@@ -1,6 +1,7 @@
 import { Outlet, Link, createRootRoute, useNavigate, useLocation } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import '../styles/app.css';
+import { can, refreshMe, type StoredUser } from '../services/auth';
 
 export const Route = createRootRoute({
   component: RootLayout,
@@ -9,7 +10,7 @@ export const Route = createRootRoute({
 function RootLayout() {
   const navigate = useNavigate();
   const location = useLocation();
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<StoredUser | null>(null);
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
 
   useEffect(() => {
@@ -17,7 +18,9 @@ function RootLayout() {
     const savedUser = localStorage.getItem('ails_user');
     if (savedUser) {
       setUser(JSON.parse(savedUser));
-    } else if (location.pathname !== '/login') {
+      // R4：挂载时按 /auth/me 刷新权限面（角色改派/权限调整后刷新页面即感知，静默失败）
+      refreshMe().then((u) => u && setUser(u));
+    } else if (!isAuthPage()) {
       navigate({ to: '/login' });
     }
 
@@ -38,7 +41,11 @@ function RootLayout() {
     window.location.reload();
   };
 
-  if (location.pathname === '/login') {
+  // 登录页与其子路由（/login/oidc/callback）都不渲染侧栏布局
+  const isAuthPage = () =>
+    location.pathname === '/login' || location.pathname.startsWith('/login/');
+
+  if (isAuthPage()) {
     return <Outlet />;
   }
 
@@ -56,54 +63,68 @@ function RootLayout() {
             <span>Slurm HPC 管理平台</span>
           </div>
           <ul className="nav-list">
+            {/* R4：菜单按权限点渲染（能力驱动；后端 RequirePermission 为权威门） */}
+            {can('cluster:read', user) && (
+              <>
+                <li className="nav-item">
+                  <Link to="/" activeProps={{ className: 'active' }} activeOptions={{ exact: true }}>
+                    集群总览
+                  </Link>
+                </li>
+                <li className="nav-item">
+                  <Link to="/monitor" activeProps={{ className: 'active' }}>
+                    集群监控
+                  </Link>
+                </li>
+                <li className="nav-item">
+                  <Link to="/nodes" activeProps={{ className: 'active' }}>
+                    节点状态
+                  </Link>
+                </li>
+                <li className="nav-item">
+                  <Link to="/jobs" activeProps={{ className: 'active' }}>
+                    作业管理
+                  </Link>
+                </li>
+                <li className="nav-item">
+                  <Link to="/history" activeProps={{ className: 'active' }}>
+                    作业历史
+                  </Link>
+                </li>
+                <li className="nav-item">
+                  <Link to="/partitions" activeProps={{ className: 'active' }}>
+                    分区
+                  </Link>
+                </li>
+              </>
+            )}
+            {can('ide:list', user) && (
+              <li className="nav-item">
+                <Link to="/webide" activeProps={{ className: 'active' }}>
+                  Web-IDE
+                </Link>
+              </li>
+            )}
+            {can('billing:read', user) && (
+              <li className="nav-item">
+                <Link to="/billing" activeProps={{ className: 'active' }}>
+                  计费
+                </Link>
+              </li>
+            )}
             <li className="nav-item">
-              <Link to="/" activeProps={{ className: 'active' }} activeOptions={{ exact: true }}>
-                集群总览
+              <Link to="/settings" activeProps={{ className: 'active' }}>
+                安全设置
               </Link>
             </li>
-            <li className="nav-item">
-              <Link to="/monitor" activeProps={{ className: 'active' }}>
-                集群监控
-              </Link>
-            </li>
-            <li className="nav-item">
-              <Link to="/nodes" activeProps={{ className: 'active' }}>
-                节点状态
-              </Link>
-            </li>
-            <li className="nav-item">
-              <Link to="/jobs" activeProps={{ className: 'active' }}>
-                作业管理
-              </Link>
-            </li>
-            <li className="nav-item">
-              <Link to="/history" activeProps={{ className: 'active' }}>
-                作业历史
-              </Link>
-            </li>
-            <li className="nav-item">
-              <Link to="/webide" activeProps={{ className: 'active' }}>
-                Web-IDE
-              </Link>
-            </li>
-            <li className="nav-item">
-              <Link to="/billing" activeProps={{ className: 'active' }}>
-                计费
-              </Link>
-            </li>
-            {/* 管理入口：仅 admin / tenant_admin 可见（角色来自 localStorage 'ails_user'，同 user 解析） */}
-            {(user?.role === 'admin' || user?.role === 'tenant_admin') && (
+            {/* 管理入口：平台面板（tenants:read）或租户面板（tenant:users:read）任一可见 */}
+            {(can('tenants:read', user) || can('tenant:users:read', user)) && (
               <li className="nav-item">
                 <Link to="/admin" activeProps={{ className: 'active' }}>
                   管理
                 </Link>
               </li>
             )}
-            <li className="nav-item">
-              <Link to="/partitions" activeProps={{ className: 'active' }}>
-                分区
-              </Link>
-            </li>
           </ul>
         </div>
 
@@ -121,7 +142,7 @@ function RootLayout() {
           <div className="user-card" style={{ marginBottom: '1rem' }}>
             <div className="user-info">
               <span className="user-name">{user?.name || '高级算力管理员'}</span>
-              <span className="user-role">{user?.org || 'hpc-lab'} ({user?.role || '管理员'})</span>
+              <span className="user-role">{user?.org || 'hpc-lab'} ({user?.roleName || user?.role || '管理员'})</span>
             </div>
             <button
               style={{ background: 'none', border: 'none', color: 'var(--accent-rose)', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}
