@@ -8,8 +8,10 @@ export const Route = createFileRoute('/login')({
 
 function LoginPage() {
   const navigate = useNavigate();
-  const [username, setUsername] = useState('admin');
-  const [password, setPassword] = useState('admin123');
+  // 空默认值：不预填凭证（此前预填 admin/admin123 是开发期遗留——生产登录页
+  // 明文展示管理员口令，v5-H2 浏览器走查发现）。
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [ssoEnabled, setSsoEnabled] = useState(false);
