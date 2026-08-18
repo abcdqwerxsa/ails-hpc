@@ -119,6 +119,10 @@ func NewRouter(h Handlers) *gin.Engine {
 		platformAdmin.GET("/qos", auth.RequirePermission(auth.PermQosManage), h.Admin.ListQOS)
 		platformAdmin.POST("/qos", auth.RequirePermission(auth.PermQosManage), h.Admin.CreateQOS)
 		platformAdmin.PATCH("/tenants/:slug/qos", auth.RequirePermission(auth.PermQosManage), h.Admin.SetTenantQOS)
+		// 分区属性查看/修改（v2 增量；scontrol 直通）
+		partitionsManage := auth.RequirePermission(auth.PermPartitionsManage)
+		platformAdmin.GET("/partitions/:name", partitionsManage, h.Admin.GetPartition)
+		platformAdmin.PATCH("/partitions/:name", partitionsManage, h.Admin.UpdatePartition)
 		// R3 角色管理：平台自定义角色 CRUD + 角色指派
 		rolesManage := auth.RequirePermission(auth.PermRolesManage)
 		platformAdmin.GET("/roles", rolesManage, h.Admin.ListPlatformRoles)

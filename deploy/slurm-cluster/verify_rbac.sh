@@ -31,6 +31,9 @@ MTOKEN=$(curl -s -X POST $API/auth/login -H 'Content-Type: application/json' -d 
 check "member nodes read" "200" "$(curl -s -o /dev/null -w '%{http_code}' $API/slurm/nodes -H "Authorization: Bearer $MTOKEN")"
 check "member drain denied" "403" "$(curl -s -o /dev/null -w '%{http_code}' -X POST $API/slurm/nodes/node1/state -H "Authorization: Bearer $MTOKEN" -H 'Content-Type: application/json' -d '{"state":"DRAIN"}')"
 check "member roles api denied" "403" "$(curl -s -o /dev/null -w '%{http_code}' $API/admin/roles -H "Authorization: Bearer $MTOKEN")"
+# 分区管理（partitions:manage）：member 403；admin 空体 400（无副作用——不触 scontrol）
+check "member partitions api denied" "403" "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH $API/admin/partitions/debug -H "Authorization: Bearer $MTOKEN" -H 'Content-Type: application/json' -d '{"state":"DOWN"}')"
+check "admin partitions empty update 400" "400" "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH $API/admin/partitions/debug -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{}')"
 
 echo "== 3) 内置角色 seed =="
 ROLES=$(curl -s $API/admin/roles -H "Authorization: Bearer $TOKEN")

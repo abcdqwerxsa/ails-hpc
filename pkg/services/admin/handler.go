@@ -282,6 +282,42 @@ func (h *AdminHandler) SetTenantQOS(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "tenant qos updated"})
 }
 
+// --- 分区管理（partitions:manage；scontrol 直通，同 4.2 教义） ---
+
+// GetPartition GET /api/v1/admin/partitions/:name —— 编辑弹层当前值（scontrol show partition）。
+func (h *AdminHandler) GetPartition(c *gin.Context) {
+	p, err := h.service.GetPartition(c.Request.Context(), c.Param("name"))
+	if errors.Is(err, ErrPartitionNotFound) {
+		httpx.NotFound(c, "partition not found")
+		return
+	}
+	if err != nil {
+		httpx.BadRequest(c, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"partition": p})
+}
+
+// UpdatePartition PATCH /api/v1/admin/partitions/:name {state?,maxTime?,default?,...}
+// 可改字段白名单与逐字段值校验见 cluster_admin.go（空串=不变更；全空 400）。
+func (h *AdminHandler) UpdatePartition(c *gin.Context) {
+	var req PartitionUpdates
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.BadRequest(c, "invalid payload")
+		return
+	}
+	if err := ValidatePartitionUpdates(req); err != nil {
+		httpx.BadRequest(c, err.Error())
+		return
+	}
+	actor, _ := actorAndTenant(c)
+	if err := h.service.UpdatePartition(c.Request.Context(), actor, c.Param("name"), req, requestID(c)); err != nil {
+		httpx.BadRequest(c, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "partition updated"})
+}
+
 // ListAudit GET /api/v1/admin/audit?actor=&action=&limit=（平台审计查看器，admin 独占）。
 func (h *AdminHandler) ListAudit(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.Query("limit"))

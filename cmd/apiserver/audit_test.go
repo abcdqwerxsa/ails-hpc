@@ -12,7 +12,7 @@ import (
 
 // TestAudit_CoversAuthAndOps 审计面覆盖：登录成功/失败/锁定、作业提交与取消、IDE 启动。
 func TestAudit_CoversAuthAndOps(t *testing.T) {
-	r, st := setupRBACStack(t)
+	r, st, _ := setupRBACStack(t)
 
 	// 登录失败（错误密码）→ auth.login.fail
 	doAuth(r, http.MethodPost, "/api/v1/auth/login", `{"username":"alice","password":"wrong!!!"}`, "")
@@ -56,7 +56,7 @@ func TestAudit_CoversAuthAndOps(t *testing.T) {
 
 // TestAudit_LoginDetailShape 登录审计 detail 形状（ip/锁定态）——供运维检索。
 func TestAudit_LoginDetailShape(t *testing.T) {
-	r, st := setupRBACStack(t)
+	r, st, _ := setupRBACStack(t)
 	doAuth(r, http.MethodPost, "/api/v1/auth/login", `{"username":"alice","password":"nope!!!"}`, "")
 	entries, err := st.ListAudit(t.Context(), "alice", "auth.login.fail", 10)
 	if err != nil || len(entries) == 0 {

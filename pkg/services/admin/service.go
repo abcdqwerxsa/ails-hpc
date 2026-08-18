@@ -28,6 +28,8 @@ var (
 	ErrRoleNotAllowed = errors.New("admin: tenant admins may only create member or tenant_admin users")
 	// ErrReservationNotFound 预约不存在。
 	ErrReservationNotFound = errors.New("admin: reservation not found")
+	// ErrPartitionNotFound 分区不存在（scontrol show partition 无该名字）。
+	ErrPartitionNotFound = errors.New("admin: partition not found")
 )
 
 // SlurmProvisioner 是 Slurm 侧供给面（默认 sacctmgr via docker exec；测试注入假实现）。

@@ -11,7 +11,7 @@ export const BUILTIN_ROLE_PERMISSIONS: Record<string, string[]> = {
   admin: [
     'cluster:read', 'nodes:manage',
     'tenants:read', 'tenants:manage', 'users:create',
-    'audit:read', 'reservations:manage', 'qos:manage', 'roles:manage',
+    'audit:read', 'reservations:manage', 'qos:manage', 'partitions:manage', 'roles:manage',
   ],
   ops_admin: ['cluster:read', 'billing:read'],
   tenant_admin: [

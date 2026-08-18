@@ -16,7 +16,7 @@ import (
 
 // TestPolicy_PasswordComplexity 复杂度策略：弱密码 400，强密码 200。
 func TestPolicy_PasswordComplexity(t *testing.T) {
-	r, _ := setupRBACStack(t)
+	r, _, _ := setupRBACStack(t)
 	tok := loginViaAPI(t, r, "alice", "alice12345")
 
 	try := func(np string) int {
@@ -36,7 +36,7 @@ func TestPolicy_PasswordComplexity(t *testing.T) {
 
 // TestPolicy_PasswordHistory 历史 N 次不可重用：改密后改回旧密码 → 400。
 func TestPolicy_PasswordHistory(t *testing.T) {
-	r, _ := setupRBACStack(t)
+	r, _, _ := setupRBACStack(t)
 	// 第一轮：alice12345 → New#Pass1
 	tok1 := loginViaAPI(t, r, "alice", "alice12345")
 	if c := doAuthRaw(r, http.MethodPost, "/api/v1/auth/password",
@@ -70,7 +70,7 @@ func TestPolicy_PasswordHistory(t *testing.T) {
 // TestPolicy_MustChangeGate 强制改密门：被管理员重置后，业务端点 403（code=
 // must_change_password），仅自助面放行；改密成功后恢复。
 func TestPolicy_MustChangeGate(t *testing.T) {
-	r, st := setupRBACStack(t)
+	r, st, _ := setupRBACStack(t)
 	ctx := context.Background()
 	tadmin := loginViaAPI(t, r, "tadmin", "tenant12345")
 
@@ -113,7 +113,7 @@ func TestPolicy_MustChangeGate(t *testing.T) {
 
 // TestPolicy_SessionsAndLogoutAll 会话台账与全设备登出。
 func TestPolicy_SessionsAndLogoutAll(t *testing.T) {
-	r, _ := setupRBACStack(t)
+	r, _, _ := setupRBACStack(t)
 	// 两次登录 = 两条会话（token 都有效）
 	tok1 := loginViaAPI(t, r, "alice", "alice12345")
 	tok2 := loginViaAPI(t, r, "alice", "alice12345")
@@ -141,7 +141,7 @@ func TestPolicy_SessionsAndLogoutAll(t *testing.T) {
 
 // TestPolicy_CreateUserForceChange API 建户初始密码强制首登改密（tadmin 建 bob）。
 func TestPolicy_CreateUserForceChange(t *testing.T) {
-	r, st := setupRBACStack(t)
+	r, st, _ := setupRBACStack(t)
 	tadmin := loginViaAPI(t, r, "tadmin", "tenant12345")
 
 	if c, b := doAuth(r, http.MethodPost, "/api/v1/tenants/me/users",
