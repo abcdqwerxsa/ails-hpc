@@ -137,8 +137,9 @@ CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(username, id);`,
 }
 
 // rolesMigration 生成 v3 迁移 SQL。内置角色的 permissions JSON 取自
-// auth.BuiltinRolePermissions（构建期快照，排序保证确定性）——seed 后内置角色以
-// 库内值为权威（is_system=1 不可删改），代码映射仅作 yaml/内存库与旧令牌回退。
+// auth.BuiltinRolePermissions（构建期快照，排序保证确定性）。注意：seed 只管建库
+// 首次落行；此后内置角色以代码为权威，Open 每次经 resyncBuiltinRoles 对齐
+// （is_system=1 不可经 API 改，resync 是词汇表扩充触达旧库的唯一通道）。
 //
 // users.role 列保留且语义收紧为"基角色"（scope 推导：member/tenant_admin/ops_admin/
 // admin），自定义角色经 role_id 指向；列上原有 CHECK 不变（基角色恒四常量之一）。
