@@ -58,8 +58,10 @@ func (sacctmgrProvisioner) ProvisionAccount(account, parentAccount string) error
 	if parentAccount != "" {
 		add += fmt.Sprintf(" parent=%s", parentAccount)
 	}
-	_, err := slurmrest.RunInSlurmctld("sh", "-c", add+" || true")
-	return err
+	if _, err := slurmrest.RunInSlurmctld("sh", "-c", add+" || true"); err != nil {
+		return err
+	}
+	return refreshAssocs()
 }
 
 func (sacctmgrProvisioner) ProvisionUser(clusterUser string, uid, gid int, account, parentAccount string) error {
@@ -87,12 +89,23 @@ func (sacctmgrProvisioner) ProvisionUser(clusterUser string, uid, gid int, accou
 			return fmt.Errorf("posix provision on %s: %w", t, err)
 		}
 	}
-	return nil
+	return refreshAssocs()
 }
 
 func (sacctmgrProvisioner) SetAccountLimits(account, setting string) error {
-	_, err := slurmrest.RunInSlurmctld("sh", "-c",
-		fmt.Sprintf("sacctmgr -i modify account %s set %s", account, setting))
+	if _, err := slurmrest.RunInSlurmctld("sh", "-c",
+		fmt.Sprintf("sacctmgr -i modify account %s set %s", account, setting)); err != nil {
+		return err
+	}
+	return refreshAssocs()
+}
+
+// refreshAssocs 让 slurmctld 立即重读 association（生产实证：sacctmgr 落库后
+// slurmctld 的 assoc 缓存不自动跟进——新用户提交报 "Invalid account or
+// account/partition combination"，直到 scontrol reconfigure；限额变更同理）。
+// 小集群 reconfigure 开销毫秒级，换来供给确定性。
+func refreshAssocs() error {
+	_, err := slurmrest.RunInSlurmctld("scontrol", "reconfigure")
 	return err
 }
 
