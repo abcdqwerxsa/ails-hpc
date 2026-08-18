@@ -12,6 +12,27 @@ import (
 	"ails-hpc/pkg/auth"
 )
 
+// resyncBuiltinRoles 把四个内置系统角色的 permissions 行对齐到代码权威清单
+// （auth.BuiltinRolePermissions）。系统角色不可经 API 改（ErrRoleSystem），而词汇表
+// 扩充（如 partitions:manage/users:manage）只改代码——没有 resync 就没有合法通道让
+// 旧库跟上（#64 生产 verify 抓到 admin 面 403 即此坑）。幂等，Open 每次执行。
+func resyncBuiltinRoles(ctx context.Context, db *sql.DB) error {
+	for name, perms := range auth.BuiltinRolePermissions {
+		sorted := append([]string(nil), perms...)
+		sort.Strings(sorted)
+		buf, err := json.Marshal(sorted)
+		if err != nil {
+			return fmt.Errorf("store: builtin role %s: %w", name, err)
+		}
+		if _, err := db.ExecContext(ctx,
+			`UPDATE roles SET permissions = ? WHERE is_system = 1 AND tenant_id IS NULL AND name = ?`,
+			string(buf), name); err != nil {
+			return fmt.Errorf("store: resync builtin role %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
 // 角色管理错误（R3；handler 按 sentinel 映射 HTTP：escalation/reserved/invalid→400，
 // system/in-use/exists→409，not-found→404）。
 var (

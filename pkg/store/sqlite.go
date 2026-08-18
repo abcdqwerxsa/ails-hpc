@@ -34,6 +34,12 @@ func Open(path string) (Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	// 内置系统角色以代码为权威（rolesMigration 旧注释的"库内值为权威"教义有洞：
+	// 系统角色不可改 + 词汇表只改代码 = 永久失同步）。每次开库对齐——幂等。
+	if err := resyncBuiltinRoles(context.Background(), db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	// 保留租户 'system' 恒存在（admin/ops_admin 的归属，设计 §2.3）——冷启动空库
 	// 即可建平台管理员做 bootstrap；幂等，重开不重复。CreateTenant 仍拒绝经 API 建。
 	if _, err := db.ExecContext(context.Background(), `

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"encoding/json"
 	"path/filepath"
 	"testing"
@@ -177,4 +178,50 @@ func TestForeignKeyBlocksRoleDropWithUsers(t *testing.T) {
 		t.Error("deleting a role still referenced by users must fail (FK)")
 	}
 	_ = st.Close()
+}
+
+// TestOpenResyncsBuiltinRoles v3 修复回归：词汇表扩充后旧库的 is_system 行不会自动
+// 跟随（#64 生产 verify 抓到 admin 对 partitions:manage/users:manage 403）。重开库
+// 必须把系统角色行对齐到 auth.BuiltinRolePermissions——篡改后 reopen 断言复原。
+func TestOpenResyncsBuiltinRoles(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "resync.db")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	impl := st.(*sqliteStore)
+	// 篡改：模拟 #63/#64 部署前的旧库快照（缺两个新权限点）
+	if _, err := impl.db.Exec(`UPDATE roles SET permissions = ? WHERE is_system = 1 AND name = 'admin'`,
+		`["cluster:read","nodes:manage"]`); err != nil {
+		t.Fatalf("tamper: %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	st2, err := Open(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer st2.Close()
+	admin, err := st2.(AdminStore).RoleByName(context.Background(), "", "admin")
+	if err != nil || admin == nil {
+		t.Fatalf("RoleByName admin: %v %v", admin, err)
+	}
+	want := map[string]bool{}
+	for _, p := range auth.BuiltinRolePermissions[auth.RoleSystemAdmin] {
+		want[p] = true
+	}
+	got := map[string]bool{}
+	for _, p := range admin.Permissions {
+		got[p] = true
+	}
+	if len(got) != len(want) {
+		t.Fatalf("after reopen admin perms = %v, want %v (resync not applied?)", admin.Permissions, auth.BuiltinRolePermissions[auth.RoleSystemAdmin])
+	}
+	for p := range want {
+		if !got[p] {
+			t.Errorf("admin missing %q after reopen; perms=%v", p, admin.Permissions)
+		}
+	}
 }
