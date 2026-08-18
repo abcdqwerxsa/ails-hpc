@@ -3,6 +3,7 @@ package billing
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -12,12 +13,35 @@ import (
 )
 
 // 费率模型（定价策略，非集群数据），单位 CNY：CPU 每核时、内存每 GB·时、GPU 每卡时。
-// 后续可移至 config；此处保留为常量并显式标注，避免与"集群真实数据"混淆。
-const (
-	rateCPU = 0.50 // CNY / CPU-hour
-	rateMEM = 0.10 // CNY / GB-hour
-	rateGPU = 2.50 // CNY / GPU-hour
-)
+// v4-W1 起费率是策略不是代码：env AILS_RATE_CPU/MEM/GPU 可覆盖（缺省回落历史默认，
+// 零配置行为不变）；UsageResponse 透出当前生效费率——计价透明不藏。
+type Rates struct {
+	CPU float64 `json:"cpu"` // CNY / CPU-hour
+	MEM float64 `json:"mem"` // CNY / GB-hour
+	GPU float64 `json:"gpu"` // CNY / GPU-hour
+}
+
+// defaultRates 历史常数（v1-v3 的既定定价，保持零配置行为不变）。
+var defaultRates = Rates{CPU: 0.50, MEM: 0.10, GPU: 2.50}
+
+// ratesFromEnv 读 AILS_RATE_CPU/MEM/GPU；未设/非法/负值一律回落默认（策略加载
+// 失败不致命——计费可用性优先于新价生效）。
+func ratesFromEnv() Rates {
+	r := defaultRates
+	for _, f := range []struct {
+		env string
+		dst *float64
+	}{
+		{"AILS_RATE_CPU", &r.CPU}, {"AILS_RATE_MEM", &r.MEM}, {"AILS_RATE_GPU", &r.GPU},
+	} {
+		if v := os.Getenv(f.env); v != "" {
+			if p, err := strconv.ParseFloat(v, 64); err == nil && p >= 0 {
+				*f.dst = p
+			}
+		}
+	}
+	return r
+}
 
 // BillingService 基于真实 SACCT（slurmdbd）作业历史计算资源用量与账单。
 // slurmdb 为唯一真源 —— 不再维护内存捏造记录。
@@ -34,16 +58,22 @@ type SacctFetcher interface {
 
 type billingService struct {
 	fetcher SacctFetcher
+	rates   Rates
 }
 
 // NewBillingService 用真实 slurmrest 客户端构造计费服务。
 func NewBillingService(client *slurmrest.Client) BillingService {
-	return &billingService{fetcher: sacctViaSlurmrest{client: client}}
+	return &billingService{fetcher: sacctViaSlurmrest{client: client}, rates: ratesFromEnv()}
 }
 
 // NewBillingServiceWithFetcher 用注入的 sacct 抓取器构造计费服务（测试用）。
 func NewBillingServiceWithFetcher(f SacctFetcher) BillingService {
-	return &billingService{fetcher: f}
+	return &billingService{fetcher: f, rates: ratesFromEnv()}
+}
+
+// NewBillingServiceWithRates 显式指定费率构造（测试用；绕过 env）。
+func NewBillingServiceWithRates(f SacctFetcher, r Rates) BillingService {
+	return &billingService{fetcher: f, rates: r}
 }
 
 // sacctFormat 字段顺序与 SacctRow / ParseSacct 一致；
@@ -137,6 +167,7 @@ func (s *billingService) GetUsage(ctx context.Context, param UsageQueryParam) (*
 		TotalGPUHours:      round(gpuHrs),
 		JobCount:           jobCount,
 		ContainerCount:     0, // SACCT 无容器概念，如实为 0
+		Rates:              s.rates,
 		Breakdown:          breakdownByUserAccount(rows),
 	}, nil
 }
@@ -194,7 +225,7 @@ func (s *billingService) ExportReport(ctx context.Context, param ExportQueryPara
 		}, nil
 	}
 
-	cost := usage.TotalCPUHours*rateCPU + usage.TotalMemoryGBHours*rateMEM + usage.TotalGPUHours*rateGPU
+	cost := usage.TotalCPUHours*s.rates.CPU + usage.TotalMemoryGBHours*s.rates.MEM + usage.TotalGPUHours*s.rates.GPU
 	user := param.User
 	if user == "" {
 		user = "all"

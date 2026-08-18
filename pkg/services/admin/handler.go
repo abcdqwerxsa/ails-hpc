@@ -276,6 +276,39 @@ func (h *AdminHandler) ResetPlatformUserPassword(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "password reset; must change on next login"})
 }
 
+// GetTenantQuotas GET /api/v1/admin/tenants/quotas（v4-W3）：全部租户配额——
+// 平台侧入口（tenants:read）。admin 不持 billing:read（纯硬件监控教义），
+// 平台视角的配额总览走本端点而非 billing 面。
+func (h *AdminHandler) GetTenantQuotas(c *gin.Context) {
+	quotas, err := h.service.ListTenantQuotas(c.Request.Context())
+	if err != nil {
+		mapErr(c, err, "admin.ListTenantQuotas")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"quotas": quotas})
+}
+
+// GetBillingQuota GET /api/v1/slurm/billing/quota（v4-W3；billing:read 门 + scope 收口）。
+// 读数走 sacctmgr 权威。scope：ops(scope all)=全部租户；tenant_admin/member=仅本租户。
+func (h *AdminHandler) GetBillingQuota(c *gin.Context) {
+	quotas, err := h.service.ListTenantQuotas(c.Request.Context())
+	if err != nil {
+		mapErr(c, err, "admin.ListTenantQuotas")
+		return
+	}
+	sc := scopeOf(c)
+	if sc.Mode != auth.ScopeAll {
+		own := make([]TenantQuota, 0, 1)
+		for _, q := range quotas {
+			if q.TenantSlug == sc.TenantSlug {
+				own = append(own, q)
+			}
+		}
+		quotas = own
+	}
+	c.JSON(http.StatusOK, gin.H{"quotas": quotas})
+}
+
 // --- 4.2 预约 / QOS ---
 
 // ListReservations GET /api/v1/admin/reservations

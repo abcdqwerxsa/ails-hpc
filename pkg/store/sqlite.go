@@ -14,6 +14,8 @@ import (
 // sqliteStore 是 Store 的 sqlite 实现（WAL + busy_timeout；apiserver 单写者）。
 type sqliteStore struct {
 	db *sql.DB
+	// stopPruner 审计保留裁剪 goroutine 的停止通道（v4-W2；nil=未启动）。
+	stopPruner chan struct{}
 }
 
 // compile-time：sqliteStore 必须可直接替换 yaml/内存用户库。
@@ -40,6 +42,11 @@ func Open(path string) (Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	// v4-W2 审计保留：裁剪查询的 created_at 索引（幂等 DDL，不占迁移版本号）。
+	if err := ensureAuditCreatedIndex(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("store: audit index: %w", err)
+	}
 	// 保留租户 'system' 恒存在（admin/ops_admin 的归属，设计 §2.3）——冷启动空库
 	// 即可建平台管理员做 bootstrap；幂等，重开不重复。CreateTenant 仍拒绝经 API 建。
 	if _, err := db.ExecContext(context.Background(), `
@@ -48,10 +55,17 @@ func Open(path string) (Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("store: ensure reserved tenant %q: %w", systemTenant, err)
 	}
-	return &sqliteStore{db: db}, nil
+	s := &sqliteStore{db: db}
+	s.startAuditPruner() // 保留窗口裁剪（env 可调/禁用；Close 即停）
+	return s, nil
 }
 
-func (s *sqliteStore) Close() error { return s.db.Close() }
+func (s *sqliteStore) Close() error {
+	if s.stopPruner != nil {
+		close(s.stopPruner)
+	}
+	return s.db.Close()
+}
 
 // userRow 是 users ⨝ tenants ⨝ roles 的读投影；tenant_slug 同时填充 auth.User.OrgSlug
 // （兼容既有 tenantResolver/claims 路径——它们以 orgSlug 为租户标识直至 Phase 2 的 tid）。

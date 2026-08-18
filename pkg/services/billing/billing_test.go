@@ -312,3 +312,50 @@ func TestExportReport_JSONAndChart(t *testing.T) {
 		t.Fatalf("bad chart: %+v", rc)
 	}
 }
+
+// TestRatesEnvOverrideAndTransparency v4-W1：费率 env 可覆盖（缺省回落历史常数），
+// 且 UsageResponse 透出当前生效费率（计价透明）；导出成本按生效费率计。
+func TestRatesEnvOverrideAndTransparency(t *testing.T) {
+	t.Setenv("AILS_RATE_CPU", "1.25")
+	t.Setenv("AILS_RATE_MEM", "bogus") // 非法 → 回落默认
+	// AILS_RATE_GPU 未设 → 默认
+
+	rows := []SacctRow{
+		{JobID: "1", User: "u1", Account: "a1", ElapsedRaw: 3600, AllocCPUS: 2}, // 2 CPU·h
+	}
+	svc := NewBillingServiceWithFetcher(fakeFetcher{rows: rows})
+
+	usage, err := svc.GetUsage(context.Background(), UsageQueryParam{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.Rates.CPU != 1.25 || usage.Rates.MEM != 0.10 || usage.Rates.GPU != 2.50 {
+		t.Errorf("rates = %+v, want CPU=1.25(env) MEM=0.10(默认) GPU=2.50(默认)", usage.Rates)
+	}
+
+	// 导出成本按生效费率：2 CPU·h × 1.25 = 2.5 CNY
+	exp, err := svc.ExportReport(context.Background(), ExportQueryParam{Format: "json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	j, ok := exp.(ExportJSONResponse)
+	if !ok {
+		t.Fatalf("export type %T", exp)
+	}
+	if !approxEq(j.TotalCost, 2.5, 1e-9) {
+		t.Errorf("TotalCost = %v, want 2.5 (2 CPU·h × 1.25)", j.TotalCost)
+	}
+}
+
+// TestRatesExplicitConstructor 显式费率构造（NewBillingServiceWithRates）绕过 env。
+func TestRatesExplicitConstructor(t *testing.T) {
+	t.Setenv("AILS_RATE_CPU", "9.99")
+	svc := NewBillingServiceWithRates(fakeFetcher{}, Rates{CPU: 1, MEM: 2, GPU: 3})
+	usage, err := svc.GetUsage(context.Background(), UsageQueryParam{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.Rates.CPU != 1 || usage.Rates.MEM != 2 || usage.Rates.GPU != 3 {
+		t.Errorf("explicit rates leaked env: %+v", usage.Rates)
+	}
+}

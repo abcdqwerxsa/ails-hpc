@@ -39,6 +39,10 @@ check "member users api denied" "403" "$(curl -s -o /dev/null -w '%{http_code}' 
 check "admin users dir 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' $API/admin/users -H "Authorization: Bearer $TOKEN")"
 check "admin self disable 400" "400" "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH $API/admin/users/admin -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"status":"disabled"}')"
 check "admin weak reset 400" "400" "$(curl -s -o /dev/null -w '%{http_code}' -X POST $API/admin/users/member/password -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"newPassword":"weak"}')"
+# v4：费率透出（usage 响应含 rates）+ 配额双入口（member billing 面 200 / admin 平台面 200；均只读）
+curl -s "$API/slurm/billing/usage" -H "Authorization: Bearer $MTOKEN" | grep -q '"rates"' && ok "billing usage carries rates" || bad "billing rates"
+check "member billing quota 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' $API/slurm/billing/quota -H "Authorization: Bearer $MTOKEN")"
+check "admin platform quotas 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' $API/admin/tenants/quotas -H "Authorization: Bearer $TOKEN")"
 
 echo "== 3) 内置角色 seed =="
 ROLES=$(curl -s $API/admin/roles -H "Authorization: Bearer $TOKEN")

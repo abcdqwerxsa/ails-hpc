@@ -117,6 +117,49 @@ func (s *Service) clusterAudit(ctx context.Context, actor, action, target, rid, 
 	_ = s.st.WriteAudit(ctx, actor, action, target, rid, detail)
 }
 
+// --- 租户配额可见性（v4-W3）：读数走 Slurm 权威，不信 DB 限额快照 ---
+// （限额可能被集群侧直接改过——UpdateTenant 的 DB 字段只是设置时的记录。）
+
+// TenantQuota 是一个租户的 GrpTRES 上限（原始串直出，前端解析 cpu=/mem=/gres/gpu=）。
+type TenantQuota struct {
+	TenantSlug    string `json:"tenantSlug"`
+	ParentAccount string `json:"parentAccount"`
+	GrpTRES       string `json:"grpTres"` // 空串=未设限（集群默认）
+}
+
+// ListTenantQuotas sacctmgr -nP show account format=name,grptres 单次全量 →
+// 按租户父账号关联。需要用户库（租户清单）——yaml 模式 ensure() 503。
+func (s *Service) ListTenantQuotas(ctx context.Context) ([]TenantQuota, error) {
+	if err := s.ensure(); err != nil {
+		return nil, err
+	}
+	out, err := s.runCluster("sh", "-c",
+		`sacctmgr -nP show account format=name,grptres || true`)
+	if err != nil {
+		return nil, fmt.Errorf("sacctmgr show account: %w", err)
+	}
+	limits := map[string]string{}
+	for _, ln := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		f := strings.SplitN(ln, "|", 2)
+		if len(f) == 2 && f[0] != "" {
+			if _, dup := limits[f[0]]; !dup { // 重复行取首条
+				limits[f[0]] = f[1]
+			}
+		}
+	}
+	ts, err := s.st.Tenants(ctx)
+	if err != nil {
+		return nil, err
+	}
+	quotas := []TenantQuota{}
+	for _, t := range ts {
+		quotas = append(quotas, TenantQuota{
+			TenantSlug: t.Slug, ParentAccount: t.ParentAccount, GrpTRES: limits[t.ParentAccount],
+		})
+	}
+	return quotas, nil
+}
+
 func (s *Service) findReservation(ctx context.Context, name string) (*Reservation, error) {
 	rs, err := s.ListReservations(ctx)
 	if err != nil {

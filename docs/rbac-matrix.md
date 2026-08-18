@@ -71,7 +71,9 @@ R1 等价性测试锁定）；ops_admin 是计费观测角色；作业与 IDE �
 | POST /slurm/containers/launch · DELETE /slurm/containers/:id · POST /slurm/containers/:id/extend · ANY /ide/:session/* | ide:manage |
 | GET /slurm/containers/list | ide:list |
 | GET /slurm/billing/usage·export | billing:read |
+| GET /slurm/billing/quota | billing:read（v4-W3；scope：ops=全部，tenant 侧=本租户） |
 | GET /admin/tenants · /admin/tenants/:slug/users | tenants:read |
+| GET /admin/tenants/quotas | tenants:read（v4-W3 平台侧配额总览——admin 无 billing:read） |
 | POST /admin/tenants · PATCH /admin/tenants/:slug | tenants:manage |
 | POST /admin/users | users:create |
 | GET /admin/users · PATCH /admin/users/:username · POST /admin/users/:username/password | users:manage |
