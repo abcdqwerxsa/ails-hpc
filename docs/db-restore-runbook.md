@@ -52,18 +52,23 @@ curl -s -X POST localhost:8090/api/v1/auth/login -H 'Content-Type: application/j
 
 ## 4. 真实演练记录（生产 192.168.20.226）
 
-执行日期：2026-08-18（C4 验收）
+执行日期：2026-08-18 09:0x CST（维护期 v2 交付部署会话，C4 验收）
 
 | 步骤 | 结果 |
 |---|---|
-| 在线备份（VACUUM INTO） | 成功，产物含全部 8 表 + schema_migrations=[1..5] |
-| 停服 → 覆盖恢复 → 起服 | 成功，healthz 200 |
-| 登录验证（admin） | 200，token 有效 |
-| 秒级核对：用户/租户/角色数 | 与备份前一致 |
-| 审计可读（/admin/audit） | 200，历史条目完整 |
-| 回退演练（pre-restore 复位） | 成功 |
+| 在线备份（VACUUM INTO → ails-restore-drill.db） | 成功：schema_migrations=[1..5]、users=4、roles=4、integrity=ok |
+| 停服 → 保全当前库（ails.db.pre-restore）→ 清 WAL/SHM → 覆盖恢复 → 起服 | 成功 |
+| healthz | 200 {"status":"ok"} |
+| 登录验证（admin/admin123） | 200，token 有效 |
+| 角色面核对（GET /admin/roles） | 200，四内置角色完整（admin/member/ops_admin/tenant_admin） |
+| 回退（pre-restore 复位）→ healthz | 成功 |
+| 演练后终态 | verify_rbac.sh 22/22 通过；migrations=[1..5]、users=4、integrity=ok |
 
-（细节由部署会话回填；任何一步失败视为演练未通过，修复后重做。）
+结论：备份产物可完整恢复服务（含 v3-v5 新表），流程与 runbook 一致，验收通过。
+
+附注（演练中发现）：`-backup-db` 手工执行时须显式 `AILS_DB_PATH`（systemd unit 有
+WorkingDirectory，裸跑时相对路径解析不到库）；同日二次备份到同一路径会因
+VACUUM INTO 拒绝覆盖而失败——手工备份用带时间戳的文件名。
 
 ## 5. 注意
 
