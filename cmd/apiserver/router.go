@@ -101,6 +101,8 @@ func NewRouter(h Handlers) *gin.Engine {
 		billingRead := auth.RequirePermission(auth.PermBillingRead)
 		slurm.GET("/billing/usage", billingRead, h.Billing.GetUsage)
 		slurm.GET("/billing/export", billingRead, h.Billing.ExportReport)
+		// v4-W3 租户配额可见性：GrpTRES 上限（sacctmgr 权威读数；scope 收口在 handler）
+		slurm.GET("/billing/quota", billingRead, h.Admin.GetBillingQuota)
 
 		// 平台管理（admin 独占；sqlite 库未启用时端点统一 503）。
 		// R1 起按权限点逐路由挂（原 RequireRole(admin) 组门面的等价拆分——admin 持有
@@ -110,6 +112,8 @@ func NewRouter(h Handlers) *gin.Engine {
 		platformAdmin.POST("/tenants", auth.RequirePermission(auth.PermTenantsManage), h.Admin.CreateTenant)
 		platformAdmin.PATCH("/tenants/:slug", auth.RequirePermission(auth.PermTenantsManage), h.Admin.UpdateTenant)
 		platformAdmin.GET("/tenants/:slug/users", auth.RequirePermission(auth.PermTenantsRead), h.Admin.ListTenantUsers)
+		// v4-W3 租户配额总览（平台侧入口——admin 无 billing:read，配额经 tenants:read）
+		platformAdmin.GET("/tenants/quotas", auth.RequirePermission(auth.PermTenantsRead), h.Admin.GetTenantQuotas)
 		platformAdmin.POST("/users", auth.RequirePermission(auth.PermUsersCreate), h.Admin.CreatePlatformUser)
 		// v3-U 平台用户生命周期：目录/状态/显示名/重置（users:manage——与建号 users:create 分权）
 		usersManage := auth.RequirePermission(auth.PermUsersManage)

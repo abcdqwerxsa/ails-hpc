@@ -525,3 +525,176 @@ func TestRBAC_PlatformUserLifecycle(t *testing.T) {
 		}
 	}
 }
+
+// TestRBAC_TenantQuotaVisibility v4-W3：配额读数 sacctmgr 权威 + 双入口收口——
+// 平台侧 /admin/tenants/quotas（tenants:read，admin 全量）；billing 面
+// /slurm/billing/quota（billing:read：ops 全量；member/tenant_admin 仅本租户）。
+// admin 不持 billing:read（纯硬件监控教义），平台配额总览走 admin 路由。
+func TestRBAC_TenantQuotaVisibility(t *testing.T) {
+	r, _, adminSvc := setupRBACStack(t)
+	adminSvc.SetClusterRunner(func(args ...string) ([]byte, error) {
+		if len(args) > 1 && args[0] == "sh" && strings.Contains(args[2], "show account") {
+			return []byte("hpc-lab|cpu=32,mem=64G\nbio-lab|\n"), nil
+		}
+		return []byte(""), nil
+	})
+
+	padmin := loginViaAPI(t, r, "padmin", "platform123")
+	puser := loginViaAPI(t, r, "puser", "puser123456") // ops_admin（scope all）
+	alice := loginViaAPI(t, r, "alice", "alice12345")  // member（hpc-lab）
+	tadmin := loginViaAPI(t, r, "tadmin", "tenant12345")
+
+	// 平台侧入口：admin 全部租户；member 无 tenants:read → 403
+	code, body := doAuth(r, http.MethodGet, "/api/v1/admin/tenants/quotas", "", padmin)
+	if code != http.StatusOK {
+		t.Fatalf("admin quota: %d %s", code, body)
+	}
+	for _, want := range []string{`"tenantSlug":"hpc-lab"`, `"grpTres":"cpu=32,mem=64G"`, `"tenantSlug":"bio-lab"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("admin quota missing %s: %s", want, body)
+		}
+	}
+	if c := doRequest(r, http.MethodGet, "/api/v1/admin/tenants/quotas", "", alice); c != http.StatusForbidden {
+		t.Errorf("member on admin quota route: want 403 got %d", c)
+	}
+
+	// billing 面：ops(scope all) 全量
+	if c, b := doAuth(r, http.MethodGet, "/api/v1/slurm/billing/quota", "", puser); c != 200 || !strings.Contains(b, "bio-lab") {
+		t.Errorf("ops quota: %d %s", c, b)
+	}
+	// member / tenant_admin：仅本租户
+	for name, tok := range map[string]string{"member": alice, "tenant_admin": tadmin} {
+		_, b := doAuth(r, http.MethodGet, "/api/v1/slurm/billing/quota", "", tok)
+		if !strings.Contains(b, `"tenantSlug":"hpc-lab"`) || strings.Contains(b, "bio-lab") {
+			t.Errorf("%s quota must be tenant-scoped: %s", name, b)
+		}
+	}
+}
+
+// TestE2E_OperationalJourneys v4-W4：真实路由表（setupRBACStack=生产 NewRouter+真
+// sqlite+mock slurmrestd+canned CLI）上的运维旅程链——同一令牌跨多面、状态前后衔
+// 接。与逐点矩阵/对抗测试互补：它们证单点语义，这里证链路连贯（v2/v3/v4 全面）。
+func TestE2E_OperationalJourneys(t *testing.T) {
+	r, st, adminSvc := setupRBACStack(t)
+	adminSvc.SetClusterRunner(func(args ...string) ([]byte, error) {
+		if len(args) > 2 && args[0] == "scontrol" && args[1] == "show" {
+			return []byte("PartitionName=debug\n   State=UP Default=YES MaxTime=UNLIMITED Nodes=c1\n"), nil
+		}
+		if len(args) > 1 && args[0] == "sh" && strings.Contains(args[2], "show account") {
+			return []byte("hpc-lab|cpu=32,mem=64G\n"), nil
+		}
+		return []byte(""), nil
+	})
+
+	// ---- 旅程 A：平台管理员的一天（目录→角色→显示名→禁用/启用→审计闭环→配额总览）----
+	admin := loginViaAPI(t, r, "padmin", "platform123")
+
+	// A1 建自定义平台角色（只读观测：集群读+审计读+租户读）并指派给 puser
+	if c, b := doAuth(r, http.MethodPost, "/api/v1/admin/roles",
+		`{"name":"observer","permissions":["cluster:read","audit:read","tenants:read"]}`, admin); c != 200 {
+		t.Fatalf("A1 create role: %d %s", c, b)
+	}
+	if c, b := doAuth(r, http.MethodPatch, "/api/v1/admin/users/puser/role",
+		`{"role":"observer"}`, admin); c != 200 {
+		t.Fatalf("A1 assign: %d %s", c, b)
+	}
+
+	// A2 目录里给 alice 改显示名 → 同一 admin 会话的目录读回可见（写读衔接）
+	if c, _ := doAuth(r, http.MethodPatch, "/api/v1/admin/users/alice",
+		`{"displayName":"Alice A."}`, admin); c != 200 {
+		t.Fatalf("A2 set displayName: got %d", c)
+	}
+	_, dir := doAuth(r, http.MethodGet, "/api/v1/admin/users?q=Alice A", "", admin)
+	if !strings.Contains(dir, `"username":"alice"`) || !strings.Contains(dir, "Alice A.") {
+		t.Errorf("A2 directory should reflect displayName: %s", dir)
+	}
+
+	// A3 禁用 alice → 她的在途令牌即刻 401 → 启用 → 审计链完整（按动作过滤）
+	aliceTok := loginViaAPI(t, r, "alice", "alice12345")
+	if c, _ := doAuth(r, http.MethodPatch, "/api/v1/admin/users/alice", `{"status":"disabled"}`, admin); c != 200 {
+		t.Fatalf("A3 disable: got %d", c)
+	}
+	if c := doRequest(r, http.MethodGet, "/api/v1/auth/me", "", aliceTok); c != 401 {
+		t.Errorf("A3 disabled token must 401, got %d", c)
+	}
+	doAuth(r, http.MethodPatch, "/api/v1/admin/users/alice", `{"status":"active"}`, admin)
+	entries, _ := st.ListAudit(t.Context(), "padmin", "user.update", 10)
+	if len(entries) < 2 { // displayName + disable + enable ≥ 2 条即可证链
+		t.Errorf("A3 audit chain = %d entries, want >=2", len(entries))
+	}
+
+	// A4 配额总览（W3 平台侧入口）
+	if c, b := doAuth(r, http.MethodGet, "/api/v1/admin/tenants/quotas", "", admin); c != 200 || !strings.Contains(b, "cpu=32,mem=64G") {
+		t.Errorf("A4 platform quotas: %d %s", c, b)
+	}
+
+	// ---- 旅程 B：观测员与成员的一天 ----
+	// B0 A1 指派的 observer 对 puser 立即可用（不重登）：审计面 200、用户治理面 403
+	puser := loginViaAPI(t, r, "puser", "puser123456")
+	if c := doRequest(r, http.MethodGet, "/api/v1/admin/audit", "", puser); c != 200 {
+		t.Errorf("B0 observer audit:read: got %d", c)
+	}
+	if c := doRequest(r, http.MethodGet, "/api/v1/admin/users", "", puser); c != 403 {
+		t.Errorf("B0 observer without users:manage: want 403 got %d", c)
+	}
+
+	alice := loginViaAPI(t, r, "alice", "alice12345") // A3 启用后重新登录（新版本令牌）
+	// B1 提交→取消（同一令牌两步衔接）
+	var sub struct {
+		JobID int `json:"job_id"`
+	}
+	c, body := doAuth(r, http.MethodPost, "/api/v1/slurm/jobs/submit",
+		`{"name":"journey","script":"echo hi"}`, alice)
+	if c != 200 {
+		t.Fatalf("B1 submit: %d %s", c, body)
+	}
+	_ = json.Unmarshal([]byte(body), &sub)
+	if got := doRequest(r, http.MethodPost, fmt.Sprintf("/api/v1/slurm/jobs/%d/cancel", sub.JobID), "", alice); got != 200 {
+		t.Errorf("B1 cancel own job: got %d", got)
+	}
+	// B2 计费可见且带费率（W1）；配额仅本租户（W3 scope）
+	_, usage := doAuth(r, http.MethodGet, "/api/v1/slurm/billing/usage", "", alice)
+	if !strings.Contains(usage, `"rates"`) {
+		t.Errorf("B2 usage should carry rates: %s", usage)
+	}
+	_, quota := doAuth(r, http.MethodGet, "/api/v1/slurm/billing/quota", "", alice)
+	if !strings.Contains(quota, `"tenantSlug":"hpc-lab"`) || strings.Contains(quota, "bio-lab") {
+		t.Errorf("B2 member quota must be own-tenant only: %s", quota)
+	}
+	// B3 管理面全 403
+	for _, path := range []string{"/api/v1/admin/users", "/api/v1/admin/partitions/debug", "/api/v1/admin/tenants/quotas"} {
+		if c := doRequest(r, http.MethodGet, path, "", alice); c != 403 {
+			t.Errorf("B3 member on %s: want 403 got %d", path, c)
+		}
+	}
+
+	// ---- 旅程 C：集群管理面闭环（分区改属性→审计；预约建删→审计——W2 补齐面）----
+	if c, _ := doAuth(r, http.MethodPatch, "/api/v1/admin/partitions/debug",
+		`{"state":"DOWN","maxTime":"4:00:00"}`, admin); c != 200 {
+		t.Errorf("C partition update: got %d", c)
+	}
+	if c, _ := doAuth(r, http.MethodPost, "/api/v1/admin/reservations",
+		`{"name":"e2e","durationMinutes":30}`, admin); c != 200 {
+		t.Errorf("C reservation create: got %d", c)
+	}
+	if c, _ := doAuth(r, http.MethodDelete, "/api/v1/admin/reservations/e2e", "", admin); c != 200 {
+		t.Errorf("C reservation delete: got %d", c)
+	}
+	for _, w := range []struct{ action, target string }{
+		{"partition.update", "partition:debug"},
+		{"reservations.create", "reservation:e2e"},
+		{"reservations.delete", "reservation:e2e"},
+	} {
+		es, _ := st.ListAudit(t.Context(), "padmin", w.action, 10)
+		found := false
+		for _, e := range es {
+			if e.Target == w.target {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("C audit %s %s missing", w.action, w.target)
+		}
+	}
+}

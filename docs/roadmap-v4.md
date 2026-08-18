@@ -10,10 +10,10 @@
 
 | # | 内容 | 说明 | 规模 | 状态 |
 |---|---|---|---|---|
-| W1 | 费率配置化 | rateCPU/MEM/GPU 三常数(service.go 硬编码,注释自认"后续可移至 config")→ env `AILS_RATE_CPU/MEM/GPU`(缺省回落现值,零配置行为不变,同 AILS_OIDC_* 教义);billing 页透出当前费率(计价透明) | S | 待做 |
-| W2 | 审计保留 + 查看器润色 | audit_log 只进不出无上限:保留窗口默认 365 天(env `AILS_AUDIT_RETENTION_DAYS` 可调),开库 prune(照 resyncBuiltinRoles 教义)+ 常驻每日 ticker;顺带审计查看器补 action 过滤下拉(API 已支持 ?action=,UI 只有 actor 框) | S | 待做 |
-| W3 | 租户配额可见性 | 成员/租户管理员可见本租户 GrpTRES 限额 vs 已用量对比:限额经 sacctmgr show assoc(父账号)封装只读查询;用量复用 billing 聚合;展示挂 billing 页顶部(scope 内:member/tenant_admin 看本租户,admin 全部);权限点复用 billing:read | S-M | 待做 |
-| W4 | E2E 盘点扩面 | TEST_INFRA 的 feature inventory 从四大核心需求扩到 v2/v3 面:RBAC 权限门、用户生命周期(禁用/重置/displayName)、分区管理、预约/QOS、审计写入;live 模式打本地 docker 集群不打生产;与 go test 矩阵互补(HTTP 契约 + 部署形态层) | M | 待做 |
+| W1 | 费率配置化 | rateCPU/MEM/GPU 三常数(service.go 硬编码,注释自认"后续可移至 config")→ env `AILS_RATE_CPU/MEM/GPU`(缺省回落现值,零配置行为不变,同 AILS_OIDC_* 教义);billing 页透出当前费率与估算费用(计价透明) | S | **已完成**(本 PR) |
+| W2 | 审计保留 + 查看器润色 | audit_log 只进不出无上限:保留窗口默认 365 天(env `AILS_AUDIT_RETENTION_DAYS` 可调),开库 prune(照 resyncBuiltinRoles 教义)+ 常驻每日 ticker;顺带审计查看器补 action 过滤下拉(API 已支持 ?action=,UI 只有 actor 框)。**实施发现**:预约/QOS/审计三面板的 JSX 自 v1 起从未落地(只有 state/loader)——本次补建全部三面板 | S | **已完成**(本 PR) |
+| W3 | 租户配额可见性 | 成员/租户管理员可见本租户 GrpTRES 限额 vs 已用量对比:限额经 sacctmgr show assoc(父账号)封装只读查询;用量复用 billing 聚合;展示挂 billing 页顶部(scope 内:member/tenant_admin 看本租户,admin 全部);权限点复用 billing:read。**实施调整**:admin 不持 billing:read(纯硬件监控教义)→双入口:/slurm/billing/quota(billing:read,scope 收口)+/admin/tenants/quotas(tenants:read 平台总览);对比语义修正为并发上限展示(GrpTRES=并发上限非累计用量) | S-M | **已完成**(本 PR) |
+| W4 | E2E 盘点扩面 | TEST_INFRA 的 feature inventory 从四大核心需求扩到 v2/v3 面:RBAC 权限门、用户生命周期(禁用/重置/displayName)、分区管理、预约/QOS、审计写入;live 模式打本地 docker 集群不打生产;与 go test 矩阵互补(HTTP 契约 + 部署形态层)。**实施发现**:TEST_INFRA 描述的 test/e2e 影子套件从未入库→不重建(平行实现反模式),改为:真实路由上的运维旅程链测试(TestE2E_OperationalJourneys,三链覆盖 v2/v3/v4)+ TEST_INFRA/TEST_READY 重写为真实架构 | M | **已完成**(本 PR) |
 
 ## 触发驱动表(触发即启动,不预先开发)
 

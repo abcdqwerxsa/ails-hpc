@@ -596,3 +596,75 @@ func TestUpdateUserDisplayNameAndListPlatformUsers(t *testing.T) {
 		t.Errorf("clear display name failed: %+v", all[0])
 	}
 }
+
+// TestPruneAuditRetention v4-W2：保留窗口裁剪只删窗口外行；<=0 显式禁用；
+// env 读取缺省 365、非法回落。先禁后台裁剪器（Open 的 boot-prune 与本测试
+// 的 seed 存在无害竞态——生产幂等，测试须确定性）。
+func TestPruneAuditRetention(t *testing.T) {
+	t.Setenv("AILS_AUDIT_RETENTION_DAYS", "0") // 关闭 boot/ticker 裁剪
+	ctx := context.Background()
+	admin := newAdminStore(t)
+	impl := admin.(*sqliteStore)
+	// 三行：400 天前（窗口外）/ 昨天留（窗口内）/ 现在
+	seed := []struct{ actor, age string }{
+		{"old-actor", "datetime('now', '-400 days')"},
+		{"recent-actor", "datetime('now', '-1 day')"},
+		{"now-actor", "datetime('now')"},
+	}
+	for _, s := range seed {
+		if _, err := impl.db.ExecContext(ctx,
+			`INSERT INTO audit_log (actor, action, target, created_at) VALUES (?, 'auth.login', 'x', `+s.age+`)`,
+			s.actor); err != nil {
+			t.Fatalf("seed %s: %v", s.actor, err)
+		}
+	}
+
+	n, err := impl.pruneAudit(ctx, 365)
+	if err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("pruned = %d, want 1 (only the 400-day-old row)", n)
+	}
+	actors := map[string]bool{}
+	for _, e := range mustListAudit(t, admin) {
+		actors[e.Actor] = true
+	}
+	if actors["old-actor"] || !actors["recent-actor"] || !actors["now-actor"] {
+		t.Errorf("survivors = %v", actors)
+	}
+
+	// 幂等：再跑一次无新删除
+	if n, _ := impl.pruneAudit(ctx, 365); n != 0 {
+		t.Errorf("second prune deleted %d, want 0", n)
+	}
+	// 禁用：retainDays<=0 为 no-op
+	if n, _ := impl.pruneAudit(ctx, 0); n != 0 {
+		t.Errorf("disabled prune deleted %d, want 0", n)
+	}
+	// env 读取：非法回落缺省；显式 0 = 禁用（缺省 365 的断言在 TestAuditRetentionEnvDefault）
+	t.Setenv("AILS_AUDIT_RETENTION_DAYS", "bogus")
+	if got := auditRetentionDays(); got != 365 {
+		t.Errorf("bogus retention = %d, want 365", got)
+	}
+	t.Setenv("AILS_AUDIT_RETENTION_DAYS", "0")
+	if got := auditRetentionDays(); got != 0 {
+		t.Errorf("explicit 0 = %d, want 0 (disabled)", got)
+	}
+}
+
+// TestAuditRetentionEnvDefault 未设 env 时缺省 365（独立测试——上个用例已 Setenv）。
+func TestAuditRetentionEnvDefault(t *testing.T) {
+	if got := auditRetentionDays(); got != 365 {
+		t.Errorf("default retention = %d, want 365", got)
+	}
+}
+
+func mustListAudit(t *testing.T, admin AdminStore) []AuditEntry {
+	t.Helper()
+	entries, err := admin.ListAudit(context.Background(), "", "", 100)
+	if err != nil {
+		t.Fatalf("ListAudit: %v", err)
+	}
+	return entries
+}

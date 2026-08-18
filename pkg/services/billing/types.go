@@ -21,6 +21,7 @@ type UsageResponse struct {
 	TotalGPUHours      float64          `json:"total_gpu_hours"`
 	JobCount           int              `json:"job_count"`
 	ContainerCount     int              `json:"container_count"`
+	Rates              Rates            `json:"rates"` // 当前生效费率（v4-W1 计价透明）
 	Breakdown          []UsageBreakdown `json:"breakdown"`
 }
 

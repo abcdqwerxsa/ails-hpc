@@ -230,3 +230,40 @@ func TestClusterAdminAudit_X1(t *testing.T) {
 		}
 	}
 }
+
+// TestListTenantQuotas v4-W3：sacctmgr account 表 → 租户配额关联；空输出容错。
+func TestListTenantQuotas(t *testing.T) {
+	s, _ := newPartitionService(t, func(args ...string) ([]byte, error) {
+		return []byte("hpc-lab|cpu=32,mem=64G\nbio-lab|\nroot|cpu=9999\n"), nil
+	})
+	ctx := context.Background()
+	// 建两个租户（parent_account=slug）
+	if err := rawCreateTenant(t, s, "hpc-lab"); err != nil {
+		t.Fatal(err)
+	}
+	if err := rawCreateTenant(t, s, "bio-lab"); err != nil {
+		t.Fatal(err)
+	}
+
+	qs, err := s.ListTenantQuotas(ctx)
+	if err != nil {
+		t.Fatalf("ListTenantQuotas: %v", err)
+	}
+	got := map[string]string{}
+	for _, q := range qs {
+		got[q.TenantSlug] = q.GrpTRES
+	}
+	if got["hpc-lab"] != "cpu=32,mem=64G" || got["bio-lab"] != "" {
+		t.Errorf("quotas = %v", got)
+	}
+	if _, hasRoot := got["root"]; hasRoot {
+		t.Errorf("non-tenant account leaked into quotas: %v", got)
+	}
+}
+
+// rawCreateTenant 经 store 接口建租户（cluster_admin_test 夹具辅助）。
+func rawCreateTenant(t *testing.T, s *Service, slug string) error {
+	t.Helper()
+	_, err := s.st.CreateTenant(context.Background(), slug, "")
+	return err
+}
