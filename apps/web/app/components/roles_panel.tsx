@@ -249,12 +249,20 @@ export function RoleAssignSelect({
     (async () => {
       try {
         const r = scope === 'platform' ? await slurm.listPlatformRoles() : await slurm.listMyRoles();
-        setRoles((r.roles || []).filter((x) => !x.isSystem || x.name === currentRole));
+        // 选项 = 本作用域全部可派角色（内置系统角色 + 自定义）。此前把 isSystem 过滤掉
+        // 又未另渲染内置选项 → 无自定义角色时下拉只剩当前角色，无法改派。
+        let list = r.roles || [];
+        const cur = currentRoleName || currentRole;
+        if (cur && !list.some((x) => x.name === cur)) {
+          // 当前角色不在清单（如跨作用域改派前的显示值）→ 补一项防选中值悬空
+          list = [...list, { id: -1, name: cur, description: '', permissions: [], baseRole: currentRole, isSystem: true, userCount: 0 }];
+        }
+        setRoles(list);
       } catch {
-        /* 角色清单拉取失败 → 仅内置选项 */
+        /* 角色清单拉取失败 → 至少保留当前角色（初始 value） */
       }
     })();
-  }, [scope, currentRole]);
+  }, [scope, currentRole, currentRoleName]);
 
   const apply = async () => {
     setBusy(true);
