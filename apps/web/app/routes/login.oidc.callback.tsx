@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
-import { oidc, slurm } from '../services/slurm';
+import { oidc } from '../services/slurm';
 import { refreshMe } from '../services/auth';
 
 // S3：OIDC 回调路由（hash: /login/oidc/callback?status=..&token=..）。
@@ -26,23 +26,6 @@ function OidcCallbackPage() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
 
-  // A1：SSO 签发与密码登录同账——绑定的本地账号若 must_change_password=1（初始/被
-  // 重置密码），与 login.tsx 一致引导到设置页强制改密，而非落一个业务端点处处
-  // 403(must_change_password) 的仪表盘。后端中间件从库内活体强制，此处仅补前端引导。
-  const landAfterAuth = async () => {
-    await refreshMe();
-    try {
-      const me = await slurm.getMe();
-      if (me.user.mustChangePassword) {
-        navigate({ to: '/settings' });
-        return;
-      }
-    } catch {
-      /* /auth/me 拉取失败按常规落地（后续 401/403 拦截接管） */
-    }
-    navigate({ to: '/' });
-  };
-
   useEffect(() => {
     const q = parseHashQuery();
     const st = q.get('status') || '';
@@ -56,13 +39,12 @@ function OidcCallbackPage() {
         return;
       }
       localStorage.setItem('ails_token', token);
-      landAfterAuth();
+      refreshMe().then(() => navigate({ to: '/' }));
     }
     if (st === 'bound') {
       setMsg('SSO 身份已绑定到当前账号');
       setTimeout(() => navigate({ to: '/' }), 1200);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navigate]);
 
   const confirmLink = async (e: React.FormEvent) => {
@@ -72,7 +54,8 @@ function OidcCallbackPage() {
     try {
       const r = await oidc.confirmLink({ linkToken, username, password });
       localStorage.setItem('ails_token', r.token);
-      await landAfterAuth();
+      await refreshMe();
+      navigate({ to: '/' });
     } catch (err: any) {
       setError('关联失败：' + (err?.message || err));
     } finally {
