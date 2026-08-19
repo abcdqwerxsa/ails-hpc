@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -32,8 +33,8 @@ func (f *fakeProvision) ProvisionAccount(account, parent string) error {
 	return nil
 }
 
-func (f *fakeProvision) ProvisionUser(cu, account, parent string) error {
-	f.calls = append(f.calls, "u:"+cu+"/"+account+"@"+parent)
+func (f *fakeProvision) ProvisionUser(cu string, uid, gid int, account, parent string) error {
+	f.calls = append(f.calls, fmt.Sprintf("u:%s(%d/%d)/%s@%s", cu, uid, gid, account, parent))
 	if f.fail {
 		return errors.New("sacctmgr unreachable")
 	}
@@ -156,7 +157,7 @@ func TestTenantAdmin_ManagesOwnUsersOnly(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("create bob: %d %s", code, body)
 	}
-	if len(prov.calls) != 1 || prov.calls[0] != "u:bob/bob@hpc-lab" {
+	if len(prov.calls) != 1 || prov.calls[0] != "u:bob(2004/2000)/bob@hpc-lab" {
 		t.Errorf("provisioner calls = %v, want [u:bob/bob@hpc-lab]", prov.calls)
 	}
 	if u, err := st.Verify("bob", "Bob#23456"); err != nil || u.ClusterUser != "bob" || u.Account != "bob" {

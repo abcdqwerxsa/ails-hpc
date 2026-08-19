@@ -5,6 +5,7 @@ mkdir -p /etc/munge /var/log/munge /var/lib/munge /var/run/munge /shared
 chmod 1777 /shared  # 多用户共享卷：交互式会话由普通用户(如 hpcuser)提交，需可写（sticky，类 /tmp）
 mkdir -p /shared/sessions && chmod 1777 /shared/sessions  # IDE 会话 meta 目录：多用户 per-user 写连接信息
 mkdir -p /shared/jobs && chmod 1777 /shared/jobs  # 门户作业输出（1.2：/shared/jobs/<jobid>.out，%j 由 Slurm 展开）
+mkdir -p /shared/home && chmod 1777 /shared/home  # per-user HOME（IDE 会话）：必须预建 1777——首个用户运行时自建会是 755 umask，堵死后来者（生产实证：demo IDE 启动 PermissionError）
 chown -R munge:munge /etc/munge /var/log/munge /var/lib/munge /var/run/munge
 chmod 0755 /var/run/munge /var/lib/munge /var/log/munge /etc/munge
 

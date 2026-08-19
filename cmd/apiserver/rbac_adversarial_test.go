@@ -35,7 +35,9 @@ import (
 type noopProvisioner struct{}
 
 func (noopProvisioner) ProvisionAccount(account, parentAccount string) error  { return nil }
-func (noopProvisioner) ProvisionUser(cu, account, parentAccount string) error { return nil }
+func (noopProvisioner) ProvisionUser(cu string, uid, gid int, account, parentAccount string) error {
+	return nil
+}
 func (noopProvisioner) SetAccountLimits(account, setting string) error        { return nil }
 
 // setupRBACStack 全栈夹具：sqlite 库（system/hpc-lab/bio-lab + 种子用户）+ 生产路由表。
