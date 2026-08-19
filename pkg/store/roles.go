@@ -151,7 +151,9 @@ func (s *sqliteStore) RoleByName(ctx context.Context, tenantSlug, name string) (
 }
 
 // CreateRole 建自定义角色（系统角色经迁移 seed，不经本入口）。
-// 基角色作用域规则：平台角色 base ∈ {admin, ops_admin}；租户角色 base ∈ {member, tenant_admin}。
+// 基角色作用域规则：平台角色 base 四选一（2026-08-19 起放开 member/tenant_admin——平台
+// 管理员需要定义"仅本人/本租户数据范围"的自定义角色，如作业提交员）；租户角色 base ∈
+// {member, tenant_admin}。
 func (s *sqliteStore) CreateRole(ctx context.Context, in NewRole) (*Role, error) {
 	if !unixSafeRE.MatchString(in.Name) {
 		return nil, fmt.Errorf("%w: %q (want ^[a-z_][a-z0-9_-]{0,31}$)", ErrInvalidUsername, in.Name)
@@ -167,6 +169,8 @@ func (s *sqliteStore) CreateRole(ctx context.Context, in NewRole) (*Role, error)
 	if in.TenantSlug == "" {
 		allowedBase[auth.RoleSystemAdmin] = true
 		allowedBase[auth.RoleOpsAdmin] = true
+		allowedBase[auth.RoleTenantAdmin] = true
+		allowedBase[auth.RoleMember] = true
 	} else {
 		allowedBase[auth.RoleTenantAdmin] = true
 		allowedBase[auth.RoleMember] = true
