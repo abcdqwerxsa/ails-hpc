@@ -74,7 +74,7 @@ const userSelect = `
 SELECT u.username, u.password_hash, u.role, t.slug,
        u.cluster_user, u.uid, u.gid, u.account, u.display_name, u.status, u.token_version,
        u.role_id, COALESCE(r.name, u.role), r.permissions,
-       u.auth_source, COALESCE(u.oidc_sub, ''), u.must_change_password
+       u.auth_source, COALESCE(u.oidc_sub, ''), u.must_change_password, t.status
 FROM users u JOIN tenants t ON t.id = u.tenant_id
 LEFT JOIN roles r ON r.id = u.role_id`
 
@@ -84,13 +84,15 @@ func scanUser(row interface{ Scan(...any) error }) (*auth.User, error) {
 	var roleName string
 	var permsJSON sql.NullString
 	var mustChange bool
+	var tenantStatus string
 	if err := row.Scan(&u.Username, &u.PasswordHash, &u.Role, &u.TenantSlug,
 		&u.ClusterUser, &u.UID, &u.GID, &u.Account, &u.DisplayName, &u.Status, &u.TokenVersion,
-		&roleID, &roleName, &permsJSON, &u.AuthSource, &u.OIDCSub, &mustChange); err != nil {
+		&roleID, &roleName, &permsJSON, &u.AuthSource, &u.OIDCSub, &mustChange, &tenantStatus); err != nil {
 		return nil, err
 	}
 	u.MustChangePassword = mustChange
-	u.OrgSlug = u.TenantSlug // 兼容：迁移期租户标识 = orgSlug
+	u.TenantSuspended = tenantStatus == "suspended" // P1-8：登录/活体校验统一拒绝挂起租户成员
+	u.OrgSlug = u.TenantSlug                        // 兼容：迁移期租户标识 = orgSlug
 	if u.Status == "" {
 		u.Status = "active"
 	}
@@ -123,8 +125,8 @@ func (s *sqliteStore) Verify(username, password string) (*auth.User, error) {
 	if !ok {
 		return nil, auth.ErrInvalidCredentials
 	}
-	if u.Status != "active" {
-		return nil, auth.ErrInvalidCredentials // 禁用用户与"密码错"同文案，防探测
+	if u.Status != "active" || u.TenantSuspended {
+		return nil, auth.ErrInvalidCredentials // 禁用用户/挂起租户与"密码错"同文案，防探测（P1-8）
 	}
 	if err := auth.CompareHashAndPassword(u.PasswordHash, password); err != nil {
 		return nil, auth.ErrInvalidCredentials

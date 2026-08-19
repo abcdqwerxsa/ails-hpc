@@ -37,7 +37,8 @@ func (s *sqliteStore) LinkOIDC(username, sub string) error {
 		return err
 	}
 	res, err := s.db.Exec(`
-		UPDATE users SET oidc_sub = ?, updated_at = datetime('now') WHERE username = ?`,
+		UPDATE users SET oidc_sub = ?, token_version = token_version + 1,
+			updated_at = datetime('now') WHERE username = ?`,
 		sub, username)
 	if err != nil {
 		return err
@@ -62,7 +63,8 @@ func (s *sqliteStore) UnlinkOIDC(username string) error {
 		return ErrNoLocalCredential
 	}
 	res, err := s.db.Exec(`
-		UPDATE users SET oidc_sub = NULL, updated_at = datetime('now') WHERE username = ?`, username)
+		UPDATE users SET oidc_sub = NULL, token_version = token_version + 1,
+			updated_at = datetime('now') WHERE username = ?`, username)
 	if err != nil {
 		return err
 	}
@@ -81,6 +83,11 @@ func (s *sqliteStore) UnlinkOIDC(username string) error {
 func (s *sqliteStore) ProvisionOIDCUser(username, email, displayName, roleName, tenantSlug, sub string) (*auth.User, error) {
 	if sub == "" {
 		return nil, fmt.Errorf("store: empty oidc sub")
+	}
+	// P2（安全审计 2026-08-19）：username 将成为 clusterUser/account 直接进集群供给
+	// 命令——此处独立复查 unixSafeRE（此前仅依赖 auth 层 sanitizeUsername 单层防护）。
+	if !unixSafeRE.MatchString(username) {
+		return nil, fmt.Errorf("%w: %q", ErrInvalidUsername, username)
 	}
 	ctx := context.Background()
 

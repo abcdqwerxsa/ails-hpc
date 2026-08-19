@@ -66,6 +66,7 @@ type jrow struct {
 	id, cpus           int
 	name, state, nodes string
 	submit             int64
+	account            string // P1-4：归属锚定字段（空=旧用例，SessionOwner 视为遗留空属主）
 }
 
 func jobsResp(rows ...jrow) *slurmrest.JobsResponse {
@@ -80,7 +81,7 @@ func jobsResp(rows ...jrow) *slurmrest.JobsResponse {
 			TimeLimit  int    `json:"time_limit"`
 			SubmitTime int64  `json:"submit_time"`
 			Account    string `json:"account"`
-		}{JobID: x.id, Name: x.name, JobState: x.state, Nodes: x.nodes, SubmitTime: x.submit})
+		}{JobID: x.id, Name: x.name, JobState: x.state, Nodes: x.nodes, SubmitTime: x.submit, Account: x.account})
 	}
 	return r
 }

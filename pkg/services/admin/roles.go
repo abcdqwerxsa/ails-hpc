@@ -104,7 +104,11 @@ func (s *Service) DeleteRole(ctx context.Context, actor, tenantSlug, name, rid s
 // 同名角色不可达——解析不到即 404）。租户调用方（tenantSlug 非空）目标用户必须属于
 // 本租户（越权改派外租户用户 → 404，与 UpdateMyUser 同语义）；归属规则与落库在
 // store.SetUserRole。
-func (s *Service) AssignRole(ctx context.Context, actor, tenantSlug, username, roleName, rid string) error {
+// 安全审计 2026-08-19 P1-5：租户作用域增加"目标角色权限 ⊆ 调用者"校验——指派即
+// 授予权限，弱角色持有者（路由门=tenant:users:manage）不可把内置 tenant_admin 或
+// 任何超集角色派给自己/他人。平台作用域跳过（与建/改角色同决策：roles:manage 持有
+// 者管理全部角色指派）。
+func (s *Service) AssignRole(ctx context.Context, actor string, actorPerms []string, tenantSlug, username, roleName, rid string) error {
 	if err := s.ensure(); err != nil {
 		return err
 	}
@@ -113,6 +117,9 @@ func (s *Service) AssignRole(ctx context.Context, actor, tenantSlug, username, r
 		return err
 	}
 	if tenantSlug != "" {
+		if err := ensureSubset(actorPerms, r.Permissions); err != nil {
+			return fmt.Errorf("%w: role %s", err, r.Name)
+		}
 		targets, err := s.st.ListTenantUsers(ctx, tenantSlug)
 		if err != nil {
 			return err
