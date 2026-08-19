@@ -4,8 +4,10 @@ After=ails-apiserver.service
 
 [Service]
 Type=oneshot
-# 经 apiserver 二进制的 VACUUM INTO 在线快照（宿主无需 sqlite3 CLI）；7 份按星期轮转
-ExecStart=/bin/sh -c '/opt/slurm-cluster/bin/apiserver -backup-db /opt/slurm-cluster/var/lib/ails/backups/ails-$(date +%%u).db'
+# 经 apiserver 二进制的 VACUUM INTO 在线快照（宿主无需 sqlite3 CLI）；7 份按星期轮转。
+# 2026-08-19 起一并备份 Casdoor SSO：sqlite 在线快照（python3 backup API，宿主亦无 sqlite3 CLI）
+# + app.conf（origin 等非敏感配置；client secret 在门户 .env，root:600 本服务读不到，单独保护）。
+ExecStart=/bin/sh -c 'D=/opt/slurm-cluster/var/lib/ails/backups; rm -f $D/ails-$(date +%%u).db $D/casdoor-$(date +%%u).db && /opt/slurm-cluster/bin/apiserver -backup-db $D/ails-$(date +%%u).db && python3 -c "import sqlite3,sys; s=sqlite3.connect(sys.argv[1],uri=True); d=sqlite3.connect(sys.argv[2]); s.backup(d); d.close()" "file:/opt/slurm-cluster/casdoor/data/casdoor.db?mode=ro" $D/casdoor-$(date +%%u).db && cp /opt/slurm-cluster/casdoor/conf/app.conf $D/casdoor-app.conf'
 WorkingDirectory=/opt/slurm-cluster
 User=ails
 Group=ails
