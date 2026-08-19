@@ -49,7 +49,7 @@ func TestLoad_Defaults(t *testing.T) {
 }
 
 func TestLoad_Overrides(t *testing.T) {
-	t.Setenv("AILS_JWT_SECRET", "sekret")
+	t.Setenv("AILS_JWT_SECRET", "sekret-32-bytes-long-aaaa-bbbb-cccc")
 	t.Setenv("AILS_PORT", "9999")
 	t.Setenv("SLURMRESTD_URL", "http://slurm:6820")
 	t.Setenv("AILS_TOKEN_TTL", "2h")

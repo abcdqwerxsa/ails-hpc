@@ -142,7 +142,9 @@ func VerifyToken(tokenStr string) (*Claims, error) {
 	h.Write([]byte(unsignedToken))
 	expectedSig := base64.RawURLEncoding.EncodeToString(h.Sum(nil))
 
-	if parts[2] != expectedSig {
+	// P2（安全审计 2026-08-19）：恒时比较（防时序侧信道逐字节探签名；对齐 oidc_state
+	// 的 hmac.Equal 用法）。
+	if !hmac.Equal([]byte(parts[2]), []byte(expectedSig)) {
 		return nil, errors.New("invalid signature")
 	}
 
