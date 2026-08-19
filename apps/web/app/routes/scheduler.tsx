@@ -2,8 +2,11 @@ import { createFileRoute } from '@tanstack/react-router';
 import { Fragment, useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { slurm, type Partition, type PartitionDetail, type UpdatePartitionRequest } from '../services/slurm';
 import { can, getStoredUser } from '../services/auth';
+import { QOSPanel, ReservationsPanel } from '../components/scheduler_sections';
 
-export const Route = createFileRoute('/partitions')({ component: PartitionsPage });
+// 2026-08-19 IA 重组：原「分区」页扩为「调度管理」——分区/预约/QOS 同属 Slurm 调度器
+// 配置三件套（预约与 QOS 面板自 admin.tsx 迁入）。
+export const Route = createFileRoute('/scheduler')({ component: SchedulerPage });
 
 // 分区编辑表单（空串=不变更；下拉含空选项"不变"）
 const EMPTY_EDIT = {
@@ -11,7 +14,7 @@ const EMPTY_EDIT = {
   nodes: '', allowAccounts: '', allowGroups: '',
 };
 
-function PartitionsPage() {
+function SchedulerPage() {
   const [parts, setParts] = useState<Partition[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -49,10 +52,12 @@ function PartitionsPage() {
         .partitions-page .pt-row:hover { background: var(--bg-card-hover, #222632); }
       `}</style>
 
-      <h2 style={{ marginTop: 0, marginBottom: '1.5rem' }}>分区</h2>
+      <h2 style={{ marginTop: 0, marginBottom: '1.5rem' }}>调度管理</h2>
 
       {error && <Notice color="#f43f5e" bg="rgba(244,63,94,.12)">{error}</Notice>}
       {info && <Notice color="#10b981" bg="rgba(16,185,129,.12)">{info}</Notice>}
+
+      <h3 style={{ margin: '0 0 1rem', fontSize: '1.1rem' }}>分区</h3>
 
       <div
         style={{
@@ -212,6 +217,10 @@ function PartitionsPage() {
           </div>
         </div>
       )}
+
+      {/* 预约 / QOS（自 admin.tsx 迁入；各自权限门） */}
+      {can('reservations:manage', getStoredUser()) && <ReservationsPanel />}
+      {can('qos:manage', getStoredUser()) && <QOSPanel />}
     </div>
   );
 }

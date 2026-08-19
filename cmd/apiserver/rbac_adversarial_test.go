@@ -304,16 +304,17 @@ func TestRBAC_CrossTenantAndDeleteDisposition(t *testing.T) {
 }
 
 // TestRBAC_PlatformRoleIsolation 平台自定义角色不可触租户作用域，反之亦然；
-// 且 admin 无 jobs:submit——平台侧也无法铸造可提交作业的平台角色。
+// 平台作用域放开为全目录（2026-08-19 产品决策）——admin 自身无 jobs:submit 也可铸造
+// 含作业权限的平台角色（词汇表外的权限点仍被 store 层拒绝）。
 func TestRBAC_PlatformRoleIsolation(t *testing.T) {
 	r, _, _ := setupRBACStack(t)
 	padmin := loginViaAPI(t, r, "padmin", "platform123")
 	tadmin := loginViaAPI(t, r, "tadmin", "tenant12345")
 
-	// 平台侧建角色给 jobs:submit → 400（admin 自身无此权限——纯监控角色的边界保持）
+	// 平台侧建角色给 jobs:submit → 200（全目录可选；基角色 member = 持有者仅本人数据）
 	if c, _ := doAuth(r, http.MethodPost, "/api/v1/admin/roles",
-		`{"name":"jobber","permissions":["jobs:submit"]}`, padmin); c != http.StatusBadRequest {
-		t.Errorf("platform role granting jobs:submit: want 400 got %d", c)
+		`{"name":"jobber","baseRole":"member","permissions":["jobs:submit","cluster:read"]}`, padmin); c != http.StatusOK {
+		t.Errorf("platform role granting jobs:submit: want 200 got %d", c)
 	}
 	// 平台角色合法子集 → 200
 	if c, b := doAuth(r, http.MethodPost, "/api/v1/admin/roles",

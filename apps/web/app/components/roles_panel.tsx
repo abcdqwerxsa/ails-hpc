@@ -113,7 +113,9 @@ export function RolesPanel({ scope }: RolesPanelProps) {
         <button className="btn-primary" onClick={refresh} style={{ padding: '0.3rem 0.9rem' }}>刷新</button>
       </div>
       <p style={{ margin: '0 0 0.75rem', fontSize: '0.8rem', color: 'var(--text-muted,#94a3b8)' }}>
-        自定义角色的权限只能是创建者自身权限的子集（服务端校验，越界项已置灰）。内置四角色不可删改。
+        {isPlatform
+          ? '平台作用域：全部权限目录可选（roles:manage 持有者管理所有角色；词汇表外的权限点仍被服务端拒绝）。内置四角色不可删改。'
+          : '租户作用域：自定义角色的权限只能是创建者自身权限的子集（服务端校验，越界项已置灰）。内置四角色不可删改。'}
       </p>
 
       {error && <Notice color="#f43f5e" bg="rgba(239,68,68,.1)">{error}</Notice>}
@@ -137,6 +139,8 @@ export function RolesPanel({ scope }: RolesPanelProps) {
                 <>
                   <option value="ops_admin">ops_admin（平台全量可见）</option>
                   <option value="admin">admin（平台管理员）</option>
+                  <option value="tenant_admin">tenant_admin（本租户数据）</option>
+                  <option value="member">member（仅本人数据）</option>
                 </>
               ) : (
                 <>
@@ -149,7 +153,8 @@ export function RolesPanel({ scope }: RolesPanelProps) {
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
           {ALL_PERMISSIONS.map((p) => {
-            const allowed = actorPerms.includes(p);
+            // 平台作用域放开为全目录（2026-08-19 产品决策）；租户作用域仍 ⊆ 创建者。
+            const allowed = isPlatform || actorPerms.includes(p);
             const on = selected.includes(p);
             return (
               <label

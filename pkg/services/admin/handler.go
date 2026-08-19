@@ -581,7 +581,9 @@ func (h *AdminHandler) CreatePlatformRole(c *gin.Context) {
 		req.BaseRole = auth.RoleOpsAdmin // 平台默认基角色（scope=all 的最小面）
 	}
 	actor, _ := actorAndTenant(c)
-	r, err := h.service.CreateRole(c.Request.Context(), actor, actorPermissions(c), store.NewRole{
+	// 平台作用域=全目录可选（2026-08-19 产品决策）：roles:manage 持有者管理全部角色，
+	// ⊆ 自身会让纯监控的 admin 永远造不出含作业权限的角色。词汇表校验仍在 store 层。
+	r, err := h.service.CreateRole(c.Request.Context(), actor, auth.AllPermissions, store.NewRole{
 		Name: req.Name, Description: req.Description,
 		Permissions: req.Permissions, BaseRole: req.BaseRole, TenantSlug: "",
 	}, requestID(c))
@@ -603,7 +605,8 @@ func (h *AdminHandler) UpdatePlatformRole(c *gin.Context) {
 		return
 	}
 	actor, _ := actorAndTenant(c)
-	r, err := h.service.UpdateRole(c.Request.Context(), actor, actorPermissions(c), "",
+	// 平台作用域=全目录可选（与 CreatePlatformRole 同决策）
+	r, err := h.service.UpdateRole(c.Request.Context(), actor, auth.AllPermissions, "",
 		c.Param("name"), req.Permissions, req.Description, requestID(c))
 	if err != nil {
 		mapErr(c, err, "admin.UpdatePlatformRole")

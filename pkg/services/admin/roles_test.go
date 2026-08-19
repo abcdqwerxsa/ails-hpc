@@ -264,9 +264,10 @@ func TestRoles_CrossTenantIsolation(t *testing.T) {
 	}
 }
 
-// TestRoles_PlatformAdminSubset 平台侧同理：admin 不能授予自己没有的权限
-// （admin 无 jobs:submit——纯监控角色）。
-func TestRoles_PlatformAdminSubset(t *testing.T) {
+// TestRoles_PlatformFullCatalog 平台作用域放开为全目录（2026-08-19 产品决策）：
+// admin（纯监控角色、自身无 jobs:submit）也能创建含作业权限的平台自定义角色；
+// 词汇表外的权限点仍被 store 层拦截。租户作用域的 ⊆ 规则见 TestRoles_CreateSubset。
+func TestRoles_PlatformFullCatalog(t *testing.T) {
 	r, _ := newRolesFixture(t)
 	code, _ := rolesCall(r, http.MethodPost, "/api/v1/admin/roles",
 		`{"name":"auditor","permissions":["audit:read","tenants:read"]}`)
@@ -274,9 +275,19 @@ func TestRoles_PlatformAdminSubset(t *testing.T) {
 		t.Fatalf("platform subset role: want 200 got %d", code)
 	}
 	code, body := rolesCall(r, http.MethodPost, "/api/v1/admin/roles",
-		`{"name":"jobadmin","permissions":["jobs:submit"]}`)
-	if code != http.StatusBadRequest {
-		t.Fatalf("admin granting jobs:submit: want 400 got %d body=%v", code, body)
+		`{"name":"jobadmin","baseRole":"member","permissions":["jobs:submit","jobs:control","cluster:read"]}`)
+	if code != http.StatusOK {
+		t.Fatalf("admin granting jobs:submit: want 200 got %d body=%v", code, body)
+	}
+	// 词汇表外 → 400（store 层权威词汇校验）
+	if code, _ := rolesCall(r, http.MethodPost, "/api/v1/admin/roles",
+		`{"name":"weird","permissions":["super:power"]}`); code != http.StatusBadRequest {
+		t.Fatalf("unknown permission: want 400 got %d", code)
+	}
+	// 更新路径同样放开：给既有平台角色补作业权限 → 200
+	if code, _ := rolesCall(r, http.MethodPatch, "/api/v1/admin/roles/auditor",
+		`{"permissions":["audit:read","ide:manage"]}`); code != http.StatusOK {
+		t.Fatalf("platform update with ide:manage: want 200 got %d", code)
 	}
 }
 

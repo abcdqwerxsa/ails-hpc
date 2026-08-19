@@ -10,15 +10,16 @@ import (
 	"ails-hpc/pkg/store"
 )
 
-// ErrRoleEscalation 请求的权限超出调用者自身权限集合（防提权核心：服务端取子集校验，
-// 不信任请求体声明的任何权限）。
-var ErrRoleEscalation = errors.New("admin: requested permissions exceed the caller's own")
+// ErrRoleEscalation 请求的权限超出本次调用允许授予的集合（防提权核心：服务端取子集
+// 校验，不信任请求体声明的任何权限）。允许集合按作用域定：租户作用域=创建者自身权限
+// （角色链不放大）；平台作用域=全目录（平台管理员持 roles:manage，本就管理全部角色——
+// ⊆ 自身会让"纯监控角色"永远造不出含作业权限的角色，2026-08-19 产品决策放开）。
+var ErrRoleEscalation = errors.New("admin: requested permissions exceed the allowed set")
 
-// ensureSubset 校验 requested ⊆ actor（子集规则：租户自定义角色的权限只能是创建者
-// 权限的子集——由此归纳，任何角色链都不会放大权限）。
-func ensureSubset(actor, requested []string) error {
-	set := make(map[string]bool, len(actor))
-	for _, p := range actor {
+// ensureSubset 校验 requested ⊆ allowed（子集规则；allowed 的语义见 ErrRoleEscalation）。
+func ensureSubset(allowed, requested []string) error {
+	set := make(map[string]bool, len(allowed))
+	for _, p := range allowed {
 		set[p] = true
 	}
 	for _, p := range requested {
@@ -38,12 +39,12 @@ func (s *Service) ListRoles(ctx context.Context, tenantSlug string) ([]store.Rol
 }
 
 // CreateRole 建自定义角色。tenantSlug 非空时为租户角色（归属以服务端为准）；
-// permissions 必须是 actorPerms 子集（防提权）。
-func (s *Service) CreateRole(ctx context.Context, actor string, actorPerms []string, in store.NewRole, rid string) (*store.Role, error) {
+// permissions 必须是 allowedPerms 子集（平台=全目录，租户=创建者自身——防提权）。
+func (s *Service) CreateRole(ctx context.Context, actor string, allowedPerms []string, in store.NewRole, rid string) (*store.Role, error) {
 	if err := s.ensure(); err != nil {
 		return nil, err
 	}
-	if err := ensureSubset(actorPerms, in.Permissions); err != nil {
+	if err := ensureSubset(allowedPerms, in.Permissions); err != nil {
 		return nil, err
 	}
 	r, err := s.st.CreateRole(ctx, in)
@@ -56,8 +57,9 @@ func (s *Service) CreateRole(ctx context.Context, actor string, actorPerms []str
 }
 
 // UpdateRole 改角色权限/描述（作用域内按名解析；跨作用域/不存在统一 404——防枚举）。
-// 新权限集合同样必须是 actorPerms 子集——收缩后再放大也被拦截。
-func (s *Service) UpdateRole(ctx context.Context, actor string, actorPerms []string, tenantSlug, name string, permissions []string, desc *string, rid string) (*store.Role, error) {
+// 新权限集合同样必须是 allowedPerms 子集（平台=全目录，租户=创建者自身）——收缩后再
+// 放大也被拦截。
+func (s *Service) UpdateRole(ctx context.Context, actor string, allowedPerms []string, tenantSlug, name string, permissions []string, desc *string, rid string) (*store.Role, error) {
 	if err := s.ensure(); err != nil {
 		return nil, err
 	}
@@ -67,7 +69,7 @@ func (s *Service) UpdateRole(ctx context.Context, actor string, actorPerms []str
 	}
 	next := cur.Permissions
 	if permissions != nil {
-		if err := ensureSubset(actorPerms, permissions); err != nil {
+		if err := ensureSubset(allowedPerms, permissions); err != nil {
 			return nil, err
 		}
 		next = permissions
