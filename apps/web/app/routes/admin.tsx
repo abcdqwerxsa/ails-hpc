@@ -1,8 +1,9 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
-import { slurm, type AdminUser, type AuditEntry, type QOSInfo, type Reservation, type TenantInfo } from '../services/slurm';
+import { slurm, type AdminUser, type TenantInfo } from '../services/slurm';
 import { can, getStoredUser } from '../services/auth';
-import { RolesPanel, RoleAssignSelect } from '../components/roles_panel';
+import { RoleAssignSelect } from '../components/roles_panel';
+import { Field, MiniBtn, Notice, StatusBadge, cardStyle, emptyStyle, mono, num, th, td } from '../components/panel_ui';
 
 export const Route = createFileRoute('/admin')({ component: AdminPage });
 
@@ -15,26 +16,16 @@ function AdminPage() {
   if (!showPlatform && !showTenant) {
     return (
       <div>
-        <h2 style={{ marginTop: 0, marginBottom: '1rem' }}>管理</h2>
+        <h2 style={{ marginTop: 0, marginBottom: '1rem' }}>用户管理</h2>
         <Notice color="#f43f5e" bg="rgba(239,68,68,.1)">当前账号无管理权限。</Notice>
       </div>
     );
   }
   return (
     <div>
-      <h2 style={{ marginTop: 0, marginBottom: '1rem' }}>管理</h2>
-      {showTenant && (
-        <>
-          <TenantUsersPanel />
-          {can('tenant:roles:manage', user) && <RolesPanel scope="tenant" />}
-        </>
-      )}
-      {showPlatform && (
-        <>
-          <PlatformAdminPanel />
-          {can('roles:manage', user) && <RolesPanel scope="platform" />}
-        </>
-      )}
+      <h2 style={{ marginTop: 0, marginBottom: '1rem' }}>用户管理</h2>
+      {showTenant && <TenantUsersPanel />}
+      {showPlatform && <PlatformAdminPanel />}
     </div>
   );
 }
@@ -277,31 +268,6 @@ function TenantUsersPanel() {
 
 // ---------- admin：平台管理（租户 + 平台用户） ----------
 
-// 审计动作下拉（v4-W2；与服务端写入面同步维护：登录/用户/角色/租户/集群管理五类）
-const AUDIT_ACTIONS: { value: string; label: string }[] = [
-  { value: 'auth.login', label: '登录成功' },
-  { value: 'auth.login.fail', label: '登录失败' },
-  { value: 'auth.login.locked', label: '登录锁定' },
-  { value: 'user.create', label: '用户创建' },
-  { value: 'user.update', label: '用户更新/禁用' },
-  { value: 'user.reset_password', label: '密码重置' },
-  { value: 'user.role', label: '角色改派' },
-  { value: 'role.create', label: '角色创建' },
-  { value: 'role.update', label: '角色更新' },
-  { value: 'role.delete', label: '角色删除' },
-  { value: 'tenant.create', label: '租户创建' },
-  { value: 'tenant.update', label: '租户更新' },
-  { value: 'tenant.qos', label: '租户 QOS 绑定' },
-  { value: 'reservations.create', label: '预约创建' },
-  { value: 'reservations.delete', label: '预约删除' },
-  { value: 'qos.create', label: 'QOS 创建' },
-  { value: 'partition.update', label: '分区修改' },
-  { value: 'nodes.state', label: '节点 DRAIN/RESUME' },
-  { value: 'jobs.submit', label: '作业提交' },
-  { value: 'jobs.cancel', label: '作业取消' },
-  { value: 'ide.launch', label: 'IDE 启动' },
-];
-
 const emptyTenantForm = { slug: '', name: '' };
 const emptyPlatUserForm = { username: '', role: 'member', tenantSlug: '', password: '' };
 
@@ -510,85 +476,7 @@ function PlatformAdminPanel() {
     );
   });
 
-  const [audit, setAudit] = useState<AuditEntry[]>([]);
-  const [reservations, setReservations] = useState<Reservation[]>([]);
-  const [resvForm, setResvForm] = useState({ name: '', durationMinutes: '30', users: '' });
-  const [qosList, setQosList] = useState<QOSInfo[]>([]);
-  const [qosForm, setQosForm] = useState({ name: '', grpTRES: '' });
-  const [qosBindTenant, setQosBindTenant] = useState('hpc-lab');
-  const [qosBindName, setQosBindName] = useState('');
-  const loadResv = async () => {
-    try {
-      const r = await slurm.listReservations();
-      setReservations(r.reservations || []);
-    } catch (e: any) {
-      setError(`预约读取失败：${e?.message || e}`);
-    }
-  };
-  const loadQos = async () => {
-    try {
-      const r = await slurm.listQOS();
-      setQosList(r.qos || []);
-      if (r.qos?.length && !qosBindName) setQosBindName(r.qos[0].name);
-    } catch (e: any) {
-      setError(`QOS 读取失败：${e?.message || e}`);
-    }
-  };
-  const submitResv = async () => {
-    setError(''); setInfo('');
-    try {
-      await slurm.createReservation({ name: resvForm.name.trim(), durationMinutes: Number(resvForm.durationMinutes) || 30, users: resvForm.users.trim() || undefined });
-      setInfo(`预约 ${resvForm.name.trim()} 已创建`);
-      setResvForm({ name: '', durationMinutes: '30', users: '' });
-      await loadResv();
-    } catch (e: any) {
-      setError(`创建预约失败：${e?.message || e}`);
-    }
-  };
-  const delResv = async (name: string) => {
-    setError(''); setInfo('');
-    try {
-      await slurm.deleteReservation(name);
-      setInfo(`预约 ${name} 已删除`);
-      await loadResv();
-    } catch (e: any) {
-      setError(`删除预约失败：${e?.message || e}`);
-    }
-  };
-  const submitQos = async () => {
-    setError(''); setInfo('');
-    try {
-      await slurm.createQOS(qosForm.name.trim(), qosForm.grpTRES.trim() || undefined);
-      setInfo(`QOS ${qosForm.name.trim()} 已创建`);
-      setQosForm({ name: '', grpTRES: '' });
-      await loadQos();
-    } catch (e: any) {
-      setError(`创建 QOS 失败：${e?.message || e}`);
-    }
-  };
-  const bindQos = async () => {
-    setError(''); setInfo('');
-    try {
-      await slurm.setTenantQOS(qosBindTenant, qosBindName);
-      setInfo(`租户 ${qosBindTenant} 已绑定 QOS ${qosBindName}`);
-    } catch (e: any) {
-      setError(`绑定失败：${e?.message || e}`);
-    }
-  };
-  const [auditFilter, setAuditFilter] = useState('');
-  const [auditAction, setAuditAction] = useState('');
-  const loadAudit = async () => {
-    try {
-      const r = await slurm.listAudit(auditFilter.trim() || undefined, auditAction || undefined, 100);
-      setAudit(r.entries || []);
-    } catch (e: any) {
-      setError(`审计读取失败：${e?.message || e}`);
-    }
-  };
   useEffect(() => {
-    loadAudit();
-    loadResv();
-    loadQos();
     if (canManageUsers) loadDir();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -862,265 +750,7 @@ function PlatformAdminPanel() {
       </form>
       )}
 
-      {/* 预约管理（v1-4.2 的面板 JSX 此前从未落地——数据层一直在，v4-W2 补建） */}
-      {can('reservations:manage', getStoredUser()) && (
-      <div style={{ ...cardStyle, marginTop: '1.5rem', display: 'block' }}>
-        <div style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '0.75rem' }}>预约管理</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(160px,1fr))', gap: '0.75rem', marginBottom: '0.75rem' }}>
-          <Field label="预约名">
-            <input className="form-control" value={resvForm.name} onChange={(e) => setResvForm({ ...resvForm, name: e.target.value })} placeholder="maint-window" />
-          </Field>
-          <Field label="时长(分钟)">
-            <input className="form-control" value={resvForm.durationMinutes} onChange={(e) => setResvForm({ ...resvForm, durationMinutes: e.target.value })} />
-          </Field>
-          <Field label="用户(可选,逗号分隔)">
-            <input className="form-control" value={resvForm.users} onChange={(e) => setResvForm({ ...resvForm, users: e.target.value })} placeholder="留空=全租户" />
-          </Field>
-          <div style={{ display: 'flex', alignItems: 'end', gap: '0.5rem' }}>
-            <button className="btn-primary" type="button" onClick={submitResv} style={{ padding: '0.45rem 1.2rem' }}>创建预约</button>
-            <MiniBtn onClick={loadResv}>刷新</MiniBtn>
-          </div>
-        </div>
-        {reservations.length === 0 ? (
-          <div style={emptyStyle}>暂无预约</div>
-        ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
-              <thead>
-                <tr style={{ textAlign: 'left' }}>
-                  <th style={th}>名称</th><th style={th}>开始</th><th style={th}>结束</th>
-                  <th style={th}>节点</th><th style={th}>用户</th><th style={th}>状态</th><th style={th}>操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {reservations.map((r, i) => (
-                  <tr key={r.name} style={{ borderBottom: i === reservations.length - 1 ? 'none' : '1px solid var(--row-line,#2a2f3a)' }}>
-                    <td style={{ ...td, ...mono, fontWeight: 700 }}>{r.name}</td>
-                    <td style={{ ...td, ...mono, fontSize: '0.8rem' }}>{r.start_time || '-'}</td>
-                    <td style={{ ...td, ...mono, fontSize: '0.8rem' }}>{r.end_time || '-'}</td>
-                    <td style={{ ...td, ...mono, fontSize: '0.8rem' }}>{r.nodes || '-'}</td>
-                    <td style={{ ...td, ...mono, fontSize: '0.8rem' }}>{r.users || 'ALL'}</td>
-                    <td style={td}><StatusBadge status={r.state || ''} /></td>
-                    <td style={td}>
-                      <MiniBtn onClick={() => delResv(r.name)}>删除</MiniBtn>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-      )}
-
-      {/* QOS 管理（同上——v4-W2 补建 JSX） */}
-      {can('qos:manage', getStoredUser()) && (
-      <div style={{ ...cardStyle, marginTop: '1.5rem', display: 'block' }}>
-        <div style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '0.75rem' }}>QOS 管理</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(160px,1fr))', gap: '0.75rem', marginBottom: '0.75rem' }}>
-          <Field label="QOS 名">
-            <input className="form-control" value={qosForm.name} onChange={(e) => setQosForm({ ...qosForm, name: e.target.value })} placeholder="high-prio" />
-          </Field>
-          <Field label="GrpTRES(可选)">
-            <input className="form-control" value={qosForm.grpTRES} onChange={(e) => setQosForm({ ...qosForm, grpTRES: e.target.value })} placeholder="cpu=32,mem=64G" />
-          </Field>
-          <div style={{ display: 'flex', alignItems: 'end' }}>
-            <button className="btn-primary" type="button" onClick={submitQos} style={{ padding: '0.45rem 1.2rem' }}>创建 QOS</button>
-          </div>
-          <Field label="绑定租户">
-            <select
-              className="form-control"
-              value={qosBindTenant}
-              onChange={(e: ChangeEvent<HTMLSelectElement>) => setQosBindTenant(e.target.value)}
-            >
-              {tenants.map((t) => (
-                <option key={t.slug} value={t.slug}>{t.slug}</option>
-              ))}
-            </select>
-          </Field>
-          <Field label="绑定 QOS">
-            <select
-              className="form-control"
-              value={qosBindName}
-              onChange={(e: ChangeEvent<HTMLSelectElement>) => setQosBindName(e.target.value)}
-            >
-              {(qosList.length > 0 ? qosList.map((q) => q.name) : []).map((n) => (
-                <option key={n} value={n}>{n}</option>
-              ))}
-            </select>
-          </Field>
-          <div style={{ display: 'flex', alignItems: 'end', gap: '0.5rem' }}>
-            <button className="btn-primary" type="button" onClick={bindQos} style={{ padding: '0.45rem 1.2rem' }}>绑定</button>
-            <MiniBtn onClick={loadQos}>刷新</MiniBtn>
-          </div>
-        </div>
-        {qosList.length === 0 ? (
-          <div style={emptyStyle}>暂无 QOS</div>
-        ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
-              <thead>
-                <tr style={{ textAlign: 'left' }}>
-                  <th style={th}>名称</th><th style={th}>优先级</th><th style={th}>GrpTRES</th>
-                  <th style={th}>MaxTRES</th><th style={th}>MaxWall</th>
-                </tr>
-              </thead>
-              <tbody>
-                {qosList.map((q, i) => (
-                  <tr key={q.name} style={{ borderBottom: i === qosList.length - 1 ? 'none' : '1px solid var(--row-line,#2a2f3a)' }}>
-                    <td style={{ ...td, ...mono, fontWeight: 700 }}>{q.name}</td>
-                    <td style={{ ...td, ...num }}>{q.priority || '-'}</td>
-                    <td style={{ ...td, ...mono, fontSize: '0.8rem' }}>{q.grp_tres || '-'}</td>
-                    <td style={{ ...td, ...mono, fontSize: '0.8rem' }}>{q.max_tres || '-'}</td>
-                    <td style={{ ...td, ...mono, fontSize: '0.8rem' }}>{q.max_wall || '-'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-      )}
-
-      {/* 审计日志（v1-2.2 的表格 JSX 从未落地——v4-W2 补建；v4 起 action 过滤） */}
-      {can('audit:read', getStoredUser()) && (
-      <div style={{ ...cardStyle, marginTop: '1.5rem', display: 'block' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.75rem' }}>
-          <div style={{ fontSize: '1rem', fontWeight: 700 }}>审计日志（最近 100 条）</div>
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-            <input
-              className="form-control form-control-sm"
-              placeholder="按操作者过滤"
-              value={auditFilter}
-              onChange={(e) => setAuditFilter(e.target.value)}
-              style={{ width: 150 }}
-            />
-            <select
-              className="form-control form-control-sm"
-              value={auditAction}
-              onChange={(e: ChangeEvent<HTMLSelectElement>) => setAuditAction(e.target.value)}
-              style={{ width: 190 }}
-            >
-              <option value="">全部动作</option>
-              {AUDIT_ACTIONS.map((a) => (
-                <option key={a.value} value={a.value}>{a.label}</option>
-              ))}
-            </select>
-            <MiniBtn onClick={loadAudit}>查询</MiniBtn>
-          </div>
-        </div>
-        {audit.length === 0 ? (
-          <div style={emptyStyle}>无匹配记录</div>
-        ) : (
-          <div style={{ overflowX: 'auto', maxHeight: 420, overflowY: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-              <thead>
-                <tr style={{ textAlign: 'left' }}>
-                  <th style={th}>时间</th><th style={th}>操作者</th><th style={th}>动作</th>
-                  <th style={th}>目标</th><th style={th}>详情</th>
-                </tr>
-              </thead>
-              <tbody>
-                {audit.map((e, i) => (
-                  <tr key={e.id ?? i} style={{ borderBottom: i === audit.length - 1 ? 'none' : '1px solid var(--row-line,#2a2f3a)' }}>
-                    <td style={{ ...td, ...mono, fontSize: '0.75rem', color: 'var(--text-muted,#94a3b8)', whiteSpace: 'nowrap' }}>{e.createdAt || '-'}</td>
-                    <td style={td}>{e.actor || '-'}</td>
-                    <td style={{ ...td, ...mono, fontSize: '0.78rem' }}>{e.action}</td>
-                    <td style={{ ...td, ...mono, fontSize: '0.78rem' }}>{e.target || '-'}</td>
-                    <td style={{ ...td, ...mono, fontSize: '0.72rem', color: 'var(--text-muted,#94a3b8)', maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={e.detail}>{e.detail || '-'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-      )}
     </div>
   );
 }
 
-// ---------- 共享小组件 / 样式（对齐 billing.tsx / jobs.tsx 既有模式） ----------
-
-const cardStyle = {
-  background: 'var(--bg-card,#1b1e28)',
-  border: '1px solid var(--border-color,#2a2f3a)',
-  borderRadius: 12,
-  padding: '1.25rem',
-  display: 'grid',
-  gap: '0.75rem',
-  boxShadow: 'var(--shadow-card)',
-  transition: 'box-shadow .3s ease',
-} as const;
-
-const emptyStyle = { padding: '2.5rem', textAlign: 'center', color: 'var(--text-muted,#94a3b8)' } as const;
-
-const th = {
-  padding: '0.85rem 1.25rem',
-  fontSize: '0.72rem',
-  textTransform: 'uppercase',
-  letterSpacing: '0.05em',
-  color: 'var(--text-muted,#94a3b8)',
-  fontWeight: 700,
-  borderBottom: '1px solid var(--border-color,#2a2f3a)',
-} as const;
-
-const td = {
-  padding: '0.9rem 1.25rem',
-  fontSize: '0.875rem',
-  color: 'var(--text-main,#f1f5f9)',
-} as const;
-
-const mono = { fontFamily: "'JetBrains Mono', monospace" } as const;
-const num = { ...mono, textAlign: 'right' } as const;
-
-// 状态徽章配色：active=emerald / suspended=amber / disabled=rose（其余蓝灰兜底）
-const STATUS_STYLES: Record<string, { color: string; bg: string }> = {
-  active: { color: '#10b981', bg: 'rgba(16,185,129,.12)' },
-  suspended: { color: '#f59e0b', bg: 'rgba(245,158,11,.12)' },
-  disabled: { color: '#f43f5e', bg: 'rgba(244,63,94,.12)' },
-};
-
-function StatusBadge({ status }: { status: string }) {
-  const s = STATUS_STYLES[(status || '').toLowerCase()] || { color: '#3b82f6', bg: 'rgba(59,130,246,.12)' };
-  return (
-    <span style={{ padding: '0.15rem 0.5rem', borderRadius: 6, fontSize: '0.72rem', fontWeight: 700, color: s.color, background: s.bg }}>
-      {status || '-'}
-    </span>
-  );
-}
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <label style={{ display: 'grid', gap: '0.25rem', fontSize: '0.8rem', color: 'var(--text-muted,#94a3b8)' }}>
-      {label}
-      {children}
-    </label>
-  );
-}
-
-function Notice({ color, bg, children }: { color: string; bg: string; children: ReactNode }) {
-  return <div style={{ padding: '0.6rem 0.9rem', color, background: bg, borderRadius: 8, marginBottom: '1rem', fontSize: '0.88rem' }}>{children}</div>;
-}
-
-function MiniBtn({ disabled, onClick, children }: { disabled?: boolean; onClick: () => void; children: ReactNode }) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      style={{
-        padding: '0.25rem 0.6rem',
-        fontSize: '0.75rem',
-        borderRadius: 6,
-        border: 'none',
-        background: 'var(--card-bg)',
-        boxShadow: 'var(--shadow-btn)',
-        color: 'var(--text-main,#f1f5f9)',
-        cursor: disabled ? 'wait' : 'pointer',
-        transition: 'box-shadow .2s ease',
-      }}
-    >
-      {children}
-    </button>
-  );
-}

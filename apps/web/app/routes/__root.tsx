@@ -92,8 +92,8 @@ function RootLayout() {
                   </Link>
                 </li>
                 <li className="nav-item">
-                  <Link to="/partitions" activeProps={{ className: 'active' }}>
-                    分区
+                  <Link to="/scheduler" activeProps={{ className: 'active' }}>
+                    调度管理
                   </Link>
                 </li>
               </>
@@ -117,11 +117,19 @@ function RootLayout() {
                 安全设置
               </Link>
             </li>
-            {/* 管理入口：平台面板（tenants:read）或租户面板（tenant:users:read）任一可见 */}
+            {/* 用户管理：平台面板（tenants:read）或租户面板（tenant:users:read）任一可见 */}
             {(can('tenants:read', user) || can('tenant:users:read', user)) && (
               <li className="nav-item">
                 <Link to="/admin" activeProps={{ className: 'active' }}>
-                  管理
+                  用户管理
+                </Link>
+              </li>
+            )}
+            {/* RBAC 管理（2026-08-19 IA 重组）：角色管理或审计任一可见 */}
+            {(can('roles:manage', user) || can('tenant:roles:manage', user) || can('audit:read', user)) && (
+              <li className="nav-item">
+                <Link to="/rbac" activeProps={{ className: 'active' }}>
+                  RBAC 管理
                 </Link>
               </li>
             )}

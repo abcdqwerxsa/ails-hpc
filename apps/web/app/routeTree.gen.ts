@@ -8,7 +8,8 @@
 // 注：本仓未安装 @tanstack/router-plugin/cli，故手工维护——新增/删除 route 文件后在此同步。
 
 import { Route as rootRoute } from './routes/__root'
-import { Route as PartitionsImport } from './routes/partitions'
+import { Route as SchedulerImport } from './routes/scheduler'
+import { Route as RbacImport } from './routes/rbac'
 import { Route as MonitorImport } from './routes/monitor'
 import { Route as BillingImport } from './routes/billing'
 import { Route as AdminImport } from './routes/admin'
@@ -21,7 +22,8 @@ import { Route as SettingsImport } from './routes/settings'
 import { Route as LoginOidcCallbackImport } from './routes/login.oidc.callback'
 import { Route as IndexImport } from './routes/index'
 
-const PartitionsRoute = PartitionsImport.update({ id: '/partitions', path: '/partitions', getParentRoute: () => rootRoute } as any)
+const SchedulerRoute = SchedulerImport.update({ id: '/scheduler', path: '/scheduler', getParentRoute: () => rootRoute } as any)
+const RbacRoute = RbacImport.update({ id: '/rbac', path: '/rbac', getParentRoute: () => rootRoute } as any)
 const MonitorRoute = MonitorImport.update({ id: '/monitor', path: '/monitor', getParentRoute: () => rootRoute } as any)
 const BillingRoute = BillingImport.update({ id: '/billing', path: '/billing', getParentRoute: () => rootRoute } as any)
 const AdminRoute = AdminImport.update({ id: '/admin', path: '/admin', getParentRoute: () => rootRoute } as any)
@@ -47,7 +49,8 @@ declare module '@tanstack/react-router' {
     '/monitor': { id: '/monitor'; path: '/monitor'; fullPath: '/monitor'; preLoaderRoute: typeof MonitorImport; parentRoute: typeof rootRoute }
     '/billing': { id: '/billing'; path: '/billing'; fullPath: '/billing'; preLoaderRoute: typeof BillingImport; parentRoute: typeof rootRoute }
     '/admin': { id: '/admin'; path: '/admin'; fullPath: '/admin'; preLoaderRoute: typeof AdminImport; parentRoute: typeof rootRoute }
-    '/partitions': { id: '/partitions'; path: '/partitions'; fullPath: '/partitions'; preLoaderRoute: typeof PartitionsImport; parentRoute: typeof rootRoute }
+    '/rbac': { id: '/rbac'; path: '/rbac'; fullPath: '/rbac'; preLoaderRoute: typeof RbacImport; parentRoute: typeof rootRoute }
+    '/scheduler': { id: '/scheduler'; path: '/scheduler'; fullPath: '/scheduler'; preLoaderRoute: typeof SchedulerImport; parentRoute: typeof rootRoute }
   }
 }
 
@@ -63,5 +66,6 @@ export const routeTree = rootRoute.addChildren([
   MonitorRoute,
   BillingRoute,
   AdminRoute,
-  PartitionsRoute,
+  RbacRoute,
+  SchedulerRoute,
 ])
