@@ -211,6 +211,29 @@ func TestOIDCFlow_JITProvision(t *testing.T) {
 	}
 }
 
+// Casdoor 形态：不发 preferred_username（用户名在 name claim），JIT 用户名应回退到 name。
+func TestOIDCFlow_JITNameClaimFallback(t *testing.T) {
+	prov := &fakeProvisioner{}
+	store := NewUserStoreFromList(nil)
+	mapping := OIDCMappingConfig{
+		RolesClaim:     "groups",
+		RoleMap:        map[string]string{"hpc-member": "member"},
+		TenantMap:      map[string]string{"hpc-member": "default"},
+		UnmappedPolicy: "deny",
+	}
+	fx := newFlowFixture(t, store, prov, mapping)
+	fx.idp.Claims = map[string]any{"preferred_username": "", "name": "ssotest", "groups": []string{"hpc-member"}}
+
+	state := fx.startLogin(t)
+	w := fx.completeCallback(t, state)
+	if got := fragmentParam(t, w.Header().Get("Location"), "status"); got != "ok" {
+		t.Fatalf("status = %q loc=%s", got, w.Header().Get("Location"))
+	}
+	if len(prov.provisioned) != 1 || prov.provisioned[0] != "ssotest/member@default" {
+		t.Errorf("provisioned = %v, want [ssotest/member@default]", prov.provisioned)
+	}
+}
+
 func TestOIDCFlow_JITDenied(t *testing.T) {
 	prov := &fakeProvisioner{}
 	store := NewUserStoreFromList(nil)

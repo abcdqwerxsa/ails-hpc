@@ -264,6 +264,15 @@ func (c *OIDCClient) VerifyIDToken(idToken string) (*IDTokenClaims, error) {
 	return &cl, nil
 }
 
+// Username 返回 IdP 侧用户名：优先 preferred_username（OIDC 标准），空则回退
+// name claim（Casdoor 等只发 name），均经 sanitizeUsername 归一。
+func (cl *IDTokenClaims) Username() string {
+	if u := sanitizeUsername(cl.PreferredUsername); u != "" {
+		return u
+	}
+	return sanitizeUsername(cl.Name)
+}
+
 // ParseRoles 从 ID token 载荷解析角色/组 claim（rolesClaim 如 "roles" / "groups"；
 // 兼容数组与逗号分隔字符串两种形态）。
 func (cl *IDTokenClaims) ParseRoles(rolesClaim string) []string {

@@ -202,7 +202,7 @@ func (h *OIDCHandler) Callback(c *gin.Context) {
 	}
 
 	// 3) 撞名确认流（S4）：IdP 用户名命中本地未绑定账号 → 前端引导输本地密码确认
-	username := sanitizeUsername(idCl.PreferredUsername)
+	username := idCl.Username()
 	if username != "" {
 		if u, ok := h.store.Lookup(username); ok && u.OIDCSub == "" {
 			lt, err := MintLinkToken(idCl.Sub, username)
@@ -230,7 +230,7 @@ func (h *OIDCHandler) tryProvision(c *gin.Context, idCl *IDTokenClaims) *User {
 	if h.prov == nil {
 		return nil
 	}
-	username := sanitizeUsername(idCl.PreferredUsername)
+	username := idCl.Username()
 	if username == "" {
 		return nil
 	}
@@ -396,7 +396,7 @@ func (h *OIDCHandler) redirectResult(c *gin.Context, status, errMsg, token strin
 }
 
 func (h *OIDCHandler) auditSSO(c *gin.Context, cl *IDTokenClaims, action, detail string) {
-	actor := cl.PreferredUsername
+	actor := cl.Username()
 	if actor == "" {
 		actor = "sub:" + cl.Sub
 	}
