@@ -1,19 +1,11 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
 import { slurm, type JobDetail, type JobSummary, type Partition } from '../services/slurm';
 import { can } from '../services/auth';
 import { Select } from '../components/select';
+import { Field, MiniBtn, NeuSegmented, Notice, StatusBadge, th, td } from '../components/panel_ui';
 
 export const Route = createFileRoute('/jobs')({ component: JobsPage });
-
-function jobStateColor(s: string): string {
-  const st = (s || '').toUpperCase();
-  if (st === 'RUNNING') return '#10b981';
-  if (st === 'PENDING' || st === 'HELD' || st === 'CONFIGURING') return '#f59e0b';
-  if (st === 'COMPLETED') return '#64748b';
-  if (st === 'CANCELLED' || st === 'FAILED' || st === 'TIMEOUT' || st === 'OUT_OF_MEMORY') return '#f43f5e';
-  return '#3b82f6';
-}
 
 const emptyForm = {
   name: '',
@@ -26,8 +18,7 @@ const emptyForm = {
   script: '#!/bin/bash\nsleep 30\n',
 };
 
-// 常用模板（v3-P1）：一键填充表单后按需修改。模板即代码随 dist 发版，
-// 不落库不进权限面（roadmap-v3 设计决策：用户自定义模板等真实诉求出现再表化）。
+// 常用模板（v3-P1）：一键填充表单后按需修改。
 const TEMPLATES: { label: string; hint: string; form: typeof emptyForm }[] = [
   {
     label: 'CPU 小任务',
@@ -64,7 +55,7 @@ const TEMPLATES: { label: string; hint: string; form: typeof emptyForm }[] = [
 ];
 
 // 作业状态过滤选项（值对齐 job_state 大写形式）
-const FILTERS: { label: string; value: string }[] = [
+const FILTERS = [
   { label: '全部', value: 'ALL' },
   { label: 'RUNNING', value: 'RUNNING' },
   { label: 'PENDING', value: 'PENDING' },
@@ -89,7 +80,7 @@ function JobsPage() {
   const [arraySpec, setArraySpec] = useState('');
   const [dependency, setDependency] = useState('');
 
-  // 分区列表（一次拉取，供提交表单下拉；standard=E核默认 / performance=P核，见 slurm.conf）
+  // 分区列表
   useEffect(() => {
     slurm
       .getPartitions()
@@ -178,162 +169,139 @@ function JobsPage() {
 
   const field = (k: keyof typeof emptyForm) => (e: ChangeEvent<HTMLInputElement>) => setForm({ ...form, [k]: e.target.value });
 
-  // 按状态过滤渲染的作业（filter==='ALL' 或 job_state 大写匹配）
+  // 按状态过滤渲染的作业
   const visibleJobs = jobs.filter((j) => filter === 'ALL' || (j.job_state || '').toUpperCase() === filter);
 
   return (
     <div>
-      <h2 style={{ marginTop: 0, marginBottom: '1rem' }}>作业管理</h2>
-
-      {error && <Notice color="#f43f5e" bg="rgba(239,68,68,.1)">{error}</Notice>}
-      {info && <Notice color="#10b981" bg="rgba(16,185,129,.1)">{info}</Notice>}
-
-      {can('jobs:submit') && (
-      <form
-        onSubmit={submit}
-        style={{ background: 'var(--bg-card,#1b1e28)', border: '1px solid var(--border-color,#2a2f3a)', borderRadius: 12, padding: '1.25rem', marginBottom: '1.5rem', display: 'grid', gap: '0.75rem', boxShadow: 'var(--shadow-card)', transition: 'box-shadow .3s ease' }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted,#94a3b8)' }}>常用模板</span>
-          {TEMPLATES.map((tpl) => (
-            <button
-              key={tpl.label}
-              type="button"
-              className="neu-btn"
-              title={tpl.hint}
-              style={{ fontSize: '0.78rem', padding: '0.3rem 0.7rem' }}
-              onClick={() => {
-                setForm(tpl.form);
-                setArraySpec('');
-                setDependency('');
-                setInfo(`已套用模板「${tpl.label}」（${tpl.hint}）——按需修改后提交`);
-              }}
-            >
-              {tpl.label}
-            </button>
-          ))}
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))', gap: '0.75rem' }}>
-          <Field label="作业名"><input className="form-control" value={form.name} onChange={field('name')} placeholder="my-job" /></Field>
-          <Field label="分区">
-            <Select
-              value={form.partition}
-              onChange={(v) =>
-                setForm({ ...form, partition: v, gpus: v === 'performance' ? form.gpus : '0' })
-              }
-              options={(partitions.length > 0 ? partitions.map((p) => p.name) : ['standard']).map((name) => ({
-                value: name,
-                label: `${name}${name === 'performance' ? '（P 核）' : name === 'standard' ? '（E 核）' : ''}`,
-              }))}
-            />
-          </Field>
-          <Field label="节点数"><input className="form-control" type="number" min="1" value={form.nodes} onChange={field('nodes')} /></Field>
-          <Field label="任务数"><input className="form-control" type="number" min="1" value={form.tasks} onChange={field('tasks')} /></Field>
-          <Field label="时限(分钟)"><input className="form-control" value={form.time_limit} onChange={field('time_limit')} /></Field>
-          <Field label="内存 MB（可选）">
-            <input
-              className="form-control"
-              type="number"
-              min="0"
-              max="6000"
-              value={form.memory_mb}
-              onChange={field('memory_mb')}
-              placeholder="默认 350/核"
-            />
-          </Field>
-          <Field label="GPU 卡数">
-            <Select
-              value={form.gpus}
-              onChange={(v) =>
-                setForm({
-                  ...form,
-                  gpus: v,
-                  // GPU 只在 performance 分区：选了 GPU 自动切分区；取消 GPU 不回切（尊重用户选择）
-                  partition: Number(v) > 0 ? 'performance' : form.partition,
-                })
-              }
-              options={[
-                { value: '0', label: '0（不申请）' },
-                { value: '1', label: '1 卡（P 核分区）' },
-              ]}
-            />
-          </Field>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <button type="button" className="neu-btn" onClick={() => setShowAdvanced(!showAdvanced)}>
-            {showAdvanced ? '收起高级选项' : '高级选项（数组/依赖）'}
-          </button>
-          {arraySpec.trim() && <span style={{ fontSize: '0.78rem', color: 'var(--accent-primary)' }}>数组 {arraySpec.trim()}</span>}
-          {dependency.trim() && <span style={{ fontSize: '0.78rem', color: 'var(--accent-amber,#f59e0b)' }}>依赖 {dependency.trim()}</span>}
-        </div>
-        {showAdvanced && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(180px,1fr))', gap: '0.75rem' }}>
-            <Field label="作业数组（可选）">
-              <input className="form-control" value={arraySpec} onChange={(e) => setArraySpec(e.target.value)} placeholder="如 1-4 或 1-10%2" />
-            </Field>
-            <Field label="依赖（可选）">
-              <input className="form-control" value={dependency} onChange={(e) => setDependency(e.target.value)} placeholder="如 afterok:123" />
-            </Field>
-          </div>
-        )}
-        <Field label="脚本">
-          <textarea
-            className="form-control"
-            rows={4}
-            value={form.script}
-            onChange={(e) => setForm({ ...form, script: e.target.value })}
-            style={{ fontFamily: 'monospace', width: '100%', boxSizing: 'border-box' }}
-          />
-        </Field>
-        <button className="btn-primary" type="submit" disabled={submitting} style={{ justifySelf: 'start', padding: '0.5rem 1.5rem' }}>
-          {submitting ? '提交中…' : '提交作业'}
-        </button>
-      </form>
-      )}
-
-
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-        <h3 style={{ margin: 0, fontSize: '1.05rem' }}>作业队列</h3>
-        <button className="btn-primary" onClick={refresh} style={{ padding: '0.3rem 0.9rem' }}>刷新</button>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+        <h2 style={{ margin: 0 }}>作业管理</h2>
+        <button className="btn-primary" onClick={refresh} style={{ padding: '0.45rem 1rem' }}>刷新</button>
       </div>
 
-      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
-        {FILTERS.map((f) => {
-          const active = filter === f.value;
-          return (
-            <button
-              key={f.value}
-              onClick={() => setFilter(f.value)}
-              style={{
-                background: 'var(--card-bg)',
-                boxShadow: 'var(--shadow-btn)',
-                border: `1px solid ${active ? 'var(--accent-primary)' : 'transparent'}`,
-                borderRadius: 8,
-                padding: '0.3rem 0.8rem',
-                fontSize: '0.8rem',
-                fontWeight: 700,
-                cursor: 'pointer',
-                color: active ? 'var(--accent-primary)' : 'var(--text-main,#f1f5f9)',
-                transition: 'border-color .2s ease, color .2s ease',
-              }}
-            >
-              {f.label}
+      {error && <Notice color="#f43f5e" bg="rgba(239,68,68,.12)">{error}</Notice>}
+      {info && <Notice color="#10b981" bg="rgba(16,185,129,.12)">{info}</Notice>}
+
+      {can('jobs:submit') && (
+        <form
+          onSubmit={submit}
+          className="neu-chiseled-card"
+          style={{ padding: '1.35rem', marginBottom: '1.75rem', display: 'grid', gap: '0.9rem' }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)' }}>常用模板</span>
+            {TEMPLATES.map((tpl) => (
+              <button
+                key={tpl.label}
+                type="button"
+                className="neu-btn"
+                title={tpl.hint}
+                style={{ fontSize: '0.78rem', padding: '0.3rem 0.75rem' }}
+                onClick={() => {
+                  setForm(tpl.form);
+                  setArraySpec('');
+                  setDependency('');
+                  setInfo(`已套用模板「${tpl.label}」（${tpl.hint}）——按需修改后提交`);
+                }}
+              >
+                {tpl.label}
+              </button>
+            ))}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))', gap: '0.85rem' }}>
+            <Field label="作业名"><input className="form-control" value={form.name} onChange={field('name')} placeholder="my-job" /></Field>
+            <Field label="分区">
+              <Select
+                value={form.partition}
+                onChange={(v) =>
+                  setForm({ ...form, partition: v, gpus: v === 'performance' ? form.gpus : '0' })
+                }
+                options={(partitions.length > 0 ? partitions.map((p) => p.name) : ['standard']).map((name) => ({
+                  value: name,
+                  label: `${name}${name === 'performance' ? '（P 核）' : name === 'standard' ? '（E 核）' : ''}`,
+                }))}
+              />
+            </Field>
+            <Field label="节点数"><input className="form-control" type="number" min="1" value={form.nodes} onChange={field('nodes')} /></Field>
+            <Field label="任务数"><input className="form-control" type="number" min="1" value={form.tasks} onChange={field('tasks')} /></Field>
+            <Field label="时限(分钟)"><input className="form-control" value={form.time_limit} onChange={field('time_limit')} /></Field>
+            <Field label="内存 MB（可选）">
+              <input
+                className="form-control"
+                type="number"
+                min="0"
+                max="6000"
+                value={form.memory_mb}
+                onChange={field('memory_mb')}
+                placeholder="默认 350/核"
+              />
+            </Field>
+            <Field label="GPU 卡数">
+              <Select
+                value={form.gpus}
+                onChange={(v) =>
+                  setForm({
+                    ...form,
+                    gpus: v,
+                    partition: Number(v) > 0 ? 'performance' : form.partition,
+                  })
+                }
+                options={[
+                  { value: '0', label: '0（不申请）' },
+                  { value: '1', label: '1 卡（P 核分区）' },
+                ]}
+              />
+            </Field>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <button type="button" className="neu-btn" onClick={() => setShowAdvanced(!showAdvanced)}>
+              {showAdvanced ? '收起高级选项' : '高级选项（数组/依赖）'}
             </button>
-          );
-        })}
+            {arraySpec.trim() && <span style={{ fontSize: '0.78rem', color: 'var(--accent-primary)' }}>数组 {arraySpec.trim()}</span>}
+            {dependency.trim() && <span style={{ fontSize: '0.78rem', color: 'var(--accent-amber,#f59e0b)' }}>依赖 {dependency.trim()}</span>}
+          </div>
+          {showAdvanced && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(180px,1fr))', gap: '0.75rem' }}>
+              <Field label="作业数组（可选）">
+                <input className="form-control" value={arraySpec} onChange={(e) => setArraySpec(e.target.value)} placeholder="如 1-4 或 1-10%2" />
+              </Field>
+              <Field label="依赖（可选）">
+                <input className="form-control" value={dependency} onChange={(e) => setDependency(e.target.value)} placeholder="如 afterok:123" />
+              </Field>
+            </div>
+          )}
+          <Field label="脚本">
+            <textarea
+              className="form-control"
+              rows={4}
+              value={form.script}
+              onChange={(e) => setForm({ ...form, script: e.target.value })}
+              style={{ fontFamily: 'monospace', width: '100%', boxSizing: 'border-box' }}
+            />
+          </Field>
+          <button className="btn-primary" type="submit" disabled={submitting} style={{ justifySelf: 'start', padding: '0.55rem 1.6rem' }}>
+            {submitting ? '提交中…' : '提交作业'}
+          </button>
+        </form>
+      )}
+
+      {/* 作业队列头部与拟物分段控制器 */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+        <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700 }}>作业队列</h3>
+        <NeuSegmented options={FILTERS} value={filter} onChange={(v) => setFilter(v)} />
       </div>
 
       {loading ? (
-        <div style={{ color: 'var(--text-muted,#888)' }}>加载中…</div>
+        <div style={{ color: 'var(--text-muted)', padding: '2rem 0' }}>加载中…</div>
       ) : jobs.length === 0 ? (
-        <div style={{ color: 'var(--text-muted,#888)' }}>当前无作业。</div>
+        <div style={{ color: 'var(--text-muted)', padding: '2rem 0' }}>当前无作业。</div>
       ) : visibleJobs.length === 0 ? (
-        <div style={{ color: 'var(--text-muted,#888)' }}>无匹配条件的作业。</div>
+        <div style={{ color: 'var(--text-muted)', padding: '2rem 0' }}>无匹配条件的作业。</div>
       ) : (
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
+        <div className="neu-chiseled-card" style={{ overflowX: 'auto', marginBottom: '1.75rem' }}>
+          <table className="custom-table">
             <thead>
-              <tr style={{ textAlign: 'left', color: 'var(--text-muted,#94a3b8)', borderBottom: '1px solid var(--border-color,#2a2f3a)' }}>
+              <tr>
                 <th style={th}>ID</th>
                 <th style={th}>名称</th>
                 <th style={th}>用户</th>
@@ -347,22 +315,19 @@ function JobsPage() {
             </thead>
             <tbody>
               {visibleJobs.map((j) => (
-                <tr key={j.job_id} style={{ borderBottom: '1px solid var(--border-color,#2a2f3a)' }}>
-                  <td style={td}>{j.job_id}</td>
-                  <td style={td}>{j.name}</td>
+                <tr key={j.job_id}>
+                  <td style={{ ...td, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>{j.job_id}</td>
+                  <td style={{ ...td, fontWeight: 600 }}>{j.name}</td>
                   <td style={td}>{j.owner || '-'}</td>
                   <td style={td}>{j.partition}</td>
                   <td style={td}>
-                    <span style={{ padding: '0.15rem 0.5rem', borderRadius: 6, fontSize: '0.72rem', fontWeight: 700, color: '#fff', background: jobStateColor(j.job_state) }}>
-                      {j.job_state}
-                    </span>
+                    <StatusBadge status={j.job_state} />
                   </td>
-                  <td style={td}>{j.nodes || '-'}</td>
-                  <td style={td}>{j.time_limit || '-'}</td>
-                  <td style={td}>{j.submit_time ? new Date(j.submit_time * 1000).toLocaleString() : '-'}</td>
-                  <td style={{ ...td, display: 'flex', gap: '0.4rem' }}>
+                  <td style={{ ...td, fontFamily: "'JetBrains Mono', monospace" }}>{j.nodes || '-'}</td>
+                  <td style={{ ...td, fontFamily: "'JetBrains Mono', monospace" }}>{j.time_limit || '-'}</td>
+                  <td style={{ ...td, fontSize: '0.8rem', color: 'var(--text-muted)' }}>{j.submit_time ? new Date(j.submit_time * 1000).toLocaleString() : '-'}</td>
+                  <td style={{ ...td, display: 'flex', gap: '0.45rem' }}>
                     <MiniBtn onClick={() => openDetail(j.job_id)}>详情</MiniBtn>
-                    {/* 只禁用正在操作的这一行（acting = jobId+kind），其他行不受影响；控制按钮需 jobs:control */}
                     {can('jobs:control') && (
                       <>
                         <MiniBtn disabled={acting.startsWith(String(j.job_id))} onClick={() => act(j.job_id, 'cancel')}>取消</MiniBtn>
@@ -378,8 +343,7 @@ function JobsPage() {
         </div>
       )}
 
-      {/* 作业详情弹窗（roadmap 1.2 的"sacct 生命期 + 输出 tail-200 弹窗"——JSX 此前
-          从未落地（与预约/QOS/审计面板同类缺口），v4 审计后补建） */}
+      {/* 作业详情弹窗 */}
       {(detail || detailLoading || detailErr) && (
         <div
           onClick={() => { setDetail(null); setDetailErr(''); setDetailLoading(false); }}
@@ -387,22 +351,21 @@ function JobsPage() {
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            style={{ background: 'var(--bg-card,#1b1e28)', border: '1px solid var(--border-color,#2a2f3a)', borderRadius: 12, boxShadow: 'var(--shadow-card)', maxWidth: 720, width: '100%', maxHeight: '85vh', overflowY: 'auto', padding: '1.25rem' }}
+            className="neu-chiseled-card"
+            style={{ maxWidth: 720, width: '100%', maxHeight: '85vh', overflowY: 'auto', padding: '1.5rem' }}
           >
-            {detailLoading && <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted,#94a3b8)' }}>详情加载中…</div>}
-            {detailErr && <Notice color="#f43f5e" bg="rgba(239,68,68,.1)">{detailErr}</Notice>}
+            {detailLoading && <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>详情加载中…</div>}
+            {detailErr && <Notice color="#f43f5e" bg="rgba(239,68,68,.12)">{detailErr}</Notice>}
             {detail && (
               <>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.9rem' }}>
-                  <div style={{ fontSize: '1.05rem', fontWeight: 700 }}>
-                    作业 #{detail.job_id} · {detail.name}
-                    <span style={{ marginLeft: '0.6rem', padding: '0.15rem 0.5rem', borderRadius: 6, fontSize: '0.72rem', fontWeight: 700, color: '#fff', background: jobStateColor(detail.state) }}>
-                      {detail.state}
-                    </span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+                  <div style={{ fontSize: '1.1rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <span>作业 #{detail.job_id} · {detail.name}</span>
+                    <StatusBadge status={detail.state} />
                   </div>
                   <MiniBtn onClick={() => setDetail(null)}>关闭</MiniBtn>
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))', gap: '0.6rem', marginBottom: '0.9rem' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))', gap: '0.75rem', marginBottom: '1.25rem' }}>
                   <DetailKV k="属主" v={detail.owner} />
                   <DetailKV k="账户" v={detail.account} />
                   <DetailKV k="分区" v={detail.partition} />
@@ -412,12 +375,12 @@ function JobsPage() {
                   <DetailKV k="开始" v={detail.start} />
                   <DetailKV k="结束" v={detail.end} />
                 </div>
-                <div style={{ fontSize: '0.85rem', fontWeight: 700, marginBottom: '0.4rem' }}>输出（末 200 行）</div>
+                <div style={{ fontSize: '0.85rem', fontWeight: 700, marginBottom: '0.5rem' }}>输出（末 200 行）</div>
                 <pre
                   style={{
-                    margin: 0, padding: '0.75rem', borderRadius: 8, fontSize: '0.78rem', lineHeight: 1.5,
+                    margin: 0, padding: '0.85rem', borderRadius: 8, fontSize: '0.78rem', lineHeight: 1.5,
                     fontFamily: "'JetBrains Mono', monospace", whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                    background: 'var(--bg-card-hover,#222632)', color: 'var(--text-main,#f1f5f9)',
+                    background: 'var(--terminal-bg, #0f172a)', color: '#34d399',
                     maxHeight: 320, overflowY: 'auto', boxShadow: 'var(--shadow-inset-deep)',
                   }}
                 >
@@ -432,50 +395,11 @@ function JobsPage() {
   );
 }
 
-// DetailKV 详情弹窗的键值小格（值空显示 '-'，灰调弱化）。
 function DetailKV({ k, v }: { k: string; v?: string }) {
   return (
-    <div>
-      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted,#94a3b8)' }}>{k}</div>
-      <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.8rem', color: 'var(--text-main,#f1f5f9)' }}>{v || '-'}</div>
+    <div style={{ background: 'var(--card-bg)', padding: '0.5rem 0.75rem', borderRadius: 8, boxShadow: 'var(--shadow-inset-deep)' }}>
+      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: '0.2rem' }}>{k}</div>
+      <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)' }}>{v || '-'}</div>
     </div>
-  );
-}
-
-const th = { padding: '0.5rem' } as const;
-const td = { padding: '0.5rem' } as const;
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <label style={{ display: 'grid', gap: '0.25rem', fontSize: '0.8rem', color: 'var(--text-muted,#94a3b8)' }}>
-      {label}
-      {children}
-    </label>
-  );
-}
-
-function Notice({ color, bg, children }: { color: string; bg: string; children: ReactNode }) {
-  return <div style={{ padding: '0.6rem 0.9rem', color, background: bg, borderRadius: 8, marginBottom: '1rem', fontSize: '0.88rem' }}>{children}</div>;
-}
-
-function MiniBtn({ disabled, onClick, children }: { disabled?: boolean; onClick: () => void; children: ReactNode }) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      style={{
-        padding: '0.25rem 0.6rem',
-        fontSize: '0.75rem',
-        borderRadius: 6,
-        border: 'none',
-        background: 'var(--card-bg)',
-        boxShadow: 'var(--shadow-btn)',
-        color: 'var(--text-main,#f1f5f9)',
-        cursor: disabled ? 'wait' : 'pointer',
-        transition: 'box-shadow .2s ease',
-      }}
-    >
-      {children}
-    </button>
   );
 }

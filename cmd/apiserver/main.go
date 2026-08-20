@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -150,13 +152,30 @@ func main() {
 			cfg.OIDC.Issuer, cfg.OIDC.RedirectURL, cfg.OIDCMapping.UnmappedPolicy)
 	}
 
+	containerService := containers.NewContainerService(slurmClient)
+
+	// 空闲容器自动回收守护协程（默认 60 分钟，AILS_IDE_IDLE_TIMEOUT_MIN 可调；0=关闭）
+	idleTimeoutMin := 60
+	if envTimeout := os.Getenv("AILS_IDE_IDLE_TIMEOUT_MIN"); envTimeout != "" {
+		if v, err := strconv.Atoi(envTimeout); err == nil && v >= 0 {
+			idleTimeoutMin = v
+		}
+	}
+	if idleTimeoutMin > 0 {
+		containerService.StartIdleReaper(context.Background(), 1*time.Minute, idleTimeoutMin, func(sessionID string, jobID int, owner string, idleMin int) {
+			log.Printf("[IdleReaper] Auto-reclaimed idle session %s (job %d, owner %s, idle %d min)", sessionID, jobID, owner, idleMin)
+			_ = adminStore.WriteAudit(context.Background(), "system", "container.idle_reclaim", "session:"+sessionID, "", fmt.Sprintf(`{"job_id":%d,"owner":%q,"idle_min":%d}`, jobID, owner, idleMin))
+		})
+		log.Printf("IDE IdleReaper started: idle_timeout=%d min", idleTimeoutMin)
+	}
+
 	handlers := Handlers{
 		Auth:       authHandler,
 		OIDC:       oidcHandler,
 		Cluster:    cluster.NewClusterHandler(cluster.NewClusterService(slurmClient)),
 		Nodes:      nodes.NewNodeHandler(nodes.NewNodeService(slurmClient)),
 		Jobs:       jobs.NewJobHandlerScoped(jobs.NewJobService(slurmClient), tenantResolver),
-		Containers: containers.NewContainerHandlerScoped(containers.NewContainerService(slurmClient), tenantResolver),
+		Containers: containers.NewContainerHandlerScoped(containerService, tenantResolver),
 		Billing:    billing.NewBillingHandlerWithScope(billingService, tenantResolver),
 		Monitor: monitor.NewMonitorHandler(
 			monitor.NewMonitorServicePersistent(slurmClient, filepath.Join(filepath.Dir(cfg.DBPath), "monitor.db"))),
