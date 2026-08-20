@@ -107,6 +107,7 @@ func main() {
 	// 注入签名密钥与 TTL（fail-closed：无密钥已在 config.Load 阶段拒绝启动）
 	auth.SetSecret(cfg.JWTSecret)
 	auth.SetTokenTTL(cfg.TokenTTL)
+	auth.SetIdeCookieSecure(cfg.CookieSecure)
 
 	// 用户库 = sqlite（Phase 6 起 db 唯一；users.yaml 仅作 -import-users 导入源）。
 	st, err := store.Open(cfg.DBPath)

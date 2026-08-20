@@ -207,7 +207,7 @@ func (s *containerServiceImpl) ListActiveContainers(ctx context.Context) ([]*Con
 			WebURL:    webURLFor(sid),
 			JobID:     j.JobID,
 			Node:      firstNonEmpty(m.Node, j.Nodes),
-			Owner:     m.Owner,
+			Owner:     j.Account, // P1-4：归属取 Slurm 作业 Account（meta.Owner 可伪造，仅历史展示不可信）
 			Nodes:     m.Nodes,
 			CPUs:      m.CPUs,
 			MemoryMB:  m.MemoryMB,
@@ -219,17 +219,23 @@ func (s *containerServiceImpl) ListActiveContainers(ctx context.Context) ([]*Con
 }
 
 // RecycleContainer 取消会话对应的 Slurm 作业并清理 meta（即结束 IDE 会话）。
-// SessionOwner 返回会话归属者（meta.owner）。会话不存在返回 ErrContainerNotFound。
+// SessionOwner 返回会话归属者。P1-4（安全审计 2026-08-19）：归属锚定 Slurm 作业的
+// Account——提交时由 Slurm 按令牌身份强制写入（L1，不可伪造）；/shared/sessions 的
+// meta 由作业脚本写入、任何持 jobs:submit 的作业都可伪造任意内容，不可作归属依据。
+// meta 降级为纯连接细节（nodeIP/port），仅供属主验证通过后的反代使用（自指向残余
+// 风险：属主只能把本人会话指向本人可控目标，与作业内直连等价）。
+// 会话不存在（无匹配 IDE 作业）返回 ErrContainerNotFound。
 func (s *containerServiceImpl) SessionOwner(ctx context.Context, id string) (string, error) {
-	metaMap, err := s.meta.ReadAll()
-	if err != nil || metaMap == nil {
-		return "", ErrContainerNotFound
+	jobs, err := s.jobs.GetJobs()
+	if err != nil {
+		return "", err
 	}
-	m, ok := metaMap[id]
-	if !ok {
-		return "", ErrContainerNotFound
+	for _, j := range jobs.Jobs {
+		if sid, _, isIDE := parseIDEJobName(j.Name); isIDE && sid == id {
+			return j.Account, nil
+		}
 	}
-	return m.Owner, nil
+	return "", ErrContainerNotFound
 }
 
 func (s *containerServiceImpl) RecycleContainer(ctx context.Context, id, actAs string) (*ContainerRecycleResponse, error) {

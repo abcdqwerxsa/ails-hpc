@@ -22,6 +22,7 @@ type Config struct {
 	SlurmUserName string        // AILS_SLURM_USER，默认 "hpcuser"
 	UsersFile     string        // AILS_USERS_FILE，默认 "config/users.yaml"
 	UserStoreKind string        // AILS_USER_STORE，"yaml"|"db"（多租户 Phase 1 双模，默认 yaml）
+	CookieSecure  bool          // AILS_COOKIE_SECURE=1——TLS 部署后给 IDE cookie 加 Secure（P2）
 	DBPath        string        // AILS_DB_PATH，sqlite 用户库路径（UserStoreKind=db 时生效）
 
 	// OIDC SSO（S1/S2；Issuer 空 = 功能整体禁用，本地密码登录不受影响）
@@ -54,14 +55,17 @@ func Load() (*Config, error) {
 			RedirectURL:  envOr("AILS_OIDC_REDIRECT", ""),
 		},
 		OIDCPortalURL: envOr("AILS_OIDC_PORTAL_URL", "/portal/"),
+		CookieSecure:  os.Getenv("AILS_COOKIE_SECURE") == "1",
 	}
 
 	if err := parseOIDCMapping(cfg); err != nil {
 		return nil, err
 	}
 
-	if len(cfg.JWTSecret) == 0 {
-		return nil, errors.New("AILS_JWT_SECRET is required (set it to a random >=32-byte string)")
+	// P2（安全审计 2026-08-19）：最小长度强制——此前只查非空，短 secret 直接降低
+	// HS256 暴力破解成本。生产 .env 为 openssl rand -hex 32（64 字符）不受影响。
+	if len(cfg.JWTSecret) < 32 {
+		return nil, errors.New("AILS_JWT_SECRET must be at least 32 bytes (use: openssl rand -hex 32)")
 	}
 	return cfg, nil
 }

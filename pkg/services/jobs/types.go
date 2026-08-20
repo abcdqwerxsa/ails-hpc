@@ -15,6 +15,11 @@ var (
 	ErrInvalidSpec         = errors.New("invalid array/dependency spec")
 	ErrJobNotFound         = errors.New("Job not found")
 	ErrCannotHoldCancelled = errors.New("Cannot hold cancelled job")
+	// ErrInvalidJobName/ErrInvalidPartition 作业名/分区名白名单外（安全审计 2026-08-19
+	// P0-1：Name 未加引号拼进容器内 sh -c 的脚本路径——`;`/`$()`/反引号即 root 命令
+	// 注入、`/`/`..` 即任意路径写；分区进 sbatch -p。统一字符集校验）。
+	ErrInvalidJobName   = errors.New("invalid job name: want ^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
+	ErrInvalidPartition = errors.New("invalid partition name: want ^[A-Za-z][A-Za-z0-9_-]{0,31}$")
 )
 
 // FlexTimeLimit 支持 JSON 解包时兼容 string ("3600") 和 int (3600)

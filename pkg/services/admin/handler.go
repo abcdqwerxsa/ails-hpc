@@ -2,6 +2,7 @@ package admin
 
 import (
 	"errors"
+	"log"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -58,8 +59,12 @@ func mapErr(c *gin.Context, err error, op string) {
 	case errors.Is(err, ErrReadOnlyStore):
 		httpx.ServiceUnavailable(c, "admin API requires AILS_USER_STORE=db (yaml seed is read-only)", nil)
 	case errors.Is(err, ErrProvisionFailed):
-		// DB 已提交、Slurm 供给失败：502 + 明确文案（重试幂等）
-		httpx.Error(c, http.StatusBadGateway, err.Error())
+		// DB 已提交、Slurm 供给失败：502（重试幂等）。P2：err 链含完整供给命令行
+		// （useradd/sacctmgr 拼串），只落服务端日志，客户端给通用文案。
+		log.Printf("AUDIT provision.fail actor=%s err=%v", c.GetString("actor"), err)
+		httpx.Error(c, http.StatusBadGateway, "cluster-side provisioning failed; retry is idempotent")
+	case errors.Is(err, ErrAdminTarget):
+		httpx.Error(c, http.StatusForbidden, err.Error())
 	case errors.Is(err, ErrRoleNotAllowed), errors.Is(err, ErrRoleEscalation),
 		errors.Is(err, ErrSelfDisable):
 		httpx.BadRequest(c, err.Error())
@@ -635,7 +640,7 @@ func (h *AdminHandler) AssignPlatformRole(c *gin.Context) {
 		return
 	}
 	actor, _ := actorAndTenant(c)
-	if err := h.service.AssignRole(c.Request.Context(), actor, "", c.Param("username"), req.Role, requestID(c)); err != nil {
+	if err := h.service.AssignRole(c.Request.Context(), actor, actorPermissions(c), "", c.Param("username"), req.Role, requestID(c)); err != nil {
 		mapErr(c, err, "admin.AssignPlatformRole")
 		return
 	}
@@ -718,7 +723,7 @@ func (h *AdminHandler) AssignMyRole(c *gin.Context) {
 		return
 	}
 	actor, tenant := actorAndTenant(c)
-	if err := h.service.AssignRole(c.Request.Context(), actor, tenant, c.Param("username"), req.Role, requestID(c)); err != nil {
+	if err := h.service.AssignRole(c.Request.Context(), actor, actorPermissions(c), tenant, c.Param("username"), req.Role, requestID(c)); err != nil {
 		mapErr(c, err, "admin.AssignMyRole")
 		return
 	}

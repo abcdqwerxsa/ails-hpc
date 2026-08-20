@@ -58,6 +58,7 @@ func NewRouter(h Handlers) *gin.Engine {
 	// Phase 2：带用户库实校——禁用/改密即刻吊销在途令牌（claims.Ver 比对）。
 	api.Use(auth.JWTAuthMiddlewareWithStore(h.Auth.Store()))
 	// A2：作业提交/控制、IDE 会话操作落 audit_log（变更面审计补齐；登录审计在 handler）。
+	// P2：映射含 /ide/**（反代内写操作）。中间件挂在 api 组——/ide/ 路由同组生效。
 	api.Use(slurmAuditMiddleware(h.Audit))
 	{
 		// 自助改密（任何已认证角色；成功后本人令牌全部失效）
@@ -72,15 +73,17 @@ func NewRouter(h Handlers) *gin.Engine {
 		api.POST("/auth/oidc/unlink", h.OIDC.Unlink)
 		slurm := api.Group("/slurm")
 
-		// 读：集群状态（所有已认证角色）
-		slurm.GET("/ping", h.Cluster.GetStatus)
-		slurm.GET("/nodes", h.Nodes.GetNodes)
-		slurm.GET("/jobs", h.Jobs.ListJobs)
-		slurm.GET("/jobs/:id/detail", h.Jobs.GetJobDetail)
-		slurm.GET("/jobs/history", h.Jobs.ListHistory)
-		slurm.GET("/partitions", h.Cluster.GetPartitions)
-		slurm.GET("/monitor/snapshot", h.Monitor.GetSnapshot)
-		slurm.GET("/monitor/history", h.Monitor.GetHistory)
+		// 读：集群状态（cluster:read——安全审计 2026-08-19 P1-7：权限点此前声明
+		// 未执行，剥掉它的自定义角色仍可读全部集群面；内置四角色全持有点，行为不变）
+		clusterRead := slurm.Group("", auth.RequirePermission(auth.PermClusterRead))
+		clusterRead.GET("/ping", h.Cluster.GetStatus)
+		clusterRead.GET("/nodes", h.Nodes.GetNodes)
+		clusterRead.GET("/jobs", h.Jobs.ListJobs)
+		clusterRead.GET("/jobs/:id/detail", h.Jobs.GetJobDetail)
+		clusterRead.GET("/jobs/history", h.Jobs.ListHistory)
+		clusterRead.GET("/partitions", h.Cluster.GetPartitions)
+		clusterRead.GET("/monitor/snapshot", h.Monitor.GetSnapshot)
+		clusterRead.GET("/monitor/history", h.Monitor.GetHistory)
 
 		// 管理员独占：节点 DRAIN/RESUME
 		slurm.POST("/nodes/:name/state", auth.RequirePermission(auth.PermNodesManage), h.Nodes.UpdateNodeState)
@@ -183,7 +186,7 @@ func corsMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, PATCH, DELETE")
 
 		if c.Request.Method == http.MethodOptions {
 			c.AbortWithStatus(http.StatusNoContent)

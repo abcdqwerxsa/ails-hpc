@@ -23,6 +23,9 @@ import (
 var (
 	// ErrReadOnlyStore 未启用 sqlite 用户库（yaml 种子只读）——管理接口整体不可用。
 	ErrReadOnlyStore = errors.New("admin: requires AILS_USER_STORE=db (yaml seed is read-only)")
+	// ErrAdminTarget 内置 admin 基角色账号仅可由同为 admin 基角色的调用者改动
+	// （P2，安全审计 2026-08-19：防自定义角色经 users:manage 接管/瘫痪平台管理员）。
+	ErrAdminTarget = errors.New("builtin admin accounts can only be modified by an admin")
 	// ErrProvisionFailed DB 写入成功但 Slurm 供给失败（幂等可重试）。
 	ErrProvisionFailed = errors.New("admin: user created but Slurm provisioning failed (retry is safe)")
 	// ErrRoleNotAllowed 租户级建用户只允许 member/tenant_admin（平台角色由 /admin/users 建）。
@@ -236,12 +239,48 @@ func (s *Service) ListPlatformUsers(ctx context.Context) ([]auth.User, error) {
 
 // UpdatePlatformUser 平台改用户（v3-U2/U4：显示名与/或状态；空串=不变更）。
 // 自禁用拒绝（防自锁）；禁用即 token_version+1 吊销在途令牌（store 语义）。
+// protectBuiltinAdmin P2 守卫（安全审计 2026-08-19）：目标是内置 admin 基角色账号
+// 且调用者不是 → 拒绝。自操作放行（自身守卫另行：ErrSelfDisable）。
+func (s *Service) protectBuiltinAdmin(ctx context.Context, actor, username string) error {
+	if actor == username {
+		return nil
+	}
+	if s.baseRoleOf(ctx, username) != auth.RoleSystemAdmin {
+		return nil
+	}
+	if s.baseRoleOf(ctx, actor) == auth.RoleSystemAdmin {
+		return nil
+	}
+	return ErrAdminTarget
+}
+
+// baseRoleOf 平台目录里查用户基角色（找不到=空）。
+func (s *Service) baseRoleOf(ctx context.Context, username string) string {
+	users, err := s.st.ListPlatformUsers(ctx)
+	if err != nil {
+		return ""
+	}
+	for _, u := range users {
+		if u.Username == username {
+			return u.Role
+		}
+	}
+	return ""
+}
+
 func (s *Service) UpdatePlatformUser(ctx context.Context, actor, username, displayName, status, rid string) error {
 	if err := s.ensure(); err != nil {
 		return err
 	}
 	if status == "disabled" && actor == username {
 		return ErrSelfDisable
+	}
+	// P2：禁用内置 admin 基角色账号须同为 admin 基角色（防持 users:manage 的自定义
+	// 角色瘫痪平台管理员；安全审计 2026-08-19）。
+	if status == "disabled" {
+		if err := s.protectBuiltinAdmin(ctx, actor, username); err != nil {
+			return err
+		}
 	}
 	if status != "" {
 		if err := s.st.UpdateUserStatus(ctx, username, status); err != nil {
@@ -262,6 +301,11 @@ func (s *Service) UpdatePlatformUser(ctx context.Context, actor, username, displ
 // 死锁由此消除）。重置后强制首登改密 + 在途令牌全部吊销（ResetUserPassword 语义）。
 func (s *Service) ResetPlatformUserPassword(ctx context.Context, actor, username, newPassword, rid string) error {
 	if err := s.ensure(); err != nil {
+		return err
+	}
+	// P2：重置内置 admin 基角色账号密码须同为 admin 基角色——否则持 users:manage 的
+	// 自定义角色可重置平台管理员密码完成账号接管（安全审计 2026-08-19）。
+	if err := s.protectBuiltinAdmin(ctx, actor, username); err != nil {
 		return err
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
@@ -331,6 +375,11 @@ func (s *Service) UpdateMyUser(ctx context.Context, actor, tenantSlug, username,
 	}
 	if !found {
 		return store.ErrNotFound // 跨租户/不存在统一 404
+	}
+	// P2：与平台侧对齐的自禁用守卫（租户管理员自锁后无解——平台 ResetPlatformUserPassword
+	// 虽可解，但按同语义拒绝更干净；安全审计 2026-08-19）。
+	if status == "disabled" && actor == username {
+		return ErrSelfDisable
 	}
 	if status != "" {
 		if err := s.st.UpdateUserStatus(ctx, username, status); err != nil {

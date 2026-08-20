@@ -179,9 +179,15 @@ func (h *ContainerHandler) RecycleContainer(c *gin.Context) {
 }
 
 // ProxyIDE 反向代理 /api/v1/ide/<session>/* 到计算节点上的 IDE 应用 server。
-// 访问已由路由层的 RequireRole(member,tenant_admin) 守门；应用自身 auth 关闭。
+// 路由层 RequirePermission(ide:manage) 只控入口；会话归属在handler层收紧
+// （安全审计 2026-08-19 P0-3：与 Recycle/Extend 同口径——反代进 IDE 等于接管
+// 容器 shell，必须有 forbidIfNotSessionOwner，否则 tenant_admin 可进任意成员会话）。
+// 应用自身 auth 关闭。
 func (h *ContainerHandler) ProxyIDE(c *gin.Context) {
 	session := c.Param("session")
+	if h.forbidIfNotSessionOwner(c, session) {
+		return
+	}
 	nodeIP, port, status, envType, err := h.service.ProxyTarget(c.Request.Context(), session)
 	if err != nil {
 		httpx.ServiceUnavailable(c, "session not reachable", httpx.Extra{"status": status})

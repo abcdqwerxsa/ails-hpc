@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"log"
 	"net/http"
 
 	"ails-hpc/pkg/httpx"
@@ -24,8 +25,10 @@ func NewClusterHandler(service ClusterService) *ClusterHandler {
 func (h *ClusterHandler) GetStatus(c *gin.Context) {
 	res, err := h.service.Ping(c.Request.Context())
 	if err != nil {
-		// 503 是面向客户端的"集群不可达"信号（非内部泄密），保留真实消息 + status:"DOWN"
-		httpx.ServiceUnavailable(c, err.Error(), httpx.Extra{"status": "DOWN"})
+		// 503 是面向客户端的"集群不可达"信号 + status:"DOWN"。P2：真实错误（含
+		// slurmrestd 响应细节）只落服务端日志，客户端文案固定。
+		log.Printf("cluster ping failed: %v", err)
+		httpx.ServiceUnavailable(c, "slurmrestd unreachable", httpx.Extra{"status": "DOWN"})
 		return
 	}
 	c.JSON(http.StatusOK, res)

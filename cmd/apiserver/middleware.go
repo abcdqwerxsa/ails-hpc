@@ -80,6 +80,9 @@ var slurmAuditActions = map[string]string{
 	"/api/v1/slurm/containers/launch":     "ide.launch",
 	"/api/v1/slurm/containers/:id":        "ide.recycle",
 	"/api/v1/slurm/containers/:id/extend": "ide.extend",
+	// P2（安全审计 2026-08-19）：IDE 反代内的写操作（非 GET——terminal 执行/文件写）
+	// 此前不落审计；GET 资产加载按既有规则跳过。
+	"/api/v1/ide/:session/*any": "ide.proxy",
 }
 
 // slurmAuditMiddleware 把 /slurm/** 的变更操作（非 GET）落 audit_log。

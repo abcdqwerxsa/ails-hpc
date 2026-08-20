@@ -58,6 +58,9 @@ type User struct {
 	// OIDCSub SSO 身份标识（IdP sub claim）；S4 绑定/解绑与 S1 回落查找用。
 	OIDCSub string `yaml:"-" json:"-"`
 
+	// TenantSuspended 所属租户被挂起（P1-8：安全审计 2026-08-19——suspended 此前
+	// 不阻断登录与在途令牌；sqlite Lookup 联查填充，内存库恒 false）。
+	TenantSuspended bool `yaml:"-" json:"-"`
 	// MustChangePassword 首次登录/被重置后须改密（A1）；中间件放行面仅限自助改密
 	// 相关端点，改密成功后清除。
 	MustChangePassword bool `yaml:"-" json:"mustChangePassword,omitempty"`

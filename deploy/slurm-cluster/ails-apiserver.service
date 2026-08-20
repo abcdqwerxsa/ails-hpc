@@ -23,6 +23,8 @@ Wants=network-online.target
 Type=notify
 WatchdogSec=30
 User=ails
+# P2（安全审计 2026-08-19）：库/备份文件含密码哈希——收紧默认 644 → 640/600
+UMask=0027
 Group=ails
 WorkingDirectory=/opt/slurm-cluster
 EnvironmentFile=/opt/slurm-cluster/.env

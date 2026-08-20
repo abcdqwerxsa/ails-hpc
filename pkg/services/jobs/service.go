@@ -16,9 +16,13 @@ import (
 var globalJobIDCounter int64 = 1000
 
 // sbatch --array / --dependency 值白名单（4.1：防参数注入）。
+// jobNameRE/jobPartitionRE 作业名/分区白名单（安全审计 2026-08-19 P0-1：Name 进
+// sh -c 拼接的脚本路径与 sbatch -J；字符集禁 shell 元字符与路径分隔符）。
 var (
-	sbatchSpecRE = regexp.MustCompile(`^[0-9][0-9,\-%:]*$`)
-	sbatchDepRE  = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_:?*().,\-]*$`)
+	sbatchSpecRE   = regexp.MustCompile(`^[0-9][0-9,\-%:]*$`)
+	sbatchDepRE    = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_:?*().,\-]*$`)
+	jobNameRE      = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.\-]{0,63}$`)
+	jobPartitionRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_\-]{0,31}$`)
 )
 
 type JobService interface {
@@ -78,10 +82,13 @@ type CliSubmitOpts struct {
 
 // defaultCliSubmit 生产实现：脚本写入 /shared/portal-jobs/<name>-<rand>.job，
 // sudo -u <clusterUser> sbatch（身份/记账与 REST 提交同口径），随后保留脚本（复现/排查）。
+// name 已经 SubmitJob 入口 jobNameRE 白名单（无引号/元字符/路径分隔符）；此处对
+// scriptPath 单引号包裹为第二层（P0-1 纵深：即使未来新调用方绕过入口校验也不逃逸）。
 func defaultCliSubmit(o CliSubmitOpts) (int, error) {
 	scriptPath := fmt.Sprintf("/shared/portal-jobs/%s-%d.job", o.Name, time.Now().UnixNano())
+	quotedPath := "'" + scriptPath + "'"
 	if _, err := slurmrest.RunInSlurmctldWithStdin(o.Script, "sh", "-c",
-		"mkdir -p /shared/portal-jobs && cat > "+scriptPath+" && chmod 644 "+scriptPath); err != nil {
+		"mkdir -p /shared/portal-jobs && cat > "+quotedPath+" && chmod 644 "+quotedPath); err != nil {
 		return 0, fmt.Errorf("stage script: %w", err)
 	}
 	args := []string{"sudo", "-u", o.ClusterUser, "sbatch", "--parsable",
@@ -171,6 +178,14 @@ func (s *jobServiceImpl) SubmitJob(ctx context.Context, req *SubmitJobRequest, c
 
 	if req.Nodes < 0 || cpus < 0 || req.Tasks < 0 || req.CpusPerTask < 0 {
 		return nil, ErrNegativeResources
+	}
+
+	// P0-1：入口白名单（REST 与 CLI 两路径共用；CLI 落点另有引号兜底）。
+	if req.Name != "" && !jobNameRE.MatchString(req.Name) {
+		return nil, ErrInvalidJobName
+	}
+	if req.Partition != "" && !jobPartitionRE.MatchString(req.Partition) {
+		return nil, ErrInvalidPartition
 	}
 
 	if cpus > 1000 || req.Nodes > 100 {

@@ -10,4 +10,6 @@ Type=oneshot
 ExecStart=/bin/sh -c 'D=/opt/slurm-cluster/var/lib/ails/backups; rm -f $D/ails-$(date +%%u).db $D/casdoor-$(date +%%u).db && /opt/slurm-cluster/bin/apiserver -backup-db $D/ails-$(date +%%u).db && python3 -c "import sqlite3,sys; s=sqlite3.connect(sys.argv[1],uri=True); d=sqlite3.connect(sys.argv[2]); s.backup(d); d.close()" "file:/opt/slurm-cluster/casdoor/data/casdoor.db?mode=ro" $D/casdoor-$(date +%%u).db && cp /opt/slurm-cluster/casdoor/conf/app.conf $D/casdoor-app.conf'
 WorkingDirectory=/opt/slurm-cluster
 User=ails
+# P2（安全审计 2026-08-19）：库/备份文件含密码哈希——收紧默认 644 → 640/600
+UMask=0027
 Group=ails

@@ -81,7 +81,7 @@ func authenticate(c *gin.Context, store UserStore) (*Claims, bool) {
 	}
 	if store != nil {
 		u, ok := store.Lookup(claims.Username)
-		if !ok || u.Status != "active" {
+		if !ok || u.Status != "active" || u.TenantSuspended {
 			httpx.Unauthorized(c, "invalid or expired token")
 			return nil, false
 		}
@@ -113,19 +113,29 @@ func authenticate(c *gin.Context, store UserStore) (*Claims, bool) {
 			Path:     ideCookiePath,
 			HttpOnly: true,
 			SameSite: http.SameSiteLaxMode,
+			Secure:   ideCookieSecure, // P2：TLS 部署后置 AILS_COOKIE_SECURE=1（http 下置位会静默丢 cookie）
 			MaxAge:   24 * 3600,
 		})
 	}
 	return claims, true
 }
 
+// ideCookieSecure 由 main 按 AILS_COOKIE_SECURE 注入（默认 false——当前 http 部署；
+// 上 TLS 后开启，cookie 只经 https 传输。安全审计 2026-08-19 P2）。
+var ideCookieSecure bool
+
+// SetIdeCookieSecure 设置 IDE 凭证 cookie 的 Secure 属性。
+func SetIdeCookieSecure(v bool) { ideCookieSecure = v }
+
 // mustChangeAllowed 是 must_change_password=1 时的端点白名单（自助面）。
 func mustChangeAllowed(path string) bool {
+	// 安全审计 2026-08-19 P1-6：不再前缀放行 /auth/oidc/*——改密锁定窗口期若可调
+	// bind，持初始/重置密码方可把自己的 IdP sub 绑上账号（绑定不 bump token_version
+	// → 改密后仍可 SSO 登录的持久后门）。锁定用户先改密再绑定/解绑。
 	for _, p := range []string{
 		"/api/v1/auth/password",
 		"/api/v1/auth/me",
 		"/api/v1/auth/logout-all",
-		"/api/v1/auth/oidc/",
 	} {
 		if strings.HasPrefix(path, p) {
 			return true

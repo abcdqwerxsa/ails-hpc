@@ -51,6 +51,20 @@ type QOS struct {
 // nameRE 予約/QOS 名白名单。
 var nameRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,31}$`)
 
+// 安全审计 2026-08-19 P0-2：预约 spec 各字段以 '...' 朴素包裹拼进容器内 sh -c，
+// 内含单引号即逃逸（root 注入）。以下白名单从源头禁掉引号/元字符（与 UpdatePartition
+// 的逐字段 regex 同教义）：
+//   - resvTimeRE：scontrol starttime，固定 YYYY-MM-DDTHH:MM
+//   - resvNodesRE：Slurm 节点表表达式（node1 / node[2-3],node1 等）
+//   - resvUsersRE：逗号分隔 unix 用户名
+//   - resvPartRE：分区名
+var (
+	resvTimeRE  = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$`)
+	resvNodesRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_,\[\]\-]{0,127}$`)
+	resvUsersRE = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}(,[a-z_][a-z0-9_-]{0,31})*$`)
+	resvPartRE  = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,31}$`)
+)
+
 // ListReservations scontrol show reserv（空列表=无预约）。
 func (s *Service) ListReservations(ctx context.Context) ([]Reservation, error) {
 	out, err := s.runCluster("scontrol", "show", "reserv")
@@ -68,6 +82,19 @@ func (s *Service) CreateReservation(ctx context.Context, actor, name, startTime 
 	}
 	if startTime == "" {
 		startTime = time.Now().Add(time.Minute).Format("2006-01-02T15:04")
+	}
+	// P0-2：spec 四字段白名单（用户可控且会被拼进 sh -c——防单引号逃逸注入）。
+	if !resvTimeRE.MatchString(startTime) {
+		return nil, fmt.Errorf("invalid reservation starttime (want YYYY-MM-DDTHH:MM)")
+	}
+	if nodes != "" && !resvNodesRE.MatchString(nodes) {
+		return nil, fmt.Errorf("invalid reservation nodes")
+	}
+	if partition != "" && !resvPartRE.MatchString(partition) {
+		return nil, fmt.Errorf("invalid reservation partition")
+	}
+	if users != "" && !resvUsersRE.MatchString(users) {
+		return nil, fmt.Errorf("invalid reservation users")
 	}
 	// scontrol 要求 nodes= / nodecnt= / corecnt= 至少其一：未指定时默认 nodecnt=1。
 	spec := []string{"reservationname=" + name, "starttime=" + startTime,
@@ -289,15 +316,15 @@ func (s *Service) runCluster(args ...string) ([]byte, error) {
 
 // PartitionDetail 是 scontrol show partition <name> 的解析视图（编辑弹层当前值来源）。
 type PartitionDetail struct {
-	Name           string `json:"name"`
-	State          string `json:"state"`
-	Default        string `json:"default"`
-	MaxTime        string `json:"maxTime"`
-	DefMemPerCPU   string `json:"defMemPerCPU"`
-	Nodes          string `json:"nodes"`
-	OverSubscribe  string `json:"overSubscribe"`
-	AllowAccounts  string `json:"allowAccounts"`
-	AllowGroups    string `json:"allowGroups"`
+	Name          string `json:"name"`
+	State         string `json:"state"`
+	Default       string `json:"default"`
+	MaxTime       string `json:"maxTime"`
+	DefMemPerCPU  string `json:"defMemPerCPU"`
+	Nodes         string `json:"nodes"`
+	OverSubscribe string `json:"overSubscribe"`
+	AllowAccounts string `json:"allowAccounts"`
+	AllowGroups   string `json:"allowGroups"`
 }
 
 // PartitionUpdates 是分区可修改字段白名单（空串=不变更；值合法性由 handler 层
@@ -332,8 +359,8 @@ var partitionValueREs = map[string]*regexp.Regexp{
 
 // partitionFields 是 PartitionUpdates 字段 → scontrol 键的有序映射（构建命令与校验共用）。
 var partitionFields = []struct {
-	Key    string // scontrol 键（= 结构体字段名）
-	Get    func(PartitionUpdates) string
+	Key string // scontrol 键（= 结构体字段名）
+	Get func(PartitionUpdates) string
 }{
 	{"State", func(u PartitionUpdates) string { return u.State }},
 	{"Default", func(u PartitionUpdates) string { return u.Default }},
