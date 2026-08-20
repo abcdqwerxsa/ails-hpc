@@ -1,6 +1,6 @@
 # AILS HPC 面板使用手册（实验室成员版）
 
-> 面板地址：http://192.168.20.226:8090/portal/ 。本文只讲"怎么用"；
+> 面板地址：https://portal.nilpo.app/portal/ （推荐；内网备入口 http://192.168.20.226:8090/portal/ ——Web-IDE 仅域名入口可用）。本文只讲"怎么用"；
 > 架构与运维见 PROJECT.md / docs/（面向开发者与管理员）。
 
 ## 1. 登录与账号
@@ -38,7 +38,7 @@
 
 ```bash
 TOKEN="ailspat_粘贴你的令牌"
-curl -H "Authorization: Bearer $TOKEN" http://192.168.20.226:8090/api/v1/slurm/jobs
+curl -H "Authorization: Bearer $TOKEN" https://portal.nilpo.app/api/v1/slurm/jobs
 ```
 
 - 令牌**不会**因改密/登出失效（与网页会话独立）；不再使用时在设置页**吊销**（立即生效）。每人最多 10 个活跃令牌。
