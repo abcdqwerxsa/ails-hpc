@@ -400,6 +400,17 @@ export interface UpdateRoleRequest {
   permissions?: string[];
 }
 
+// T1 个人 API 令牌（对齐后端 auth.PATInfo；token 明文仅创建响应出现）
+export interface PATInfo {
+  id: number;
+  name: string;
+  prefix: string;
+  createdAt: string;
+  lastUsedAt?: string;
+  expiresAt?: string;
+  revoked: boolean;
+}
+
 // 会话台账行（A1；对齐后端 auth.SessionEntry）
 export interface SessionEntry {
   id: number;
@@ -476,6 +487,14 @@ export const slurm = {
 
   // A1 会话策略：会话台账 + 全设备登出（token_version+1，全部在途 token 失效）
   getMySessions: () => apiFetch<{ sessions: SessionEntry[] }>("/auth/me/sessions"),
+  // T1 个人 API 令牌自助面
+  listPATs: () => apiFetch<{ tokens: PATInfo[] }>("/auth/tokens"),
+  createPAT: (payload: { name?: string; expiresInDays?: number }) =>
+    apiFetch<{ id: number; name: string; prefix: string; token: string; expiresAt: string }>("/auth/tokens", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  revokePAT: (id: number) => apiFetch<{ message: string }>(`/auth/tokens/${id}`, { method: "DELETE" }),
   logoutAll: () => apiFetch<{ message: string }>("/auth/logout-all", { method: "POST" }),
 
   // 集群状态：200 + pings[0].ping==="UP" 即 UP；503 抛错 → 调用方按 DEGRADED 处理

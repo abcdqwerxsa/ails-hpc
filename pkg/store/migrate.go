@@ -133,6 +133,21 @@ CREATE TABLE IF NOT EXISTS sessions (
   token_version INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(username, id);`,
+		// v6(T1 个人 API token)：长期可撤销凭证。只存 sha256(令牌)——明文仅签发时
+		// 返回一次；last_used_at 节流更新（中间件 5 分钟窗）；revoked_at 软吊销。
+		`
+CREATE TABLE IF NOT EXISTS api_tokens (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  username     TEXT NOT NULL REFERENCES users(username) ON DELETE CASCADE,
+  name         TEXT NOT NULL DEFAULT '',
+  token_hash   TEXT NOT NULL UNIQUE,
+  prefix       TEXT NOT NULL DEFAULT '',
+  created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  last_used_at TEXT,
+  expires_at   TEXT,
+  revoked_at   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_api_tokens_user ON api_tokens(username, id);`,
 	}
 }
 
