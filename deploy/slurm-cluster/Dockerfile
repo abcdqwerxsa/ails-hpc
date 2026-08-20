@@ -36,14 +36,18 @@ RUN apt-get update && apt-get install -y \
 # 交互式 Web IDE/Notebook 运行时（OOD 范式：作为 Slurm 作业在计算节点上由 sbatch 拉起）
 #   - jupyterlab/notebook：清华 pip 镜像
 #   - code-server：官方 install.sh（从 GitHub release 下载）
-#   - python3-venv（IDE 环境多样化 2026-08-20）：用户自助 `python -m venv` 需 ensurepip，
-#     缺它则 venv 创建失败（实测 rc=1 "ensurepip is not available"）——用户隔离环境的
-#     前置依赖，见 walkthrough.md §3
-RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip python3-venv && \
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip && \
     pip3 install --no-cache-dir \
         -i https://pypi.tuna.tsinghua.edu.cn/simple \
         jupyterlab notebook && \
+    ALL_PROXY=socks5://192.168.20.226:1080 \
     curl -fsSL https://code-server.dev/install.sh | sh && \
+    rm -rf /var/lib/apt/lists/*
+
+# python3-venv（IDE 环境多样化 2026-08-20）：用户自助 `python -m venv` 需 ensurepip，
+# 缺它则 venv 创建失败（实测 "ensurepip is not available"）。独立成层——不动上面的
+# 缓存层（含外网下载的 code-server），重建时只构建本小层。
+RUN apt-get update && apt-get install -y --no-install-recommends python3.10-venv && \
     rm -rf /var/lib/apt/lists/*
 
 # 配置 Munge 和 Slurm 系统账号与 PID/Spool 专属目录
