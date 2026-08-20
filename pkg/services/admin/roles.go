@@ -112,6 +112,12 @@ func (s *Service) AssignRole(ctx context.Context, actor string, actorPerms []str
 	if err := s.ensure(); err != nil {
 		return err
 	}
+	// P2 守卫（安全审计 2026-08-19，与 UpdatePlatformUser 同面）：非 admin 基角色
+	// 调用者不可动内置 admin 基角色账号——否则持 roles:manage 的自定义角色可把
+	// 平台管理员降级为 member（接管/瘫痪）。
+	if err := s.protectBuiltinAdmin(ctx, actor, username); err != nil {
+		return err
+	}
 	r, err := s.resolveRole(ctx, tenantSlug, roleName)
 	if err != nil {
 		return err
@@ -140,6 +146,45 @@ func (s *Service) AssignRole(ctx context.Context, actor string, actorPerms []str
 	}
 	_ = s.st.WriteAudit(ctx, actor, "user.role", "user:"+username, rid,
 		fmt.Sprintf(`{"role":%q,"baseRole":%q}`, r.Name, r.BaseRole))
+	return nil
+}
+
+// MoveUserTenant 平台作用域：迁移用户到目标租户并同事务改派角色。角色限定平台
+// 作用域解析（内置四角色/平台自定义）——最终 (角色, 租户) 组合的归属校验在 store 层
+// （单步迁移会被角色-租户不变量互斥拒绝，故两步合一）。审计独立于 AssignRole
+// （user.tenant：跨租户身份变更是高敏操作）。
+func (s *Service) MoveUserTenant(ctx context.Context, actor, username, tenantSlug, roleName, rid string) error {
+	if err := s.ensure(); err != nil {
+		return err
+	}
+	// P2 守卫：同 AssignRole——非 admin 基角色调用者不可迁移内置 admin 账号
+	// （迁出租户 + 降级角色比禁用更彻底，必须同防）。
+	if err := s.protectBuiltinAdmin(ctx, actor, username); err != nil {
+		return err
+	}
+	// 账号名迁移前后不变（clusterUser/account 与租户解耦）；快照兼作审计的"from"值
+	// （用户名不可改名，Lookup 与落库之间的 TOCTOU 无实际危害）。
+	before, ok := s.st.Lookup(username)
+	if !ok {
+		return store.ErrNotFound
+	}
+	if err := s.st.MoveUserTenant(ctx, username, tenantSlug, roleName); err != nil {
+		return err
+	}
+	// fairshare 层级对齐：叶子账号 re-parent 到新租户父账号（root └ <租户> └ <用户>）。
+	// DB 已提交，供给失败按 CreateUser 同语义报 502（ErrProvisionFailed）——重试幂等
+	// （store 侧同值 UPDATE no-op，sacctmgr re-parent 到原 parent 亦 no-op）。
+	t, err := s.st.TenantBySlug(ctx, tenantSlug)
+	if err != nil {
+		// 租户在 store 迁移事务里刚校验过存在且 active；到这里失败属异常态——绝不可
+		// 静默跳过 re-parent（否则 DB 与 Slurm 记账层级静默漂移），按供给失败上报。
+		return fmt.Errorf("%w: resolve tenant %s for reparent: %v", ErrProvisionFailed, tenantSlug, err)
+	}
+	if err := s.provision.ReparentAccount(before.Account, t.ParentAccount); err != nil {
+		return fmt.Errorf("%w: reparent %s to %s: %v", ErrProvisionFailed, before.Account, t.ParentAccount, err)
+	}
+	_ = s.st.WriteAudit(ctx, actor, "user.tenant", "user:"+username, rid,
+		fmt.Sprintf(`{"from":%q/%q,"to":%q/%q}`, before.TenantSlug, before.Role, tenantSlug, roleName))
 	return nil
 }
 

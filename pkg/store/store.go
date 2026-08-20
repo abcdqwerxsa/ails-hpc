@@ -87,6 +87,9 @@ type AdminStore interface {
 	DeleteRole(ctx context.Context, roleID int64) error
 	// SetUserRole 改派用户角色（角色-租户归属校验；改派即刻生效）。
 	SetUserRole(ctx context.Context, username string, roleID int64) error
+	// MoveUserTenant 迁移用户到目标租户并同事务改派角色（最终组合做归属校验——
+	// 两步合一，因单步迁移会被对方不变量拒绝）。
+	MoveUserTenant(ctx context.Context, username, tenantSlug, roleName string) error
 
 	// --- OIDC 账号关联（S1/S4；service 层补 Slurm 供给与审计） ---
 	// UserByOIDCSub 按绑定的 SSO 身份查用户。

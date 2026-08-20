@@ -330,6 +330,65 @@ func (s *sqliteStore) SetUserRole(ctx context.Context, username string, roleID i
 	})
 }
 
+// MoveUserTenant 把用户迁移到目标租户，并在同一事务里改派到该租户下合法的角色。
+// 单独迁移不可行：角色-租户归属规则会让"先迁租户"或"先改角色"各被对方不变量拒绝
+// （如普通租户的 member 迁入 system 前必须已是 admin/ops_admin，而改派 admin 又要求
+// 已在 system）——所以本入口把两步合一，按"最终 (角色, 租户) 组合"做一次归属校验。
+// role 按平台作用域名解析（内置四角色或平台自定义角色）。改派即刻生效（无需 bump
+// token_version，与 SetUserRole 同语义）。
+func (s *sqliteStore) MoveUserTenant(ctx context.Context, username, tenantSlug, roleName string) error {
+	r, err := s.RoleByName(ctx, "", roleName)
+	if errors.Is(err, ErrNotFound) {
+		return fmt.Errorf("%w: role %s", ErrNotFound, roleName)
+	}
+	if err != nil {
+		return err
+	}
+	return s.withTx(ctx, func(tx *sql.Tx) error {
+		var targetTenant int64
+		var targetStatus string
+		err := tx.QueryRowContext(ctx,
+			`SELECT id, status FROM tenants WHERE slug = ?`, tenantSlug).
+			Scan(&targetTenant, &targetStatus)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("%w: tenant %s", ErrNotFound, tenantSlug)
+		}
+		if err != nil {
+			return err
+		}
+		if targetStatus != "active" {
+			return fmt.Errorf("%w: tenant %s is %s", ErrTenantSuspended, tenantSlug, targetStatus)
+		}
+		// 归属校验与 SetUserRole 同规，但比较对象是"迁移后的租户"。
+		switch {
+		case r.IsSystem:
+			if r.BaseRole == auth.RoleSystemAdmin || r.BaseRole == auth.RoleOpsAdmin {
+				if tenantSlug != systemTenant {
+					return fmt.Errorf("%w: %s must belong to tenant 'system'", ErrRoleTenantMismatch, r.BaseRole)
+				}
+			} else if tenantSlug == systemTenant {
+				return fmt.Errorf("%w: %s cannot belong to reserved tenant 'system'", ErrRoleTenantMismatch, r.BaseRole)
+			}
+		case r.TenantSlug == "":
+			if tenantSlug != systemTenant {
+				return fmt.Errorf("%w: platform role cannot be assigned to user of tenant %s", ErrRoleTenantMismatch, tenantSlug)
+			}
+		case r.TenantSlug != tenantSlug:
+			return fmt.Errorf("%w: role %s does not belong to tenant %s", ErrRoleTenantMismatch, roleName, tenantSlug)
+		}
+		res, err := tx.ExecContext(ctx, `
+			UPDATE users SET tenant_id = ?, role = ?, role_id = ?, updated_at = datetime('now')
+			WHERE username = ?`, targetTenant, r.BaseRole, r.ID, username)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return fmt.Errorf("%w: user %s", ErrNotFound, username)
+		}
+		return nil
+	})
+}
+
 func (s *sqliteStore) roleByID(ctx context.Context, id int64) (*Role, error) {
 	return scanRole(s.db.QueryRowContext(ctx, roleSelect+` WHERE r.id = ?`, id))
 }

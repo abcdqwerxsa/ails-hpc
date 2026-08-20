@@ -39,6 +39,7 @@ func (noopProvisioner) ProvisionUser(cu string, uid, gid int, account, parentAcc
 	return nil
 }
 func (noopProvisioner) SetAccountLimits(account, setting string) error        { return nil }
+func (noopProvisioner) ReparentAccount(account, newParentAccount string) error { return nil }
 
 // setupRBACStack 全栈夹具：sqlite 库（system/hpc-lab/bio-lab + 种子用户）+ 生产路由表。
 // 返回的 *admin.Service 供测试注入集群命令执行面（SetClusterRunner——分区/预约直通面）。

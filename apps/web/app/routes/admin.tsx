@@ -2,7 +2,8 @@ import { createFileRoute } from '@tanstack/react-router';
 import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
 import { slurm, type AdminUser, type TenantInfo } from '../services/slurm';
 import { can, getStoredUser } from '../services/auth';
-import { RoleAssignSelect } from '../components/roles_panel';
+import { RoleAssignSelect, TenantMoveControl } from '../components/roles_panel';
+import { Select } from '../components/select';
 import { Field, MiniBtn, Notice, StatusBadge, cardStyle, emptyStyle, mono, num, th, td } from '../components/panel_ui';
 
 export const Route = createFileRoute('/admin')({ component: AdminPage });
@@ -152,14 +153,14 @@ function TenantUsersPanel() {
               <input className="form-control" type="password" value={form.password} onChange={field('password')} placeholder="初始密码" />
             </Field>
             <Field label="角色">
-              <select
-                className="form-control"
+              <Select
                 value={form.role}
-                onChange={(e: ChangeEvent<HTMLSelectElement>) => setForm({ ...form, role: e.target.value })}
-              >
-                <option value="member">member（普通成员）</option>
-                <option value="tenant_admin">tenant_admin（租户管理员）</option>
-              </select>
+                onChange={(v) => setForm({ ...form, role: v })}
+                options={[
+                  { value: 'member', label: 'member（普通成员）' },
+                  { value: 'tenant_admin', label: 'tenant_admin（租户管理员）' },
+                ]}
+              />
             </Field>
           </div>
           <button className="btn-primary" type="submit" disabled={submitting} style={{ justifySelf: 'start', padding: '0.5rem 1.5rem', marginTop: '0.75rem' }}>
@@ -580,17 +581,14 @@ function PlatformAdminPanel() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.75rem' }}>
           <div style={{ fontSize: '1rem', fontWeight: 700 }}>平台用户目录</div>
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-            <select
-              className="form-control form-control-sm"
+            <Select
+              small
+              width={160}
               value={dirTenant}
-              onChange={(e: ChangeEvent<HTMLSelectElement>) => setDirTenant(e.target.value)}
-              style={{ width: 160 }}
-            >
-              <option value="">全部租户</option>
-              {tenants.map((t) => (
-                <option key={t.slug} value={t.slug}>{t.slug}</option>
-              ))}
-            </select>
+              onChange={setDirTenant}
+              options={[{ value: '', label: '全部租户' }, ...tenants.map((t) => ({ value: t.slug, label: t.slug }))]}
+              ariaLabel="按租户过滤"
+            />
             <input
               className="form-control form-control-sm"
               placeholder="搜索用户名/显示名"
@@ -684,6 +682,17 @@ function PlatformAdminPanel() {
                               }}
                             />
                           )}
+                          {canAssignRoles && (
+                            <TenantMoveControl
+                              username={u.username}
+                              currentTenant={u.tenantSlug || ''}
+                              currentRole={u.role || 'member'}
+                              onDone={(m) => {
+                                setInfo(m);
+                                loadDir();
+                              }}
+                            />
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -709,30 +718,20 @@ function PlatformAdminPanel() {
             />
           </Field>
           <Field label="角色">
-            <select
-              className="form-control"
+            <Select
               value={platUserForm.role}
-              onChange={(e: ChangeEvent<HTMLSelectElement>) => setPlatUserForm({ ...platUserForm, role: e.target.value })}
-            >
-              {PLATFORM_ROLES.map((r) => (
-                <option key={r.value} value={r.value}>{r.label}</option>
-              ))}
-            </select>
+              onChange={(v) => setPlatUserForm({ ...platUserForm, role: v })}
+              options={PLATFORM_ROLES.map((r) => ({ value: r.value, label: r.label }))}
+            />
           </Field>
           <Field label="所属租户">
-            <select
-              className="form-control"
+            <Select
               value={platUserForm.tenantSlug}
-              onChange={(e: ChangeEvent<HTMLSelectElement>) => setPlatUserForm({ ...platUserForm, tenantSlug: e.target.value })}
-            >
-              {tenants.length === 0 ? (
-                <option value="">（暂无租户）</option>
-              ) : (
-                tenants.map((t) => (
-                  <option key={t.slug} value={t.slug}>{t.slug} · {t.name}</option>
-                ))
-              )}
-            </select>
+              onChange={(v) => setPlatUserForm({ ...platUserForm, tenantSlug: v })}
+              options={tenants.length === 0
+                ? [{ value: '', label: '（暂无租户）' }]
+                : tenants.map((t) => ({ value: t.slug, label: `${t.slug} · ${t.name}` }))}
+            />
           </Field>
           <Field label="密码">
             <input

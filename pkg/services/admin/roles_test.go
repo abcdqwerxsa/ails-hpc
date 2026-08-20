@@ -307,3 +307,64 @@ func TestRoles_MemberGate(t *testing.T) {
 		t.Fatalf("member on tenant:roles:manage: want 403 got %d", w.Code)
 	}
 }
+
+// MovePlatformUserTenant 端点：hpc-lab 的 member 迁 system+admin（此前无路可走的
+// 提升路径），fairshare re-parent 一并下发；供给失败 → 502 但 DB 已提交（重试幂等）。
+func TestMovePlatformUserTenant(t *testing.T) {
+	_, st, prov := newFixture(t)
+	// fixture 未挂本路由 → service 层直测（路由门与 AssignPlatformRole 同面）
+	svc := admin.NewService(st, prov)
+	if err := svc.MoveUserTenant(context.Background(), "padmin", "alice", "system", "admin", "rid-1"); err != nil {
+		t.Fatalf("move alice: %v", err)
+	}
+	u, ok := st.Lookup("alice")
+	if !ok || u.TenantSlug != "system" || u.Role != auth.RoleSystemAdmin {
+		t.Fatalf("want system/admin, got %+v", u)
+	}
+	found := false
+	for _, c := range prov.calls {
+		if c == "r:alice->system" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("fairshare reparent not provisioned: %v", prov.calls)
+	}
+
+	// 供给失败：DB 仍已提交（Lookup 反映新租户），错误为 ErrProvisionFailed
+	prov.fail = true
+	prov.calls = nil
+	if err := svc.MoveUserTenant(context.Background(), "padmin", "tadmin", "hpc-lab", "member", "rid-2"); err == nil {
+		t.Fatal("expected provision failure")
+	}
+	u2, _ := st.Lookup("tadmin")
+	if u2.TenantSlug != "hpc-lab" || u2.Role != auth.RoleMember {
+		t.Fatalf("db should stay committed: %+v", u2)
+	}
+}
+
+// P2 守卫（安全审计 2026-08-19 面的补齐）：非 admin 基角色调用者不可改派/迁移内置
+// admin 账号——否则持 roles:manage 的自定义角色可降级平台管理员（接管/瘫痪）。
+func TestAdminTargetGuardOnRoleOps(t *testing.T) {
+	_, st, prov := newFixture(t)
+	svc := admin.NewService(st, prov)
+	ctx := context.Background()
+
+	// actor=tadmin（tenant_admin 基角色）试图把 padmin 降级迁去 hpc-lab → 拒绝
+	if err := svc.MoveUserTenant(ctx, "tadmin", "padmin", "hpc-lab", "member", "rid-g1"); err == nil {
+		t.Fatal("non-admin moving builtin admin should be rejected")
+	}
+	// 同一攻击面经 AssignRole（存量洞）：降级 padmin 为 member → 拒绝
+	if err := svc.AssignRole(ctx, "tadmin", nil, "hpc-lab", "padmin", "member", "rid-g2"); err == nil {
+		t.Fatal("non-admin demoting builtin admin via AssignRole should be rejected")
+	}
+	// padmin 未被改动
+	u, _ := st.Lookup("padmin")
+	if u.Role != auth.RoleSystemAdmin || u.TenantSlug != "system" {
+		t.Fatalf("padmin must be untouched: %+v", u)
+	}
+	// admin 基角色操作 admin 账号仍放行（自管不设障）
+	if err := svc.MoveUserTenant(ctx, "padmin", "padmin", "system", "admin", "rid-g3"); err != nil {
+		t.Fatalf("admin self-move (no-op) should pass: %v", err)
+	}
+}

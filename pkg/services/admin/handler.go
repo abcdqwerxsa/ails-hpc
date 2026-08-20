@@ -647,6 +647,28 @@ func (h *AdminHandler) AssignPlatformRole(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "role assigned"})
 }
 
+// MovePlatformUserTenant PATCH /api/v1/admin/users/:username/tenant {tenantSlug, role}
+// 迁移用户到目标租户，并同事务改派到该租户下合法的角色（两步合一：单步迁移会被
+// 角色-租户归属规则互斥拒绝——如普通租户 member 提升平台 admin 须经此入口）。
+// Slurm 侧同步 re-parent 叶子账号到新租户父账号（fairshare 层级对齐；失败 502 重试幂等）。
+func (h *AdminHandler) MovePlatformUserTenant(c *gin.Context) {
+	var req struct {
+		TenantSlug string `json:"tenantSlug" binding:"required"`
+		Role       string `json:"role" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.BadRequest(c, "tenantSlug and role are required")
+		return
+	}
+	actor, _ := actorAndTenant(c)
+	if err := h.service.MoveUserTenant(c.Request.Context(), actor, c.Param("username"),
+		req.TenantSlug, req.Role, requestID(c)); err != nil {
+		mapErr(c, err, "admin.MovePlatformUserTenant")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "user moved to tenant " + req.TenantSlug})
+}
+
 // --- 租户级角色管理（tenant_admin，仅本租户） ---
 
 // ListMyRoles GET /api/v1/tenants/me/roles —— 本租户的自定义角色。

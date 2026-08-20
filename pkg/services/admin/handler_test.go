@@ -46,6 +46,11 @@ func (f *fakeProvision) SetAccountLimits(account, setting string) error {
 	return condErr(f.failLmt)
 }
 
+func (f *fakeProvision) ReparentAccount(account, newParent string) error {
+	f.calls = append(f.calls, "r:"+account+"->"+newParent)
+	return condErr(f.fail)
+}
+
 func condErr(yes bool) error {
 	if yes {
 		return errors.New("sacctmgr unreachable")
