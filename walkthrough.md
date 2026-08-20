@@ -25,6 +25,28 @@
 - 启动后直接在浏览器里写代码——环境在计算节点上，数据读写 `/shared` 即集群数据。
 - 会话结束（到期/手动回收）后工作内容保留于 `/shared`。
 
+### 3.1 Python 环境管理（装包持久化）
+
+你的 HOME 指向 `/shared/home/<你的用户名>`（集群共享卷）——**装在这里的包和文件跨会话持久**，会话回收后再开仍在。
+
+**装个包（最简单）**：在 notebook 单元格或终端里
+
+```bash
+pip install --user pandas seaborn   # 装到 ~/.local，所有后续会话可用
+```
+
+**项目级隔离环境（推荐做项目时用）**：在自己的 HOME 里建 venv，并注册成 Jupyter 内核：
+
+```bash
+python3 -m venv ~/envs/myproj            # 建隔离环境
+~/envs/myproj/bin/pip install torch pandas ipykernel   # 装依赖（含内核注册器）
+~/envs/myproj/bin/python -m ipykernel install --user --name myproj --display-name "Python (myproj)"
+```
+
+注册后刷新 JupyterLab 启动器（Launcher），就会出现 **Python (myproj)** 内核卡片——新建 notebook 选它，跑的就是这个隔离环境。每个项目一套依赖互不干扰；不用的环境 `rm -rf ~/envs/myproj` 删除即可。
+
+> 注：集群不预装重型库（torch 等）——按需装到自己的环境里，装一次长期复用。需要全体共享的预置环境（如 GPU 框架）时联系管理员。
+
 ## 4. 计费与配额（计费页）
 
 - 展示你（或你所选范围）的 CPU/内存/GPU 小时用量与**估算费用**，当前费率一并列出（改价不发版，以页面展示为准）。
