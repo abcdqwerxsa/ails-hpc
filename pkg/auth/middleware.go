@@ -51,7 +51,8 @@ func JWTAuthMiddlewareWithStore(store UserStore) gin.HandlerFunc {
 }
 
 // authenticate 是两种中间件的共享内核：取凭证（头>?token=>cookie，IDE 路径）→
-// 验签 →（store 非空时）活体校验 → IDE 首跳种 cookie。失败时已写 401 响应。
+// 验签（JWT）或查取（PAT，T1）→（store 非空时）活体校验 → IDE 首跳种 cookie。
+// 失败时已写 401 响应。
 func authenticate(c *gin.Context, store UserStore) (*Claims, bool) {
 	authHeader := strings.TrimSpace(c.GetHeader("Authorization"))
 	tokenStr := ""
@@ -73,6 +74,14 @@ func authenticate(c *gin.Context, store UserStore) (*Claims, bool) {
 		httpx.Unauthorized(c, "missing or invalid Authorization header")
 		return nil, false
 	}
+	// T1：PAT 前缀分流（JWT 恒为三段点分，与 PAT 前缀互斥）。
+	if strings.HasPrefix(tokenStr, PATPrefix) {
+		claims, ok := authenticatePAT(c, store, tokenStr)
+		if ok && isIDE && fromQuery {
+			seedIDECookie(c, tokenStr)
+		}
+		return claims, ok
+	}
 	claims, err := VerifyToken(tokenStr)
 	if err != nil {
 		// 固定文案：不外泄 JWT 校验内部细节（签名/解析错误等）
@@ -81,43 +90,93 @@ func authenticate(c *gin.Context, store UserStore) (*Claims, bool) {
 	}
 	if store != nil {
 		u, ok := store.Lookup(claims.Username)
-		if !ok || u.Status != "active" || u.TenantSuspended {
-			httpx.Unauthorized(c, "invalid or expired token")
-			return nil, false
-		}
-		if ver, ok := store.UserVersion(claims.Username); !ok || ver != claims.Ver {
-			httpx.Unauthorized(c, "invalid or expired token")
-			return nil, false
-		}
-		// R2 角色表化：按库内当前值刷新角色面（角色改派/角色权限调整即刻生效，无需
-		// 重登）。Role 恒为"基角色"（scope 推导）；Rn/Perms/Rid 携带实际角色信息。
-		// 内存/yaml 库这些字段为零值 → 刷新为空 → 解析器回退内置映射，行为不变。
-		claims.Role = u.Role
-		claims.Rn = u.RoleName
-		claims.Perms = u.Permissions
-		claims.Rid = u.RoleID
-
-		// A1 强制改密：must_change_password=1 时只放行自助面（改密/自描述/登出全部/
-		// SSO 关联），其余业务端点一律 403——防初始/被重置密码被长期使用。
-		if u.MustChangePassword && !mustChangeAllowed(c.Request.URL.Path) {
-			httpx.Error(c, http.StatusForbidden,
-				"password change required before using this service",
-				httpx.Extra{"code": "must_change_password"})
+		if !liveGate(c, store, u, ok, claims) {
 			return nil, false
 		}
 	}
 	if isIDE && fromQuery {
-		http.SetCookie(c.Writer, &http.Cookie{
-			Name:     ideCookieName,
-			Value:    tokenStr,
-			Path:     ideCookiePath,
-			HttpOnly: true,
-			SameSite: http.SameSiteLaxMode,
-			Secure:   ideCookieSecure, // P2：TLS 部署后置 AILS_COOKIE_SECURE=1（http 下置位会静默丢 cookie）
-			MaxAge:   24 * 3600,
-		})
+		seedIDECookie(c, tokenStr)
 	}
 	return claims, true
+}
+
+// authenticatePAT T1 PAT 认证路径：哈希直查 → 吊销/过期拒绝 → 活体门（同 JWT）→
+// 由用户库当值重建 claims（每请求刷新，角色改派/权限调整即刻生效）。
+func authenticatePAT(c *gin.Context, store UserStore, token string) (*Claims, bool) {
+	if store == nil {
+		httpx.Unauthorized(c, "invalid or expired token")
+		return nil, false
+	}
+	ts, ok := store.(PATStore)
+	if !ok {
+		httpx.ServiceUnavailable(c, "API tokens require AILS_USER_STORE=db", nil)
+		return nil, false
+	}
+	rec, err := ts.LookupAPIToken(PATHash(token))
+	if err != nil || rec.Revoked || PATExpired(rec.ExpiresAt) {
+		// 与 JWT 同文案——吊销/过期/未知统一"无效令牌"（不泄露具体状态）
+		httpx.Unauthorized(c, "invalid or expired token")
+		return nil, false
+	}
+	u, ok := store.Lookup(rec.Username)
+	claims := &Claims{Username: rec.Username}
+	if !liveGate(c, store, u, ok, claims) {
+		return nil, false
+	}
+	if patTouchDue(rec.ID) {
+		_ = ts.TouchAPIToken(rec.ID) // best-effort：失败不影响请求
+	}
+	return claims, true
+}
+
+// liveGate 活体校验 + 角色面刷新 + must-change 门（JWT/PAT 共用）。claims 为
+// JWT 解析结果或 PAT 的空白构造（由 u 重建）。返回 false 时已写响应。
+func liveGate(c *gin.Context, store UserStore, u *User, ok bool, claims *Claims) bool {
+	if !ok || u.Status != "active" || u.TenantSuspended {
+		httpx.Unauthorized(c, "invalid or expired token")
+		return false
+	}
+	if claims.Ver != 0 || claims.Exp != 0 { // JWT 路径才比对版本（PAT 每请求重建，无 Ver）
+		if ver, vok := store.UserVersion(claims.Username); !vok || ver != claims.Ver {
+			httpx.Unauthorized(c, "invalid or expired token")
+			return false
+		}
+	}
+	// R2 角色表化：按库内当前值刷新角色面（角色改派/角色权限调整即刻生效，无需
+	// 重登）。Role 恒为"基角色"（scope 推导）；Rn/Perms/Rid 携带实际角色信息。
+	// 内存/yaml 库这些字段为零值 → 刷新为空 → 解析器回退内置映射，行为不变。
+	claims.Role = u.Role
+	claims.Rn = u.RoleName
+	claims.Perms = u.Permissions
+	claims.Rid = u.RoleID
+	claims.OrgSlug = u.OrgSlug
+	claims.TenantNS = u.TenantNS
+	claims.ClusterUser = u.ClusterUser
+	claims.Account = u.Account
+	claims.TID = u.TenantSlug
+
+	// A1 强制改密：must_change_password=1 时只放行自助面（改密/自描述/登出全部/
+	// SSO 关联），其余业务端点一律 403——防初始/被重置密码被长期使用。
+	if u.MustChangePassword && !mustChangeAllowed(c.Request.URL.Path) {
+		httpx.Error(c, http.StatusForbidden,
+			"password change required before using this service",
+			httpx.Extra{"code": "must_change_password"})
+		return false
+	}
+	return true
+}
+
+// seedIDECookie IDE 首跳种 cookie（JWT/PAT 共用）。
+func seedIDECookie(c *gin.Context, tokenStr string) {
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     ideCookieName,
+		Value:    tokenStr,
+		Path:     ideCookiePath,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   ideCookieSecure, // P2：TLS 部署后置 AILS_COOKIE_SECURE=1（http 下置位会静默丢 cookie）
+		MaxAge:   24 * 3600,
+	})
 }
 
 // ideCookieSecure 由 main 按 AILS_COOKIE_SECURE 注入（默认 false——当前 http 部署；

@@ -71,6 +71,11 @@ func NewRouter(h Handlers) *gin.Engine {
 		// OIDC 账号关联（S4；需登录）
 		api.GET("/auth/oidc/bind", h.OIDC.BindLogin)
 		api.POST("/auth/oidc/unlink", h.OIDC.Unlink)
+		// T1 个人 API token 自助管理（需登录；锁改密期间被 mustChange 门拦——
+		// 锁定期不该签发长期凭证）。PAT 亦可管理本人令牌（配额 10 封顶防链式囤积）。
+		api.POST("/auth/tokens", h.Auth.CreateAPIToken)
+		api.GET("/auth/tokens", h.Auth.ListAPITokens)
+		api.DELETE("/auth/tokens/:id", h.Auth.RevokeAPIToken)
 		slurm := api.Group("/slurm")
 
 		// 读：集群状态（cluster:read——安全审计 2026-08-19 P1-7：权限点此前声明
