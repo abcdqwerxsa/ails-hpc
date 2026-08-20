@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { slurm, type RoleInfo } from '../services/slurm';
 import { can, permissionsOfUser, getStoredUser } from '../services/auth';
+import { Select } from './select';
 
 // 权限点中文名（与后端权威词汇表 pkg/auth/permissions.go 同步维护）
 export const PERMISSION_LABELS: Record<string, string> = {
@@ -134,21 +135,19 @@ export function RolesPanel({ scope }: RolesPanelProps) {
           </label>
           <label style={fieldStyle}>
             基角色（数据范围）
-            <select className="form-control" value={form.baseRole} onChange={(e) => setForm({ ...form, baseRole: e.target.value })}>
-              {isPlatform ? (
-                <>
-                  <option value="ops_admin">ops_admin（平台全量可见）</option>
-                  <option value="admin">admin（平台管理员）</option>
-                  <option value="tenant_admin">tenant_admin（本租户数据）</option>
-                  <option value="member">member（仅本人数据）</option>
-                </>
-              ) : (
-                <>
-                  <option value="member">member（仅本人数据）</option>
-                  <option value="tenant_admin">tenant_admin（本租户数据）</option>
-                </>
-              )}
-            </select>
+            <Select
+              value={form.baseRole}
+              onChange={(v) => setForm({ ...form, baseRole: v })}
+              options={isPlatform ? [
+                { value: 'ops_admin', label: 'ops_admin（平台全量可见）' },
+                { value: 'admin', label: 'admin（平台管理员）' },
+                { value: 'tenant_admin', label: 'tenant_admin（本租户数据）' },
+                { value: 'member', label: 'member（仅本人数据）' },
+              ] : [
+                { value: 'member', label: 'member（仅本人数据）' },
+                { value: 'tenant_admin', label: 'tenant_admin（本租户数据）' },
+              ]}
+            />
           </label>
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
@@ -284,18 +283,79 @@ export function RoleAssignSelect({
 
   return (
     <div style={{ display: 'inline-flex', gap: '0.35rem', alignItems: 'center' }}>
-      <select
-        className="form-control form-control-sm"
+      <Select
+        small
+        width={150}
         value={value}
-        onChange={(e) => setValue(e.target.value)}
-        style={{ width: 150 }}
-      >
-        {roles.map((r) => (
-          <option key={r.id} value={r.name}>{r.name}</option>
-        ))}
-      </select>
+        onChange={setValue}
+        options={roles.map((r) => ({ value: r.name, label: r.name }))}
+        ariaLabel="改派角色"
+      />
       <MiniBtn disabled={busy || value === (currentRoleName || currentRole)} onClick={apply}>
         {busy ? '…' : '改派'}
+      </MiniBtn>
+    </div>
+  );
+}
+
+// TenantMoveControl 用户行内租户迁移（平台面板）：选目标租户 + 该租户下合法的角色，
+// 一次请求完成（后端同事务改派——单改租户或单改角色会被归属规则互斥拒绝）。
+export function TenantMoveControl({
+  username,
+  currentTenant,
+  currentRole,
+  onDone,
+}: {
+  username: string;
+  currentTenant: string;
+  currentRole: string;
+  onDone: (msg: string) => void;
+}) {
+  const [tenants, setTenants] = useState<{ slug: string; name?: string }[]>([]);
+  const [tenant, setTenant] = useState(currentTenant);
+  const [role, setRole] = useState(currentRole);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await slurm.listTenants();
+        setTenants(r.tenants || []);
+      } catch {
+        /* 清单拉取失败 → 保留当前值（提交前仍可手改不存在的租户，后端 404/400 兜底） */
+      }
+    })();
+  }, []);
+
+  const apply = async () => {
+    setBusy(true);
+    try {
+      await slurm.movePlatformUserTenant(username, tenant, role);
+      onDone(`用户 ${username} 已迁移到租户 ${tenant}（角色 ${role}）`);
+    } catch (e: any) {
+      onDone(`迁移失败：${e?.message || e}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const tenantOptions = [
+    ...(tenants.some((t) => t.slug === tenant) ? [] : [{ value: tenant, label: tenant }]),
+    ...tenants.map((t) => ({ value: t.slug, label: t.slug })),
+  ];
+  return (
+    <div style={{ display: 'inline-flex', gap: '0.35rem', alignItems: 'center' }}>
+      <Select small width={130} value={tenant} onChange={setTenant} options={tenantOptions} ariaLabel="目标租户" />
+      <Select
+        small
+        width={130}
+        value={role}
+        onChange={setRole}
+        options={['member', 'tenant_admin', 'ops_admin', 'admin'].map((r) => ({ value: r, label: r }))}
+        ariaLabel="迁移后角色"
+      />
+      <MiniBtn disabled={busy || (tenant === currentTenant && role === currentRole)} onClick={apply}>
+        {busy ? '…' : '迁租户'}
       </MiniBtn>
     </div>
   );

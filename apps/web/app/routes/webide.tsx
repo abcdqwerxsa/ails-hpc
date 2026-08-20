@@ -2,6 +2,7 @@ import { createFileRoute } from '@tanstack/react-router';
 import { useCallback, useEffect, useState, type ChangeEvent, type ReactNode } from 'react';
 import { can } from '../services/auth';
 import { slurm, ideFullURL, type ContainerInstance } from '../services/slurm';
+import { Select } from '../components/select';
 
 export const Route = createFileRoute('/webide')({ component: WebIDEPage });
 
@@ -110,14 +111,14 @@ function WebIDEPage() {
       >
         <label style={{ display: 'grid', gap: '0.25rem', fontSize: '0.8rem', color: 'var(--text-muted,#94a3b8)' }}>
           环境
-          <select
-            className="form-control"
+          <Select
             value={envType}
-            onChange={(e: ChangeEvent<HTMLSelectElement>) => setEnvType(e.target.value as 'jupyter' | 'vscode')}
-          >
-            <option value="jupyter">JupyterLab</option>
-            <option value="vscode">VS Code (code-server)</option>
-          </select>
+            onChange={(v) => setEnvType(v as 'jupyter' | 'vscode')}
+            options={[
+              { value: 'jupyter', label: 'JupyterLab' },
+              { value: 'vscode', label: 'VS Code (code-server)' },
+            ]}
+          />
         </label>
         <label style={{ display: 'grid', gap: '0.25rem', fontSize: '0.8rem', color: 'var(--text-muted,#94a3b8)' }}>
           CPU
@@ -131,15 +132,19 @@ function WebIDEPage() {
         </label>
         <label style={{ display: 'grid', gap: '0.25rem', fontSize: '0.8rem', color: 'var(--text-muted,#94a3b8)' }}>
           时长（分钟）
-          <select className="form-control" value={durationMin}
-            onChange={(e) => setDurationMin(e.target.value)} style={{ width: 110 }}>
-            <option value="30">30</option>
-            <option value="60">60</option>
-            <option value="120">120（默认）</option>
-            <option value="240">240</option>
-            <option value="480">480</option>
-            <option value="720">720（上限）</option>
-          </select>
+          <Select
+            width={110}
+            value={durationMin}
+            onChange={setDurationMin}
+            options={[
+              { value: '30', label: '30' },
+              { value: '60', label: '60' },
+              { value: '120', label: '120（默认）' },
+              { value: '240', label: '240' },
+              { value: '480', label: '480' },
+              { value: '720', label: '720（上限）' },
+            ]}
+          />
         </label>
         {can('ide:manage') && (
           <button className="btn-primary" onClick={launch} disabled={launching} style={{ padding: '0.5rem 1.5rem' }}>

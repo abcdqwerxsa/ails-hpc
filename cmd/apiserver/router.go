@@ -148,6 +148,8 @@ func NewRouter(h Handlers) *gin.Engine {
 		platformAdmin.PATCH("/roles/:name", rolesManage, h.Admin.UpdatePlatformRole)
 		platformAdmin.DELETE("/roles/:name", rolesManage, h.Admin.DeletePlatformRole)
 		platformAdmin.PATCH("/users/:username/role", rolesManage, h.Admin.AssignPlatformRole)
+	// 租户迁移（含同事务角色改派——可授予 admin，故门面同 roles:manage）
+	platformAdmin.PATCH("/users/:username/tenant", rolesManage, h.Admin.MovePlatformUserTenant)
 
 		// 租户管理（tenant_admin；租户归属以 claims 为权威，不信任请求体）
 		tenants := api.Group("/tenants")

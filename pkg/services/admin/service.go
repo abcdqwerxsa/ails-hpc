@@ -48,6 +48,9 @@ type SlurmProvisioner interface {
 	ProvisionUser(clusterUser string, uid, gid int, account, parentAccount string) error
 	// SetAccountLimits 设置账号级限额（如 "GrpTRES=cpu=4" / "Fairshare=10"；幂等）。
 	SetAccountLimits(account, setting string) error
+	// ReparentAccount 把用户叶子账号挂到新租户父账号下（租户迁移后 fairshare
+	// 层级对齐；幂等——re-parent 到原 parent 是 no-op）。
+	ReparentAccount(account, newParentAccount string) error
 }
 
 // sacctmgrProvisioner 是默认实现：经 slurmctld 容器执行 sacctmgr（重复 add 容错）。
@@ -98,6 +101,18 @@ func (sacctmgrProvisioner) ProvisionUser(clusterUser string, uid, gid int, accou
 func (sacctmgrProvisioner) SetAccountLimits(account, setting string) error {
 	if _, err := slurmrest.RunInSlurmctld("sh", "-c",
 		fmt.Sprintf("sacctmgr -i modify account %s set %s", account, setting)); err != nil {
+		return err
+	}
+	return refreshAssocs()
+}
+
+// ReparentAccount 租户迁移后把叶子账号挂到新父账号（fairshare 记账随之切到新租户）。
+// 目标父账号可能尚未建（新租户未供给）→ 先幂等 add 再 modify，与 entrypoint 迁移
+// 脚本同套路（21.08 实测支持 re-parent）。
+func (sacctmgrProvisioner) ReparentAccount(account, newParent string) error {
+	if _, err := slurmrest.RunInSlurmctld("sh", "-c",
+		fmt.Sprintf("sacctmgr -i add account %s || true; sacctmgr -i modify account %s set parent=%s",
+			newParent, account, newParent)); err != nil {
 		return err
 	}
 	return refreshAssocs()

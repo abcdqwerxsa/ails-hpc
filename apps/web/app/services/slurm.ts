@@ -685,6 +685,11 @@ export const slurm = {
       method: "PATCH",
       body: JSON.stringify({ role }),
     }),
+  movePlatformUserTenant: (username: string, tenantSlug: string, role: string) =>
+    apiFetch<{ message: string }>(`/admin/users/${encodeURIComponent(username)}/tenant`, {
+      method: "PATCH",
+      body: JSON.stringify({ tenantSlug, role }),
+    }),
 
   listMyRoles: () => apiFetch<RolesListResponse>("/tenants/me/roles"),
   createMyRole: (payload: CreateRoleRequest) =>
