@@ -1,10 +1,10 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { slurm, oidc, type SessionEntry } from '../services/slurm';
+import { slurm, oidc, type SessionEntry, type PATInfo } from '../services/slurm';
 import { getStoredUser } from '../services/auth';
 
 // A1 设置页：改密（复杂度策略 + 历史 N 次不可重用）、会话台账、全设备登出、
-// SSO 绑定/解绑（S4）。
+// SSO 绑定/解绑（S4）、API 令牌（T1）。
 export const Route = createFileRoute('/settings')({ component: SettingsPage });
 
 function SettingsPage() {
@@ -18,6 +18,11 @@ function SettingsPage() {
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
   const [oidcEnabled, setOidcEnabled] = useState(false);
   const [oidcLinked, setOidcLinked] = useState(false);
+  const [pats, setPats] = useState<PATInfo[]>([]);
+  const [patName, setPatName] = useState('');
+  const [patDays, setPatDays] = useState('');
+  const [patBusy, setPatBusy] = useState(false);
+  const [freshPat, setFreshPat] = useState<{ token: string; name: string } | null>(null);
 
   const user = getStoredUser();
 
@@ -30,11 +35,60 @@ function SettingsPage() {
     }
   }, []);
 
+  const loadPats = useCallback(async () => {
+    try {
+      const r = await slurm.listPATs();
+      setPats(r.tokens || []);
+    } catch {
+      /* PAT 面不可用（yaml 模式旧后端）时静默 */
+    }
+  }, []);
+
   useEffect(() => {
     loadSessions();
+    loadPats();
     oidc.config().then((c) => setOidcEnabled(!!c.enabled)).catch(() => {});
     slurm.getMe().then((me) => setOidcLinked(!!me.user.oidcLinked)).catch(() => {});
-  }, [loadSessions]);
+  }, [loadSessions, loadPats]);
+
+  const createPat = async () => {
+    setError('');
+    setInfo('');
+    setFreshPat(null);
+    const days = parseInt(patDays, 10);
+    if (patDays !== '' && (isNaN(days) || days < 1 || days > 3650)) {
+      setError('有效期须为 1-3650 天，或留空表示长期');
+      return;
+    }
+    setPatBusy(true);
+    try {
+      const r = await slurm.createPAT({
+        name: patName.trim() || undefined,
+        expiresInDays: days || undefined,
+      });
+      setFreshPat({ token: r.token, name: r.name });
+      setPatName('');
+      setPatDays('');
+      await loadPats();
+    } catch (err: any) {
+      setError(err?.message || String(err));
+    } finally {
+      setPatBusy(false);
+    }
+  };
+
+  const revokePat = async (id: number, name: string) => {
+    if (!confirm(`吊销令牌「${name}」？使用它的脚本将立即失效。`)) return;
+    setError('');
+    setInfo('');
+    try {
+      await slurm.revokePAT(id);
+      setInfo(`令牌「${name}」已吊销`);
+      await loadPats();
+    } catch (err: any) {
+      setError(err?.message || String(err));
+    }
+  };
 
   const changePw = async (e: FormEvent) => {
     e.preventDefault();
@@ -159,6 +213,67 @@ function SettingsPage() {
           </div>
         </div>
       )}
+
+      <div style={cardStyle}>
+        <div style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '0.5rem' }}>API 令牌</div>
+        <p style={{ margin: '0 0 0.75rem', fontSize: '0.78rem', color: 'var(--text-muted,#94a3b8)' }}>
+          供脚本/cron 调用面板 API（<code>Authorization: Bearer ailspat_…</code>），免用账号密码登录。
+          明文仅在创建时显示一次；吊销即刻生效。最多 10 个活跃令牌。
+        </p>
+        {freshPat && (
+          <div style={{ padding: '0.75rem 0.9rem', background: 'rgba(59,130,246,.1)', border: '1px solid var(--accent-primary,#3b82f6)', borderRadius: 8, marginBottom: '0.9rem' }}>
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted,#94a3b8)', marginBottom: '0.35rem' }}>
+              令牌「{freshPat.name}」已创建——<b>关闭后不再显示，请立即保存</b>：
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <code style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.78rem', wordBreak: 'break-all', flex: 1 }}>{freshPat.token}</code>
+              <button onClick={() => navigator.clipboard?.writeText(freshPat.token)} style={{ padding: '0.25rem 0.7rem', borderRadius: 6, border: 'none', background: 'var(--card-bg)', boxShadow: 'var(--shadow-btn)', color: 'var(--text-main,#f1f5f9)', cursor: 'pointer', fontSize: '0.75rem' }}>
+                复制
+              </button>
+            </div>
+          </div>
+        )}
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(160px,1fr) 120px auto', gap: '0.6rem', marginBottom: '0.9rem' }}>
+          <input className="form-control" value={patName} onChange={(e) => setPatName(e.target.value)} placeholder="令牌名称（如 ci-deploy）" />
+          <input className="form-control" value={patDays} onChange={(e) => setPatDays(e.target.value)} placeholder="有效天数（空=长期）" />
+          <button className="btn-primary" onClick={createPat} disabled={patBusy} style={{ padding: '0.45rem 1.1rem' }}>
+            {patBusy ? '创建中…' : '创建令牌'}
+          </button>
+        </div>
+        {pats.length === 0 ? (
+          <div style={{ color: 'var(--text-muted,#94a3b8)', fontSize: '0.85rem' }}>暂无令牌</div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ textAlign: 'left' }}>
+                  <th style={th}>名称</th><th style={th}>前缀</th><th style={th}>创建</th>
+                  <th style={th}>最近使用</th><th style={th}>过期</th><th style={th}>状态</th><th style={th}>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pats.map((p) => (
+                  <tr key={p.id}>
+                    <td style={td}>{p.name}</td>
+                    <td style={{ ...td, fontFamily: "'JetBrains Mono', monospace", fontSize: '0.78rem' }}>{p.prefix}…</td>
+                    <td style={td}>{p.createdAt?.slice(0, 16) || '-'}</td>
+                    <td style={td}>{p.lastUsedAt?.slice(0, 16) || '从未'}</td>
+                    <td style={td}>{p.expiresAt?.slice(0, 10) || '长期'}</td>
+                    <td style={td}>{p.revoked ? <span style={{ color: '#f43f5e' }}>已吊销</span> : <span style={{ color: '#10b981' }}>活跃</span>}</td>
+                    <td style={td}>
+                      {!p.revoked && (
+                        <button onClick={() => revokePat(p.id, p.name)} style={{ padding: '0.2rem 0.6rem', borderRadius: 6, border: 'none', background: 'var(--card-bg)', boxShadow: 'var(--shadow-btn)', color: 'var(--accent-rose)', cursor: 'pointer', fontSize: '0.75rem' }}>
+                          吊销
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
       <div style={cardStyle}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>

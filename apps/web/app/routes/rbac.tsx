@@ -17,6 +17,8 @@ const AUDIT_ACTIONS = [
   { value: 'user.update', label: '用户更新/禁用' },
   { value: 'user.reset_password', label: '密码重置' },
   { value: 'user.role', label: '角色改派' },
+  { value: 'token.create', label: '令牌签发' },
+  { value: 'token.revoke', label: '令牌吊销' },
   { value: 'role.create', label: '角色创建' },
   { value: 'role.update', label: '角色更新' },
   { value: 'role.delete', label: '角色删除' },
