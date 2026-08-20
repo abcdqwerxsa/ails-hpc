@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"ails-hpc/pkg/services/containers"
 	"ails-hpc/pkg/slurmrest"
@@ -40,6 +41,13 @@ func (f *fakeJobsAPI) GetJobs() (*slurmrest.JobsResponse, error) {
 func (f *fakeJobsAPI) CancelJobAs(jobID int, actAs string) error {
 	f.cancelled = append(f.cancelled, jobID)
 	f.cancelActAs = actAs
+	if f.jobs != nil {
+		for i := range f.jobs.Jobs {
+			if f.jobs.Jobs[i].JobID == jobID {
+				f.jobs.Jobs[i].JobState = "CANCELLED"
+			}
+		}
+	}
 	return f.cancelErr
 }
 
@@ -271,3 +279,90 @@ func TestLaunchContainer_TimeLimitAdjustable(t *testing.T) {
 		}
 	}
 }
+
+func TestLaunchContainer_GPU_UsesCliSubmit(t *testing.T) {
+	var cliCalled bool
+	var capturedOpts containers.CliSubmitOpts
+	cliSubmit := func(opts containers.CliSubmitOpts) (int, error) {
+		cliCalled = true
+		capturedOpts = opts
+		return 8888, nil
+	}
+
+	jobs := &fakeJobsAPI{}
+	meta := &fakeMeta{m: map[string]containers.SessionMeta{}}
+	svc := containers.NewContainerServiceWithAllDeps(jobs, meta, cliSubmit)
+
+	req := &containers.ContainerLaunchRequest{
+		EnvType:   "jupyter",
+		EnvPreset: "pytorch",
+		GPUs:      1,
+		CPUs:      4,
+		MemoryMB:  8192,
+	}
+
+	resp, err := svc.LaunchContainer(context.Background(), req, "user1", "user1")
+	if err != nil {
+		t.Fatalf("LaunchContainer failed: %v", err)
+	}
+
+	if !cliCalled {
+		t.Fatalf("expected cliSubmit to be called for GPU container, but was not")
+	}
+	if capturedOpts.Partition != "performance" {
+		t.Errorf("expected partition 'performance', got %q", capturedOpts.Partition)
+	}
+	if capturedOpts.Gpus != 1 {
+		t.Errorf("expected Gpus 1, got %d", capturedOpts.Gpus)
+	}
+	if resp.Allocated.JobID != 8888 {
+		t.Errorf("expected JobID 8888, got %d", resp.Allocated.JobID)
+	}
+	if resp.Allocated.GPUs != 1 {
+		t.Errorf("expected Allocated.GPUs 1, got %d", resp.Allocated.GPUs)
+	}
+	if resp.Allocated.EnvPreset != "pytorch" {
+		t.Errorf("expected Allocated.EnvPreset 'pytorch', got %q", resp.Allocated.EnvPreset)
+	}
+}
+
+func TestIdleReaper_ReclaimsExpiredSessions(t *testing.T) {
+	sid := "test-idle-sid"
+	now := time.Now()
+	// 模拟已启动 20 分钟（超过 10 分钟保护期）的会话
+	submitTime := now.Add(-20 * time.Minute).Unix()
+
+	jobs := &fakeJobsAPI{
+		jobs: jobsResp(jrow{id: 777, name: "jupyter-ide-" + sid, state: "RUNNING", nodes: "node1", submit: submitTime, account: "user1"}),
+	}
+	meta := &fakeMeta{
+		m: map[string]containers.SessionMeta{
+			sid: {SessionID: sid, JobID: 777, EnvType: "jupyter", NodeIP: "1.2.3.4", Port: 8888, Owner: "user1"},
+		},
+	}
+	svc := containers.NewContainerServiceWithDeps(jobs, meta)
+
+	var reclaimedSid string
+	var reclaimedJobID int
+	callback := func(sessionID string, jobID int, owner string, idleMin int) {
+		reclaimedSid = sessionID
+		reclaimedJobID = jobID
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// 启动 reaper，设置超时 15 分钟（20 > 15），检查间隔 10ms
+	svc.StartIdleReaper(ctx, 10*time.Millisecond, 15, callback)
+
+	// 等待 reaper 触发
+	time.Sleep(50 * time.Millisecond)
+
+	if reclaimedSid != sid || reclaimedJobID != 777 {
+		t.Errorf("expected session %s (job 777) to be reclaimed, got sid=%q jobID=%d", sid, reclaimedSid, reclaimedJobID)
+	}
+	if len(jobs.cancelled) != 1 || jobs.cancelled[0] != 777 {
+		t.Errorf("expected job 777 to be cancelled in Slurm, got cancelled: %v", jobs.cancelled)
+	}
+}
+

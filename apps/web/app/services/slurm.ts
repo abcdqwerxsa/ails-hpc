@@ -165,6 +165,7 @@ export interface JobControlResponse {
 export interface ContainerInstance {
   container_id: string;
   env_type: string; // jupyter | vscode
+  env_preset?: string; // base | pytorch | custom
   status: string; // STARTING | RUNNING | STOPPED
   web_url: string; // /api/v1/ide/<session>/
   job_id: number;
@@ -172,21 +173,27 @@ export interface ContainerInstance {
   nodes: number;
   cpus: number;
   memory_mb: number;
+  gpus?: number;
   created_at: string;
+  last_active_at?: string;
+  idle_minutes?: number;
 }
 export interface ContainerListResponse {
   containers: ContainerInstance[];
 }
 export interface ContainerLaunchRequest {
   env_type: string; // jupyter | vscode
+  env_preset?: string; // base | pytorch | custom
   nodes?: number;
   cpus?: number;
   memory_mb?: number;
+  gpus?: number; // GPU 数量（0=CPU, 1=1 GPU）
   time_limit_min?: number; // 会话时长分钟（1.4；默认 120，上限 720）
 }
 export interface ContainerLaunchResponse {
   container_id: string;
   env_type: string;
+  env_preset?: string;
   status: string;
   web_url: string;
   allocated?: ContainerInstance;

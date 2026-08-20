@@ -11,28 +11,36 @@
 
 /* ---------- Light theme (default — matches React's data-theme="light") ---------- */
 :root {
-  /* Native 表单部件（select 弹出列表/数字步进器/滚动条）跟随页面主题，
-     否则深色模式下下拉弹层是操作系统默认的亮色 */
+  /* Native 表单部件（select 弹出列表/数字步进器/滚动条）跟随页面主题 */
   color-scheme: light;
 
-  /* Soft neumorphic surface palette (方案 B 明色软质贴合) */
+  /* Soft neumorphic surface palette (经典清爽软拟物) */
   --bg-main: #F0F3F8;
   --bg-sidebar: #E9EEF5;
-  --card-bg: #EAEFF5; /* raised + sunken share this one base color */
+  --card-bg: #EAEFF5;
+  --sidebar-card-bg: #EAEFF5;
 
   --text-primary: #1E293B;
   --text-secondary: #64748B;
   --text-dim: #94A3B8;
 
-  /* Raised (凸起) — outward bidirectional light shadow */
+  /* Raised (凸起) — 原版双向柔和光影 */
   --shadow-card: -3px -3px 6px #FFFFFF, -12px -12px 24px #FFFFFF, 3px 3px 6px rgba(166, 180, 200, 0.4), 12px 12px 24px #D1D9E6;
   --shadow-card-hover: -3px -3px 8px #FFFFFF, -15px -15px 30px #FFFFFF, 4px 4px 8px rgba(166, 180, 200, 0.5), 15px 15px 30px #C3CCD9;
   --shadow-btn: -2px -2px 4px #FFFFFF, -7px -7px 15px #FFFFFF, 2px 2px 4px rgba(166, 180, 200, 0.4), 7px 7px 15px #D1D9E6;
   --shadow-btn-active: inset 4px 4px 8px #D1D9E6, inset -4px -4px 8px #FFFFFF;
   --sidebar-shadow: 6px 0 20px rgba(166, 180, 200, 0.25);
+  --sidebar-btn-shadow: var(--shadow-btn);
+  --sidebar-btn-active: var(--shadow-btn-active);
+  --sidebar-inset-deep: inset 2px 2px 4px rgba(166, 180, 200, 0.25), inset 5px 5px 10px rgba(203, 213, 225, 0.25), inset -2px -2px 4px #FFFFFF, inset -5px -5px 10px #FFFFFF;
 
-  /* Sunken (凹陷) — inward reversed shadow, same base color */
+  /* Sunken (凹陷) */
   --shadow-inset-deep: inset 2px 2px 4px rgba(166, 180, 200, 0.25), inset 5px 5px 10px rgba(203, 213, 225, 0.25), inset -2px -2px 4px #FFFFFF, inset -5px -5px 10px #FFFFFF;
+
+  --chiseled-top: rgba(255, 255, 255, 0.6);
+  --chiseled-left: rgba(255, 255, 255, 0.35);
+  --chiseled-right: rgba(148, 163, 184, 0.12);
+  --chiseled-bottom: rgba(148, 163, 184, 0.16);
 
   /* Accent + glow tokens */
   --accent-cyan: #0284C7;
@@ -45,7 +53,7 @@
   --accent-rose-glow: 0 0 12px rgba(244, 63, 94, 0.5);
   --accent-violet: #8B5CF6;
 
-  /* Soft dividers — faint enough that shadow defines raised surfaces */
+  /* Soft dividers */
   --border-color: rgba(148, 163, 184, 0.12);
   --row-line: rgba(148, 163, 184, 0.16);
 
@@ -56,8 +64,7 @@
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --sidebar-width: 230px;
 
-  /* ---- Legacy var aliases (referenced by inline styles + semantic classes) ----
-     Declared once as var() refs → they automatically follow the active theme. */
+  /* ---- Legacy var aliases ---- */
   --bg-dark: var(--bg-main);
   --bg-card: var(--card-bg);
   --bg-card-hover: var(--card-bg);
@@ -71,13 +78,16 @@
 
 /* ---------- Dark theme override ---------- */
 :root[data-theme="dark"] {
-  /* 下拉弹出列表/原生滚动条等 OS 渲染部件切到暗色 */
   color-scheme: dark;
 
-  /* 方案 A 像素级统一暗色色盘 */
   --bg-main: #14161E;
   --bg-sidebar: #161821;
   --card-bg: #1B1E28;
+  --sidebar-card-bg: #1B1E28;
+  --sidebar-shadow: 10px 0 24px #07080A;
+  --sidebar-btn-shadow: -1.5px -1.5px 3px rgba(255, 255, 255, 0.16), -7px -7px 16px rgba(255, 255, 255, 0.035), 3px 3px 6px rgba(0, 0, 0, 0.7), 8px 8px 18px #08090C;
+  --sidebar-btn-active: inset 4px 4px 8px #08090C, inset -4px -4px 8px rgba(255, 255, 255, 0.04);
+  --sidebar-inset-deep: inset 4px 4px 8px rgba(0, 0, 0, 0.85), inset 10px 10px 22px #08090C, inset -2px -2px 4px rgba(255, 255, 255, 0.1), inset -10px -10px 20px rgba(255, 255, 255, 0.04);
 
   --text-primary: #F1F5F9;
   --text-secondary: #94A3B8;
@@ -87,9 +97,13 @@
   --shadow-card-hover: -2px -2px 5px rgba(255, 255, 255, 0.2), -16px -16px 32px rgba(255, 255, 255, 0.05), 5px 5px 10px rgba(0, 0, 0, 0.8), 18px 18px 34px #060709;
   --shadow-btn: -1.5px -1.5px 3px rgba(255, 255, 255, 0.16), -7px -7px 16px rgba(255, 255, 255, 0.035), 3px 3px 6px rgba(0, 0, 0, 0.7), 8px 8px 18px #08090C;
   --shadow-btn-active: inset 4px 4px 8px #08090C, inset -4px -4px 8px rgba(255, 255, 255, 0.04);
-  --sidebar-shadow: 10px 0 24px #07080A;
 
   --shadow-inset-deep: inset 4px 4px 8px rgba(0, 0, 0, 0.85), inset 10px 10px 22px #08090C, inset -2px -2px 4px rgba(255, 255, 255, 0.1), inset -10px -10px 20px rgba(255, 255, 255, 0.04);
+
+  --chiseled-top: rgba(255, 255, 255, 0.12);
+  --chiseled-left: rgba(255, 255, 255, 0.06);
+  --chiseled-right: rgba(0, 0, 0, 0.4);
+  --chiseled-bottom: rgba(0, 0, 0, 0.5);
 
   --accent-cyan: #06B6D4;
   --accent-cyan-glow: 0 0 14px rgba(6, 182, 212, 0.7);
@@ -107,10 +121,15 @@
 }
 
 /* ---------- Reset ---------- */
-* {
+*, *::before, *::after {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
 }
 
 /* Themed thin scrollbars (admin surfaces need scroll cues, not hidden bars) */
@@ -138,7 +157,6 @@ body {
   color: var(--text-main);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
-  min-height: 100vh;
   display: flex;
   transition: background-color 0.3s ease, color 0.3s ease;
 }
@@ -147,15 +165,21 @@ code, pre, .font-mono {
   font-family: 'JetBrains Mono', monospace;
 }
 
-/* ---------- Layout ---------- */
+/* ---------- Layout (左右两栏独立滚动与视口锁定) ---------- */
 .app-layout {
   display: flex;
   width: 100vw;
-  min-height: 100vh;
+  height: 100vh;
+  max-height: 100vh;
+  overflow: hidden;
 }
 
 .sidebar {
   width: var(--sidebar-width);
+  height: 100vh;
+  max-height: 100vh;
+  overflow-y: auto;
+  overflow-x: hidden;
   background: var(--bg-sidebar);
   border-right: none;
   padding: 1.75rem 1.1rem;
@@ -191,7 +215,7 @@ code, pre, .font-mono {
   font-weight: 800;
   font-size: 0.8rem;
   letter-spacing: 0.5px;
-  box-shadow: var(--shadow-btn), var(--accent-cyan-glow);
+  box-shadow: var(--sidebar-btn-shadow), var(--accent-cyan-glow);
 }
 
 .nav-list {
@@ -218,12 +242,12 @@ code, pre, .font-mono {
   color: var(--text-main);
 }
 
-/* Active nav: raised same-surface pill with cyan text — the neumorphic signature */
+/* Active nav: raised same-surface pill with cyan text — exact original sidebar signature */
 .nav-item a.active {
-  background: var(--card-bg);
+  background: var(--sidebar-card-bg);
   color: var(--accent-cyan);
   font-weight: 700;
-  box-shadow: var(--shadow-btn);
+  box-shadow: var(--sidebar-btn-shadow);
 }
 
 .theme-toggle-btn {
@@ -234,14 +258,14 @@ code, pre, .font-mono {
   width: 100%;
   padding: 0.6rem;
   margin-bottom: 1rem;
-  background: var(--card-bg);
+  background: var(--sidebar-card-bg);
   border: none;
   border-radius: var(--radius-md);
   color: var(--text-main);
   font-size: 0.8rem;
   font-weight: 700;
   cursor: pointer;
-  box-shadow: var(--shadow-btn);
+  box-shadow: var(--sidebar-btn-shadow);
   transition: box-shadow 0.2s ease, color 0.2s ease;
 }
 
@@ -250,19 +274,19 @@ code, pre, .font-mono {
 }
 
 .theme-toggle-btn:active {
-  box-shadow: var(--shadow-btn-active);
+  box-shadow: var(--sidebar-btn-active);
 }
 
-/* User card: sunken inset tray */
+/* User card: sunken inset tray (exact original) */
 .user-card {
   padding: 0.85rem;
-  background: var(--card-bg);
+  background: var(--sidebar-card-bg);
   border: none;
   border-radius: var(--radius-md);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  box-shadow: var(--shadow-inset-deep);
+  box-shadow: var(--sidebar-inset-deep);
 }
 
 .user-info {
@@ -283,8 +307,11 @@ code, pre, .font-mono {
 
 .main-content {
   flex: 1;
+  height: 100vh;
+  max-height: 100vh;
   padding: 2.25rem 3rem;
   overflow-y: auto;
+  overflow-x: hidden;
   background: var(--bg-main);
   transition: background-color 0.3s ease;
 }
@@ -300,16 +327,19 @@ code, pre, .font-mono {
 
 /* ---------- Reusable neumorphic surfaces (used by routes + future pages) ---------- */
 
-/* Raised card: soft outward shadow. Add `.neu-raised` or rely on .stat-card/.table-card. */
+/* Raised card: soft outward shadow with directional specular bevel */
 .neu-raised,
 .stat-card,
 .table-card,
 .auth-card {
   background: var(--card-bg);
-  border: 1px solid transparent;
+  border-top: 1px solid var(--chiseled-top);
+  border-left: 1px solid var(--chiseled-left);
+  border-right: 1px solid var(--chiseled-right);
+  border-bottom: 1px solid var(--chiseled-bottom);
   box-shadow: var(--shadow-card);
   border-radius: var(--radius-lg);
-  transition: box-shadow 0.25s ease;
+  transition: box-shadow 0.25s ease, transform 0.2s ease;
 }
 
 .neu-raised:hover,
@@ -442,23 +472,27 @@ code, pre, .font-mono {
   font-size: 0.85rem;
   cursor: pointer;
   box-shadow: var(--shadow-btn);
-  transition: box-shadow 0.2s ease, filter 0.2s ease;
+  transition: box-shadow 0.18s cubic-bezier(0.4, 0, 0.2, 1), transform 0.12s ease, filter 0.18s ease;
+  user-select: none;
 }
 
 .btn-primary:hover {
   filter: brightness(1.08);
   box-shadow: var(--shadow-btn), var(--accent-cyan-glow);
+  transform: translateY(-1px);
 }
 
 .btn-primary:active {
   box-shadow: var(--shadow-btn-active);
   filter: brightness(0.96);
+  transform: translateY(1px) scale(0.985);
 }
 
 .btn-primary:disabled {
   cursor: wait;
   filter: grayscale(0.25);
   box-shadow: var(--shadow-btn);
+  transform: none;
 }
 
 /* Neutral raised button (secondary actions) */
@@ -472,15 +506,24 @@ code, pre, .font-mono {
   font-size: 0.82rem;
   font-weight: 700;
   cursor: pointer;
-  transition: box-shadow 0.2s ease, color 0.2s ease;
+  transition: box-shadow 0.18s cubic-bezier(0.4, 0, 0.2, 1), transform 0.12s ease, color 0.18s ease;
+  user-select: none;
 }
 
 .neu-btn:hover {
   color: var(--accent-cyan);
+  transform: translateY(-1px);
 }
 
 .neu-btn:active {
   box-shadow: var(--shadow-btn-active);
+  transform: translateY(1px) scale(0.985);
+}
+
+.neu-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
 }
 
 .neu-btn.rose {
@@ -714,3 +757,390 @@ select.form-control-sm {
   font-size: 0.875rem;
   margin-top: 0.25rem;
 }
+
+/* ---------- Global Neumorphic Floating Tooltip ---------- */
+.global-tooltip {
+  position: fixed;
+  z-index: 99999;
+  pointer-events: none;
+  background: var(--card-bg);
+  color: var(--text-main);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-card-hover), 0 8px 24px rgba(0, 0, 0, 0.22);
+  border-radius: var(--radius-sm);
+  padding: 0.4rem 0.75rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  max-width: 320px;
+  word-break: break-word;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  opacity: 0;
+  backdrop-filter: blur(8px);
+}
+
+.global-tooltip.visible {
+  opacity: 1;
+}
+
+.global-tooltip-arrow {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  transform: rotate(45deg);
+  pointer-events: none;
+}
+
+.global-tooltip.arrow-bottom .global-tooltip-arrow {
+  bottom: -5px;
+  left: calc(var(--arrow-left, 50%) - 4px);
+  border-top: none;
+  border-left: none;
+}
+
+.global-tooltip.arrow-top .global-tooltip-arrow {
+  top: -5px;
+  left: calc(var(--arrow-left, 50%) - 4px);
+  border-bottom: none;
+  border-right: none;
+}
+
+/* ============================================================
+   Tactile & Hardware Skeuomorphic Enhancements
+   (LED Beacons, Sunken Tracks, Mechanical Segmented Tabs & Slots)
+   ============================================================ */
+
+/* 1. LED Hardware Beacons with lens reflection & breathing pulse */
+@keyframes neu-led-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.78;
+    transform: scale(0.96);
+  }
+}
+
+.neu-led-beacon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--card-bg);
+  box-shadow: var(--shadow-inset-deep);
+  position: relative;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+.neu-led-core {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  position: relative;
+  transition: background-color 0.3s ease, box-shadow 0.3s ease;
+  animation: neu-led-pulse 2.8s ease-in-out infinite;
+}
+
+/* Lens highlight / specular reflection point */
+.neu-led-core::after {
+  content: '';
+  position: absolute;
+  top: 1px;
+  left: 1.5px;
+  width: 2.5px;
+  height: 2.5px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.75);
+  pointer-events: none;
+}
+
+.neu-led-emerald .neu-led-core {
+  background: #10b981;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.9), 0 0 16px rgba(16, 185, 129, 0.4);
+}
+
+.neu-led-amber .neu-led-core {
+  background: #f59e0b;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.9), 0 0 16px rgba(245, 158, 11, 0.4);
+}
+
+.neu-led-rose .neu-led-core {
+  background: #f43f5e;
+  box-shadow: 0 0 8px rgba(244, 63, 94, 0.9), 0 0 16px rgba(244, 63, 94, 0.4);
+}
+
+.neu-led-cyan .neu-led-core {
+  background: #06b6d4;
+  box-shadow: 0 0 8px rgba(6, 182, 212, 0.9), 0 0 16px rgba(6, 182, 212, 0.4);
+}
+
+.neu-led-idle .neu-led-core {
+  background: #64748b;
+  box-shadow: none;
+  animation: none;
+}
+
+/* 2. Tactile Status Pill with LED integrated */
+.neu-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.22rem 0.65rem 0.22rem 0.5rem;
+  border-radius: 12px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  background: var(--card-bg);
+  box-shadow: var(--shadow-btn);
+  border: 1px solid var(--border-color);
+  letter-spacing: 0.02em;
+  transition: box-shadow 0.2s ease;
+}
+
+/* 3. Inset Recessed Progress Bar (Hardware illuminated slot) */
+.neu-progress-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  width: 100%;
+}
+
+.neu-progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.78rem;
+}
+
+.neu-progress-label {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.neu-progress-val {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.neu-progress-track {
+  width: 100%;
+  height: 10px;
+  border-radius: 6px;
+  background: var(--card-bg);
+  box-shadow: var(--shadow-inset-deep);
+  overflow: hidden;
+  position: relative;
+  border: 1px solid rgba(148, 163, 184, 0.06);
+}
+
+.neu-progress-fill {
+  height: 100%;
+  border-radius: 5px;
+  transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+}
+
+.neu-progress-fill::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 40%;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.35) 0%, rgba(255, 255, 255, 0) 100%);
+  border-radius: 5px 5px 0 0;
+}
+
+.neu-progress-fill.cyan {
+  background: linear-gradient(90deg, #0284c7, #06b6d4);
+  box-shadow: 0 0 10px rgba(6, 182, 212, 0.5);
+}
+
+.neu-progress-fill.emerald {
+  background: linear-gradient(90deg, #059669, #10b981);
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
+}
+
+.neu-progress-fill.amber {
+  background: linear-gradient(90deg, #d97706, #f59e0b);
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.5);
+}
+
+.neu-progress-fill.rose {
+  background: linear-gradient(90deg, #e11d48, #f43f5e);
+  box-shadow: 0 0 10px rgba(244, 63, 94, 0.5);
+}
+
+.neu-progress-fill.violet {
+  background: linear-gradient(90deg, #7c3aed, #a855f7);
+  box-shadow: 0 0 10px rgba(168, 85, 247, 0.5);
+}
+
+/* 4. Tactile Segmented Controller (Sunken Tray with Raised Switch Buttons) */
+.neu-segmented-tray {
+  display: inline-flex;
+  background: var(--card-bg);
+  box-shadow: var(--shadow-inset-deep);
+  border-radius: 10px;
+  padding: 4px;
+  gap: 4px;
+  border: 1px solid var(--border-color);
+}
+
+.neu-segmented-btn {
+  border: none;
+  background: transparent;
+  padding: 0.35rem 0.85rem;
+  border-radius: 7px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  user-select: none;
+}
+
+.neu-segmented-btn:hover {
+  color: var(--text-main);
+}
+
+.neu-segmented-btn.active {
+  background: var(--card-bg);
+  color: var(--accent-cyan);
+  box-shadow: var(--shadow-btn);
+  transform: scale(1.02);
+}
+
+/* 5. Chiseled & Tactile Cards */
+.neu-chiseled-card {
+  background: var(--card-bg);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  border-top: 1px solid var(--chiseled-top);
+  border-left: 1px solid var(--chiseled-left);
+  border-right: 1px solid var(--chiseled-right);
+  border-bottom: 1px solid var(--chiseled-bottom);
+  transition: box-shadow 0.25s ease, transform 0.2s ease;
+}
+
+.neu-chiseled-card:hover {
+  box-shadow: var(--shadow-card-hover);
+}
+
+/* 6. Tactile Raised Node Chip with Bottom-to-Top Surge Charging Effect */
+.neu-node-chip {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: var(--card-bg);
+  border-top: 1px solid var(--chiseled-top);
+  border-left: 1px solid var(--chiseled-left);
+  border-right: 1px solid var(--chiseled-right);
+  border-bottom: 1px solid var(--chiseled-bottom);
+  box-shadow: var(--shadow-btn);
+  border-radius: 12px;
+  padding: 0.65rem 0.45rem;
+  min-height: 74px;
+  cursor: pointer;
+  user-select: none;
+  transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.25, 1), box-shadow 0.18s cubic-bezier(0.2, 0.8, 0.25, 1);
+  text-decoration: none;
+}
+
+.neu-node-chip > * {
+  position: relative;
+  z-index: 2;
+}
+
+.neu-node-chip:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-card-hover);
+}
+
+.neu-node-chip:active {
+  transform: translateY(1px) scale(0.975);
+  box-shadow: var(--shadow-btn-active);
+}
+
+/* Bottom-to-top Surge Charging wave */
+.neu-node-chip::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateY(100%);
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.22s ease;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 1;
+  border-top: 1.5px solid rgba(255, 255, 255, 0.9);
+}
+
+.neu-node-chip:hover::before {
+  transform: translateY(0%);
+  opacity: 1;
+}
+
+/* Tone specific surge gradients and light edges */
+.neu-node-chip.tone-emerald::before {
+  background: linear-gradient(0deg, rgba(16, 185, 129, 0.38) 0%, rgba(16, 185, 129, 0.2) 65%, rgba(16, 185, 129, 0.06) 100%);
+  border-top-color: rgba(52, 211, 153, 0.95);
+  box-shadow: 0 -2px 10px rgba(16, 185, 129, 0.5);
+}
+
+.neu-node-chip.tone-amber::before {
+  background: linear-gradient(0deg, rgba(245, 158, 11, 0.38) 0%, rgba(245, 158, 11, 0.2) 65%, rgba(245, 158, 11, 0.06) 100%);
+  border-top-color: rgba(251, 191, 36, 0.95);
+  box-shadow: 0 -2px 10px rgba(245, 158, 11, 0.5);
+}
+
+.neu-node-chip.tone-cyan::before {
+  background: linear-gradient(0deg, rgba(6, 182, 212, 0.38) 0%, rgba(6, 182, 212, 0.2) 65%, rgba(6, 182, 212, 0.06) 100%);
+  border-top-color: rgba(34, 211, 238, 0.95);
+  box-shadow: 0 -2px 10px rgba(6, 182, 212, 0.5);
+}
+
+.neu-node-chip.tone-rose::before {
+  background: linear-gradient(0deg, rgba(244, 63, 94, 0.42) 0%, rgba(244, 63, 94, 0.22) 65%, rgba(244, 63, 94, 0.06) 100%);
+  border-top-color: rgba(251, 113, 133, 0.95);
+  box-shadow: 0 -2px 10px rgba(244, 63, 94, 0.5);
+}
+
+.neu-node-chip.tone-idle::before {
+  background: linear-gradient(0deg, rgba(148, 163, 184, 0.3) 0%, rgba(148, 163, 184, 0.15) 65%, transparent 100%);
+  border-top-color: rgba(255, 255, 255, 0.7);
+}
+
+.neu-node-chip .chip-name {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-top: 0.35rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+  transition: color 0.2s ease;
+}
+
+.neu-node-chip .chip-state {
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-top: 0.1rem;
+}
+
+
+

@@ -28,7 +28,8 @@ var (
 )
 
 const (
-	idePartition     = "standard"    // E 核默认分区（performance=P 核留给计算作业；见 slurm.conf 双分区）
+	idePartitionCPU  = "standard"    // E 核默认分区
+	idePartitionGPU  = "performance" // P 核 GPU 分区
 	ideTimeLimit     = 7200          // 2h 默认会话时长（秒）
 	ideBaseURLPath   = "/api/v1/ide" // 反代前缀；与应用 base_url 对齐
 	idePortBase      = 8800
@@ -37,6 +38,9 @@ const (
 	ideCPUsDefault   = 2
 	ideJobNamePrefix = "-ide-"
 )
+
+// IdleReclaimCallback 是空闲自动回收时的回调函数（用于记录审计日志）。
+type IdleReclaimCallback func(sessionID string, jobID int, owner string, idleMin int)
 
 // ContainerService 是 Slurm 支撑的交互式开发会话服务。
 type ContainerService interface {
@@ -48,8 +52,11 @@ type ContainerService interface {
 	// ExtendSession 为运行中会话延长时限（1.4；addMinutes 增量分钟，上限 720）。
 	ExtendSession(ctx context.Context, id string, addMinutes int) (*ContainerRecycleResponse, error)
 	// ProxyTarget 返回会话的反代目标 (node_ip:port)、状态、env_type，供 /ide/<session>/ 反代 handler 使用。
-	// env_type 决定反代是否剥前缀：jupyter 有 base_url 对齐（不剥），vscode 根路径启动（剥 /api/v1/ide/<sid>）。
 	ProxyTarget(ctx context.Context, sessionID string) (nodeIP string, port int, status string, envType string, err error)
+	// TouchSession 刷新会话的最后活跃时间。
+	TouchSession(sessionID string)
+	// StartIdleReaper 启动后台空闲会话自动回收巡检。
+	StartIdleReaper(ctx context.Context, interval time.Duration, defaultTimeoutMin int, onReclaim IdleReclaimCallback)
 }
 
 // slurmJobAPI 隔离 slurmrestd 作业三件套，便于测试注入假实现。
@@ -65,12 +72,27 @@ type sessionMetaStore interface {
 	Delete(sessionID string) error
 }
 
+// CliSubmitOpts 是 GPU 交互作业的 CLI 提交参数（sbatch）。
+type CliSubmitOpts struct {
+	ClusterUser string
+	Name        string
+	Partition   string
+	Script      string
+	MemoryMB    int
+	Gpus        int
+	Nodes       int
+	Tasks       int
+	TimeLimit   int // 分钟
+}
+
 type containerServiceImpl struct {
-	jobs    slurmJobAPI
-	meta    sessionMetaStore
-	extend  func(jobID, addMinutes int) error // 续期实现（默认 scontrol CLI；测试注入）
-	mu      sync.RWMutex
-	targets map[string]cachedTarget // RUNNING 会话反代目标缓存（热路径，避免每请求 2 次 docker exec）
+	jobs       slurmJobAPI
+	meta       sessionMetaStore
+	cliSubmit  func(opts CliSubmitOpts) (int, error) // CLI 提交实现（GPU 作业）
+	extend     func(jobID, addMinutes int) error     // 续期实现（默认 scontrol CLI；测试注入）
+	mu         sync.RWMutex
+	targets    map[string]cachedTarget // RUNNING 会话反代目标缓存
+	lastActive sync.Map                // sessionID -> time.Time
 }
 
 type cachedTarget struct {
@@ -82,14 +104,86 @@ type cachedTarget struct {
 
 const proxyCacheTTL = 30 * time.Second
 
-// NewContainerService 用真实 slurmrest 客户端构造（meta 走 docker exec 读 /shared/sessions）。
+// defaultCliSubmit 生产实现：脚本写入 /shared/portal-jobs/ide-<name>-<rand>.job，
+// sudo -u <clusterUser> sbatch 提交。
+func defaultCliSubmit(o CliSubmitOpts) (int, error) {
+	scriptPath := fmt.Sprintf("/shared/portal-jobs/%s-%d.job", o.Name, time.Now().UnixNano())
+	quotedPath := "'" + scriptPath + "'"
+	if _, err := slurmrest.RunInSlurmctldWithStdin(o.Script, "sh", "-c",
+		"mkdir -p /shared/portal-jobs && cat > "+quotedPath+" && chmod 644 "+quotedPath); err != nil {
+		return 0, fmt.Errorf("stage script: %w", err)
+	}
+	args := []string{"sudo", "-u", o.ClusterUser, "sbatch", "--parsable",
+		"-J", o.Name, "-p", o.Partition,
+		fmt.Sprintf("--time=%d", max(o.TimeLimit, 1)),
+		"--chdir=/shared", "--output=/shared/jobs/%j.out",
+	}
+	if o.MemoryMB > 0 {
+		args = append(args, fmt.Sprintf("--mem=%d", o.MemoryMB))
+	}
+	if o.Gpus > 0 {
+		args = append(args, fmt.Sprintf("--gres=gpu:%d", o.Gpus))
+	}
+	if o.Nodes > 1 {
+		args = append(args, fmt.Sprintf("--nodes=%d", o.Nodes))
+	}
+	if o.Tasks > 1 {
+		args = append(args, fmt.Sprintf("--ntasks=%d", o.Tasks))
+	}
+	args = append(args, scriptPath)
+	out, err := slurmrest.RunInSlurmctld(args...)
+	if err != nil {
+		return 0, fmt.Errorf("sbatch: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	idStr := strings.SplitN(strings.TrimSpace(string(out)), ":", 2)[0]
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		return 0, fmt.Errorf("sbatch job id parse: %w (out=%q)", err, string(out))
+	}
+	return id, nil
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// NewContainerService 用真实 slurmrest 客户端构造。
 func NewContainerService(client *slurmrest.Client) ContainerService {
-	return &containerServiceImpl{jobs: client, meta: dockerSessionMetaStore{}, extend: slurmrest.ExtendJobTimeLimit, targets: make(map[string]cachedTarget)}
+	return &containerServiceImpl{
+		jobs:      client,
+		meta:      dockerSessionMetaStore{},
+		cliSubmit: defaultCliSubmit,
+		extend:    slurmrest.ExtendJobTimeLimit,
+		targets:   make(map[string]cachedTarget),
+	}
 }
 
 // NewContainerServiceWithDeps 注入依赖，供测试。
 func NewContainerServiceWithDeps(jobs slurmJobAPI, meta sessionMetaStore) ContainerService {
-	return &containerServiceImpl{jobs: jobs, meta: meta, extend: slurmrest.ExtendJobTimeLimit, targets: make(map[string]cachedTarget)}
+	return &containerServiceImpl{
+		jobs:      jobs,
+		meta:      meta,
+		cliSubmit: defaultCliSubmit,
+		extend:    slurmrest.ExtendJobTimeLimit,
+		targets:   make(map[string]cachedTarget),
+	}
+}
+
+// NewContainerServiceWithAllDeps 注入全部依赖，供高级测试。
+func NewContainerServiceWithAllDeps(jobs slurmJobAPI, meta sessionMetaStore, cliSubmit func(opts CliSubmitOpts) (int, error)) ContainerService {
+	if cliSubmit == nil {
+		cliSubmit = defaultCliSubmit
+	}
+	return &containerServiceImpl{
+		jobs:      jobs,
+		meta:      meta,
+		cliSubmit: cliSubmit,
+		extend:    slurmrest.ExtendJobTimeLimit,
+		targets:   make(map[string]cachedTarget),
+	}
 }
 
 // LaunchContainer 提交一个交互式 Slurm 作业拉起 Jupyter/code-server，返回会话入口 URL。
@@ -102,10 +196,10 @@ func (s *containerServiceImpl) LaunchContainer(ctx context.Context, req *Contain
 	if envType != "jupyter" && envType != "vscode" {
 		return nil, ErrUnsupportedEnvType
 	}
-	if req.CPUs < 0 || req.MemoryMB < 0 || req.Nodes < 0 {
+	if req.CPUs < 0 || req.MemoryMB < 0 || req.Nodes < 0 || req.GPUs < 0 {
 		return nil, ErrInvalidResources
 	}
-	if req.CPUs > 512 || req.MemoryMB > 1000000 {
+	if req.CPUs > 512 || req.MemoryMB > 1000000 || req.GPUs > 8 {
 		return nil, ErrQuotaExceeded
 	}
 	nodes := req.Nodes
@@ -120,17 +214,15 @@ func (s *containerServiceImpl) LaunchContainer(ctx context.Context, req *Contain
 	if memoryMB <= 0 {
 		memoryMB = ideMemoryDefault
 	}
+	envPreset := strings.TrimSpace(req.EnvPreset)
+	if envPreset == "" {
+		envPreset = "base"
+	}
 
 	sessionID := newSessionID()
 	port := portFor(sessionID)
-	script := buildIDEScript(envType, sessionID, port, cpus, memoryMB, nodes, clusterUser)
+	script := buildIDEScript(envType, envPreset, sessionID, port, cpus, memoryMB, req.GPUs, nodes, clusterUser)
 
-	subReq := &slurmrest.SlurmJobSubmitReq{Script: script}
-	subReq.Job.Name = envType + ideJobNamePrefix + sessionID
-	subReq.Job.Partition = idePartition
-	subReq.Job.Tasks = 1
-	subReq.Job.MinimumNodes = nodes
-	subReq.Job.CpusPerTask = cpus
 	timeLimit := ideTimeLimit
 	// 1.4：会话时长可调（分钟；默认 2h，1..720min 上限 12h）
 	if req.TimeLimitMin > 0 {
@@ -140,40 +232,76 @@ func (s *containerServiceImpl) LaunchContainer(ctx context.Context, req *Contain
 			timeLimit = req.TimeLimitMin * 60
 		}
 	}
-	// v0.0.37 REST time_limit 单位是**分钟**（实测）；内部秒 → 分钟向上取整。
-	subReq.Job.TimeLimit = (timeLimit + 59) / 60
-	subReq.Job.CurrentWorkingDirectory = "/shared"
-	// Slurm 21.08 slurmrestd 要求 environment 为非空 dict，否则拒绝提交
-	subReq.Job.Environment = map[string]string{
-		"PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-		"HOME": "/shared",
-	}
-	subReq.Job.Account = account // AccountingStorageEnforce=associations：IDE 作业也需带有效 account
+	timeLimitMin := (timeLimit + 59) / 60
+	jobName := envType + ideJobNamePrefix + sessionID
 
-	// 以 clusterUser 真实身份提交（per-user JWT）→ 作业以该 unix 身份运行（L1 隔离核心）
-	resp, err := s.jobs.SubmitJobAs(subReq, clusterUser)
-	if err != nil {
-		return nil, fmt.Errorf("submit ide job: %w", err)
+	var jobID int
+	if req.GPUs > 0 {
+		// GPU 交互作业走 sudo -u <clusterUser> sbatch CLI（slurm 21.08 REST 无 gres 提交）
+		opts := CliSubmitOpts{
+			ClusterUser: clusterUser,
+			Name:        jobName,
+			Partition:   idePartitionGPU,
+			Script:      script,
+			MemoryMB:    memoryMB,
+			Gpus:        req.GPUs,
+			Nodes:       nodes,
+			Tasks:       1,
+			TimeLimit:   timeLimitMin,
+		}
+		var err error
+		jobID, err = s.cliSubmit(opts)
+		if err != nil {
+			return nil, fmt.Errorf("submit gpu ide job: %w", err)
+		}
+	} else {
+		// CPU 作业走标准 REST 提交
+		subReq := &slurmrest.SlurmJobSubmitReq{Script: script}
+		subReq.Job.Name = jobName
+		subReq.Job.Partition = idePartitionCPU
+		subReq.Job.Tasks = 1
+		subReq.Job.MinimumNodes = nodes
+		subReq.Job.CpusPerTask = cpus
+		subReq.Job.TimeLimit = timeLimitMin
+		subReq.Job.CurrentWorkingDirectory = "/shared"
+		subReq.Job.Environment = map[string]string{
+			"PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+			"HOME": "/shared",
+		}
+		subReq.Job.Account = account
+
+		resp, err := s.jobs.SubmitJobAs(subReq, clusterUser)
+		if err != nil {
+			return nil, fmt.Errorf("submit ide job: %w", err)
+		}
+		if resp == nil || resp.JobID == 0 {
+			return nil, fmt.Errorf("slurmrestd rejected ide job submission (no job_id returned)")
+		}
+		jobID = resp.JobID
 	}
-	if resp == nil || resp.JobID == 0 {
-		// slurmrestd 用 200+errors[] 返回逻辑失败；此处兜底，避免把失败误报为成功
-		return nil, fmt.Errorf("slurmrestd rejected ide job submission (no job_id returned)")
-	}
+
+	// 记录启动初始活跃时间
+	s.TouchSession(sessionID)
 
 	inst := &ContainerInstance{
-		ID:        sessionID,
-		EnvType:   envType,
-		Status:    "STARTING",
-		WebURL:    webURLFor(sessionID),
-		JobID:     resp.JobID,
-		Nodes:     nodes,
-		CPUs:      cpus,
-		MemoryMB:  memoryMB,
-		CreatedAt: time.Now(),
+		ID:           sessionID,
+		EnvType:      envType,
+		EnvPreset:    envPreset,
+		Status:       "STARTING",
+		WebURL:       webURLFor(sessionID),
+		JobID:        jobID,
+		Nodes:        nodes,
+		CPUs:         cpus,
+		MemoryMB:     memoryMB,
+		GPUs:         req.GPUs,
+		CreatedAt:    time.Now(),
+		LastActiveAt: time.Now(),
+		IdleMinutes:  0,
 	}
 	return &ContainerLaunchResponse{
 		ContainerID: sessionID,
 		EnvType:     envType,
+		EnvPreset:   envPreset,
 		Status:      "STARTING",
 		WebURL:      inst.WebURL,
 		Allocated:   inst,
@@ -190,6 +318,7 @@ func (s *containerServiceImpl) ListActiveContainers(ctx context.Context) ([]*Con
 	metaMap, _ := s.meta.ReadAll()
 
 	out := make([]*ContainerInstance, 0)
+	now := time.Now()
 	for _, j := range jobsResp.Jobs {
 		sid, envType, ok := parseIDEJobName(j.Name)
 		if !ok {
@@ -200,31 +329,40 @@ func (s *containerServiceImpl) ListActiveContainers(ctx context.Context) ([]*Con
 			continue // 仅列活跃会话
 		}
 		m := metaMap[sid]
+		createdAt := time.Unix(j.SubmitTime, 0)
+		lastActiveAt := createdAt
+		if val, ok := s.lastActive.Load(sid); ok {
+			if t, ok := val.(time.Time); ok && !t.IsZero() {
+				lastActiveAt = t
+			}
+		}
+		idleMin := int(now.Sub(lastActiveAt).Minutes())
+		if idleMin < 0 {
+			idleMin = 0
+		}
 		ins := &ContainerInstance{
-			ID:        sid,
-			EnvType:   envType,
-			Status:    status,
-			WebURL:    webURLFor(sid),
-			JobID:     j.JobID,
-			Node:      firstNonEmpty(m.Node, j.Nodes),
-			Owner:     j.Account, // P1-4：归属取 Slurm 作业 Account（meta.Owner 可伪造，仅历史展示不可信）
-			Nodes:     m.Nodes,
-			CPUs:      m.CPUs,
-			MemoryMB:  m.MemoryMB,
-			CreatedAt: time.Unix(j.SubmitTime, 0),
+			ID:           sid,
+			EnvType:      envType,
+			EnvPreset:    m.EnvPreset,
+			Status:       status,
+			WebURL:       webURLFor(sid),
+			JobID:        j.JobID,
+			Node:         firstNonEmpty(m.Node, j.Nodes),
+			Owner:        j.Account, // P1-4：归属取 Slurm 作业 Account
+			Nodes:        m.Nodes,
+			CPUs:         m.CPUs,
+			MemoryMB:     m.MemoryMB,
+			GPUs:         m.GPUs,
+			CreatedAt:    createdAt,
+			LastActiveAt: lastActiveAt,
+			IdleMinutes:  idleMin,
 		}
 		out = append(out, ins)
 	}
 	return out, nil
 }
 
-// RecycleContainer 取消会话对应的 Slurm 作业并清理 meta（即结束 IDE 会话）。
-// SessionOwner 返回会话归属者。P1-4（安全审计 2026-08-19）：归属锚定 Slurm 作业的
-// Account——提交时由 Slurm 按令牌身份强制写入（L1，不可伪造）；/shared/sessions 的
-// meta 由作业脚本写入、任何持 jobs:submit 的作业都可伪造任意内容，不可作归属依据。
-// meta 降级为纯连接细节（nodeIP/port），仅供属主验证通过后的反代使用（自指向残余
-// 风险：属主只能把本人会话指向本人可控目标，与作业内直连等价）。
-// 会话不存在（无匹配 IDE 作业）返回 ErrContainerNotFound。
+// SessionOwner 返回会话归属者。
 func (s *containerServiceImpl) SessionOwner(ctx context.Context, id string) (string, error) {
 	jobs, err := s.jobs.GetJobs()
 	if err != nil {
@@ -266,6 +404,7 @@ func (s *containerServiceImpl) RecycleContainer(ctx context.Context, id, actAs s
 		return nil, fmt.Errorf("cancel job %d: %w", jobID, err)
 	}
 	_ = s.meta.Delete(id) // best-effort 清理
+	s.lastActive.Delete(id)
 	return &ContainerRecycleResponse{
 		ContainerID: id,
 		Status:      "STOPPED",
@@ -350,42 +489,91 @@ func (s *containerServiceImpl) ProxyTarget(ctx context.Context, sessionID string
 	return nodeIP, port, status, envType, nil
 }
 
+// TouchSession 刷新会话的最后活跃时间。
+func (s *containerServiceImpl) TouchSession(sessionID string) {
+	if sessionID != "" {
+		s.lastActive.Store(sessionID, time.Now())
+	}
+}
+
+// StartIdleReaper 启动后台空闲会话自动回收巡检。
+func (s *containerServiceImpl) StartIdleReaper(ctx context.Context, interval time.Duration, defaultTimeoutMin int, onReclaim IdleReclaimCallback) {
+	if defaultTimeoutMin <= 0 {
+		return // 0 或负数表示关闭自动回收
+	}
+	if interval <= 0 {
+		interval = 1 * time.Minute
+	}
+	ticker := time.NewTicker(interval)
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				s.reapIdleSessions(ctx, defaultTimeoutMin, onReclaim)
+			}
+		}
+	}()
+}
+
+func (s *containerServiceImpl) reapIdleSessions(ctx context.Context, timeoutMin int, onReclaim IdleReclaimCallback) {
+	list, err := s.ListActiveContainers(ctx)
+	if err != nil {
+		return
+	}
+	now := time.Now()
+	for _, ins := range list {
+		if ins.Status != "RUNNING" {
+			continue
+		}
+		// 启动保护期：创建 10 分钟以内免检
+		if now.Sub(ins.CreatedAt) < 10*time.Minute {
+			continue
+		}
+		if ins.IdleMinutes >= timeoutMin {
+			// 超期空闲，触发自动回收
+			_, err := s.RecycleContainer(ctx, ins.ID, "")
+			if err == nil && onReclaim != nil {
+				onReclaim(ins.ID, ins.JobID, ins.Owner, ins.IdleMinutes)
+			}
+		}
+	}
+}
+
 // --- 作业脚本生成 ---
 
 // buildIDEScript 生成在计算节点上拉起 IDE 应用并回写连接信息的 sbatch 脚本。
 // 应用 auth 关闭——访问由 apiserver 的 JWT 网关守门；base_url 对齐反代前缀。
-// 注意：不使用 set -u，且节点名取自 hostname -s（容器主机名即 Slurm 节点名），
-// 避免引用可能未设置的 Slurm 环境变量导致脚本在写 meta 前就失败。
-func buildIDEScript(envType, sessionID string, port, cpus, memoryMB, nodes int, clusterUser string) string {
+func buildIDEScript(envType, envPreset, sessionID string, port, cpus, memoryMB, gpus, nodes int, clusterUser string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "#!/bin/bash\n")
-	fmt.Fprintf(&b, "# AILS interactive dev session env=%s session=%s port=%d cpus=%d mem=%d nodes=%d\n",
-		envType, sessionID, port, cpus, memoryMB, nodes)
+	fmt.Fprintf(&b, "# AILS interactive dev session env=%s preset=%s session=%s port=%d cpus=%d mem=%d gpus=%d nodes=%d\n",
+		envType, envPreset, sessionID, port, cpus, memoryMB, gpus, nodes)
 	fmt.Fprintf(&b, "SESSION_ID=%q\n", sessionID)
 	fmt.Fprintf(&b, "PORT=%d\n", port)
 	fmt.Fprintf(&b, "BASE_URL=%q\n", ideBaseURLPath+"/"+sessionID)
 	fmt.Fprintf(&b, "NODE_NAME=$(hostname -s)\n")
 	fmt.Fprintf(&b, "NODE_IP=$(hostname -I | awk '{print $1}')\n")
 	fmt.Fprintf(&b, "mkdir -p /shared/sessions\n")
-	// per-user HOME：隔离 jupyter/code-server 的 runtime/config。作业默认 HOME=/shared，多用户会
-	// 争用 /shared/.local，非 root 用户无权覆盖前人留下的 runtime 文件（cookie secret、server-info、
-	// browser-open）而崩溃。改为各用户独享 /shared/home/<user>（/shared 是 1777，可自建子目录）。
 	fmt.Fprintf(&b, "export HOME=\"/shared/home/$(whoami)\"\n")
 	fmt.Fprintf(&b, "mkdir -p \"$HOME\"\n")
+	if gpus > 0 {
+		fmt.Fprintf(&b, "export CUDA_DEVICE_ORDER=PCI_BUS_ID\n")
+	}
 	// 应用启动前先回写连接信息，apiserver 据此反代
 	fmt.Fprintf(&b, "cat > /shared/sessions/${SESSION_ID}.json <<EOF\n")
-	fmt.Fprintf(&b, "{\"session_id\":\"${SESSION_ID}\",\"job_id\":${SLURM_JOB_ID:-0},\"node\":\"${NODE_NAME}\",\"node_ip\":\"${NODE_IP}\",\"port\":${PORT},\"env_type\":\"%s\",\"cpus\":%d,\"memory_mb\":%d,\"nodes\":%d,\"owner\":\"%s\"}\n",
-		envType, cpus, memoryMB, nodes, clusterUser)
+	fmt.Fprintf(&b, "{\"session_id\":\"${SESSION_ID}\",\"job_id\":${SLURM_JOB_ID:-0},\"node\":\"${NODE_NAME}\",\"node_ip\":\"${NODE_IP}\",\"port\":${PORT},\"env_type\":\"%s\",\"env_preset\":\"%s\",\"cpus\":%d,\"memory_mb\":%d,\"gpus\":%d,\"nodes\":%d,\"owner\":\"%s\"}\n",
+		envType, envPreset, cpus, memoryMB, gpus, nodes, clusterUser)
 	fmt.Fprintf(&b, "EOF\n")
 	// 应用输出重定向到会话日志，便于排查启动失败
 	fmt.Fprintf(&b, "exec > /shared/sessions/${SESSION_ID}.log 2>&1\n")
 	switch envType {
 	case "jupyter":
 		// base_url 对齐反代前缀；token 置空（由 apiserver JWT 网关守门）。
-		// 作业以 clusterUser 非 root 身份运行（per-user JWT 提交），无需 allow_root。
 		fmt.Fprintf(&b, "exec jupyter lab --no-browser --ip=0.0.0.0 --port=${PORT} --ServerApp.base_url=${BASE_URL}/ --ServerApp.token= --ServerApp.allow_remote_access=True --ServerApp.tornado_settings='{\"headers\":{\"Content-Security-Policy\":\"\"}}'\n")
 	case "vscode":
-		// code-server 对子路径代理支持有限（已知限制）：先以根路径启动，反代尽力而为
 		fmt.Fprintf(&b, "exec code-server --bind-addr 0.0.0.0:${PORT} --auth none --disable-telemetry\n")
 	}
 	return b.String()

@@ -197,6 +197,9 @@ func (h *ContainerHandler) ProxyIDE(c *gin.Context) {
 		httpx.ServiceUnavailable(c, "session still starting", httpx.Extra{"status": status})
 		return
 	}
+	// 收到反代请求，刷新会话活跃时间
+	h.service.TouchSession(session)
+
 	target := &url.URL{Scheme: "http", Host: fmt.Sprintf("%s:%d", nodeIP, port)}
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	proxy.FlushInterval = -1 // 支持 WebSocket / 流式（Jupyter kernel、code-server terminal）

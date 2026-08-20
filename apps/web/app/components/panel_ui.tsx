@@ -4,13 +4,16 @@ import type { ReactNode } from 'react';
 
 export const cardStyle = {
   background: 'var(--bg-card,#1b1e28)',
-  border: '1px solid var(--border-color,#2a2f3a)',
-  borderRadius: 12,
-  padding: '1.25rem',
+  borderTop: '1px solid var(--chiseled-top,rgba(255,255,255,0.12))',
+  borderBottom: '1px solid var(--chiseled-bottom,rgba(0,0,0,0.15))',
+  borderLeft: '1px solid var(--chiseled-left,var(--border-color,#2a2f3a))',
+  borderRight: '1px solid var(--chiseled-right,var(--border-color,#2a2f3a))',
+  borderRadius: 14,
+  padding: '1.35rem',
   display: 'grid',
-  gap: '0.75rem',
+  gap: '0.85rem',
   boxShadow: 'var(--shadow-card)',
-  transition: 'box-shadow .3s ease',
+  transition: 'box-shadow .25s ease, transform .2s ease',
 } as const;
 
 export const emptyStyle = { padding: '2.5rem', textAlign: 'center', color: 'var(--text-muted,#94a3b8)' } as const;
@@ -34,25 +37,102 @@ export const td = {
 export const mono = { fontFamily: "'JetBrains Mono', monospace" } as const;
 export const num = { ...mono, textAlign: 'right' } as const;
 
-// 状态徽章配色：active=emerald / suspended=amber / disabled=rose（其余蓝灰兜底）
-const STATUS_STYLES: Record<string, { color: string; bg: string }> = {
-  active: { color: '#10b981', bg: 'rgba(16,185,129,.12)' },
-  suspended: { color: '#f59e0b', bg: 'rgba(245,158,11,.12)' },
-  disabled: { color: '#f43f5e', bg: 'rgba(244,63,94,.12)' },
-};
+// 状态映射色系：active/running/up=emerald / suspended/pending/drain=amber / disabled/failed/down=rose / completed=idle
+export type LedTone = 'emerald' | 'amber' | 'rose' | 'cyan' | 'idle';
 
-export function StatusBadge({ status }: { status: string }) {
-  const s = STATUS_STYLES[(status || '').toLowerCase()] || { color: '#3b82f6', bg: 'rgba(59,130,246,.12)' };
+export function resolveLedTone(status: string): LedTone {
+  const s = (status || '').toUpperCase();
+  if (['ACTIVE', 'RUNNING', 'UP', 'IDLE', 'OK', 'HEALTHY'].includes(s)) return 'emerald';
+  if (['SUSPENDED', 'PENDING', 'HELD', 'CONFIGURING', 'DRAIN', 'DRAINED', 'DEGRADED'].some((k) => s.includes(k))) return 'amber';
+  if (['DISABLED', 'FAILED', 'CANCELLED', 'TIMEOUT', 'OUT_OF_MEMORY', 'DOWN', 'FAIL'].some((k) => s.includes(k))) return 'rose';
+  if (['COMPLETED'].includes(s)) return 'idle';
+  return 'cyan';
+}
+
+/** 硬件级拟物 LED 呼吸指示灯 */
+export function LedBeacon({ tone = 'emerald', className = '' }: { tone?: LedTone; className?: string }) {
   return (
-    <span style={{ padding: '0.15rem 0.5rem', borderRadius: 6, fontSize: '0.72rem', fontWeight: 700, color: s.color, background: s.bg }}>
-      {status || '-'}
+    <span className={`neu-led-beacon neu-led-${tone} ${className}`}>
+      <span className="neu-led-core" />
     </span>
+  );
+}
+
+/** 集成 LED 呼吸灯与内嵌药丸底托的状态徽章 */
+export function StatusBadge({ status, tone }: { status: string; tone?: LedTone }) {
+  const currentTone = tone || resolveLedTone(status);
+  return (
+    <span className="neu-status-pill">
+      <LedBeacon tone={currentTone} />
+      <span>{status || '-'}</span>
+    </span>
+  );
+}
+
+/** 触感凹槽导轨发光硬件进度条 */
+export function NeuProgressBar({
+  label,
+  value,
+  total,
+  unit = '',
+  color = 'cyan',
+  showPercent = true,
+}: {
+  label?: string;
+  value: number;
+  total: number;
+  unit?: string;
+  color?: 'cyan' | 'emerald' | 'amber' | 'rose' | 'violet';
+  showPercent?: boolean;
+}) {
+  const pct = total > 0 ? Math.min(100, Math.max(0, Math.round((value / total) * 100))) : 0;
+
+  return (
+    <div className="neu-progress-slot">
+      {label && (
+        <div className="neu-progress-header">
+          <span className="neu-progress-label">{label}</span>
+          <span className="neu-progress-val">
+            {value} / {total} {unit} {showPercent && `(${pct}%)`}
+          </span>
+        </div>
+      )}
+      <div className="neu-progress-track">
+        <div className={`neu-progress-fill ${color}`} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
+/** 触感机械分段控制器（底托凹槽 + 凸起浮雕滑块） */
+export function NeuSegmented<T extends string>({
+  options,
+  value,
+  onChange,
+}: {
+  options: { label: string; value: T }[];
+  value: T;
+  onChange: (val: T) => void;
+}) {
+  return (
+    <div className="neu-segmented-tray">
+      {options.map((opt) => (
+        <button
+          key={opt.value}
+          type="button"
+          className={`neu-segmented-btn ${value === opt.value ? 'active' : ''}`}
+          onClick={() => onChange(opt.value)}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
   );
 }
 
 export function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <label style={{ display: 'grid', gap: '0.25rem', fontSize: '0.8rem', color: 'var(--text-muted,#94a3b8)' }}>
+    <label style={{ display: 'grid', gap: '0.35rem', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted,#94a3b8)' }}>
       {label}
       {children}
     </label>
@@ -60,7 +140,25 @@ export function Field({ label, children }: { label: string; children: ReactNode 
 }
 
 export function Notice({ color, bg, children }: { color: string; bg: string; children: ReactNode }) {
-  return <div style={{ padding: '0.6rem 0.9rem', color, background: bg, borderRadius: 8, marginBottom: '1rem', fontSize: '0.88rem' }}>{children}</div>;
+  return (
+    <div
+      style={{
+        padding: '0.75rem 1.1rem',
+        color,
+        background: bg,
+        borderRadius: 10,
+        marginBottom: '1.25rem',
+        fontSize: '0.88rem',
+        border: '1px solid rgba(148,163,184,0.15)',
+        boxShadow: 'var(--shadow-btn)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '0.5rem',
+      }}
+    >
+      {children}
+    </div>
+  );
 }
 
 export function MiniBtn({ disabled, onClick, children }: { disabled?: boolean; onClick: () => void; children: ReactNode }) {
@@ -68,16 +166,12 @@ export function MiniBtn({ disabled, onClick, children }: { disabled?: boolean; o
     <button
       onClick={onClick}
       disabled={disabled}
+      className="neu-btn"
       style={{
-        padding: '0.25rem 0.6rem',
+        padding: '0.28rem 0.65rem',
         fontSize: '0.75rem',
-        borderRadius: 6,
-        border: 'none',
-        background: 'var(--card-bg)',
-        boxShadow: 'var(--shadow-btn)',
-        color: 'var(--text-main,#f1f5f9)',
+        borderRadius: 7,
         cursor: disabled ? 'wait' : 'pointer',
-        transition: 'box-shadow .2s ease',
       }}
     >
       {children}

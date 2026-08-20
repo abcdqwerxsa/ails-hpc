@@ -233,10 +233,10 @@ function SettingsPage() {
             </div>
           </div>
         )}
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(160px,1fr) 120px auto', gap: '0.6rem', marginBottom: '0.9rem' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(200px, 1fr) minmax(160px, 180px) auto', gap: '0.75rem', alignItems: 'center', marginBottom: '0.9rem' }}>
           <input className="form-control" value={patName} onChange={(e) => setPatName(e.target.value)} placeholder="令牌名称（如 ci-deploy）" />
-          <input className="form-control" value={patDays} onChange={(e) => setPatDays(e.target.value)} placeholder="有效天数（空=长期）" />
-          <button className="btn-primary" onClick={createPat} disabled={patBusy} style={{ padding: '0.45rem 1.1rem' }}>
+          <input className="form-control" value={patDays} onChange={(e) => setPatDays(e.target.value)} placeholder="有效天数（留空为长期）" />
+          <button className="btn-primary" onClick={createPat} disabled={patBusy} style={{ padding: '0.5rem 1.25rem', whiteSpace: 'nowrap' }}>
             {patBusy ? '创建中…' : '创建令牌'}
           </button>
         </div>

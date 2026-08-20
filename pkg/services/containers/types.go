@@ -5,17 +5,21 @@ import "time"
 // ContainerInstance 表示一个作为 Slurm 作业运行的交互式开发会话
 // （Jupyter Lab / code-server）。"Container" 为历史命名，实际是 Slurm 交互会话。
 type ContainerInstance struct {
-	ID        string    `json:"container_id"` // 会话 uuid（apiserver 生成）
-	EnvType   string    `json:"env_type"`     // jupyter | vscode
-	Status    string    `json:"status"`       // STARTING | RUNNING | STOPPED
-	WebURL    string    `json:"web_url"`      // /api/v1/ide/<session>/
-	JobID     int       `json:"job_id"`
-	Node      string    `json:"node,omitempty"`
-	Owner     string    `json:"owner,omitempty"` // 会话属主 clusterUser（Phase 4 列表租户过滤）
-	Nodes     int       `json:"nodes"`
-	CPUs      int       `json:"cpus"`
-	MemoryMB  int       `json:"memory_mb"`
-	CreatedAt time.Time `json:"created_at"`
+	ID           string    `json:"container_id"` // 会话 uuid（apiserver 生成）
+	EnvType      string    `json:"env_type"`     // jupyter | vscode
+	EnvPreset    string    `json:"env_preset,omitempty"` // base | pytorch | custom
+	Status       string    `json:"status"`       // STARTING | RUNNING | STOPPED
+	WebURL       string    `json:"web_url"`      // /api/v1/ide/<session>/
+	JobID        int       `json:"job_id"`
+	Node         string    `json:"node,omitempty"`
+	Owner        string    `json:"owner,omitempty"` // 会话属主 clusterUser（Phase 4 列表租户过滤）
+	Nodes        int       `json:"nodes"`
+	CPUs         int       `json:"cpus"`
+	MemoryMB     int       `json:"memory_mb"`
+	GPUs         int       `json:"gpus"`
+	CreatedAt    time.Time `json:"created_at"`
+	LastActiveAt time.Time `json:"last_active_at,omitempty"`
+	IdleMinutes  int       `json:"idle_minutes"`
 }
 
 // SessionMeta 是作业脚本写到 /shared/sessions/<id>.json 的连接信息，
@@ -27,8 +31,10 @@ type SessionMeta struct {
 	NodeIP    string `json:"node_ip"`
 	Port      int    `json:"port"`
 	EnvType   string `json:"env_type"`
+	EnvPreset string `json:"env_preset,omitempty"`
 	CPUs      int    `json:"cpus"`
 	MemoryMB  int    `json:"memory_mb"`
+	GPUs      int    `json:"gpus,omitempty"`
 	Nodes     int    `json:"nodes"`
 	Owner     string `json:"owner"` // 归属隔离：提交者 clusterUser（unix 身份，launch 时写入）
 }
@@ -36,9 +42,11 @@ type SessionMeta struct {
 // ContainerLaunchRequest defines the request body for launching an interactive session
 type ContainerLaunchRequest struct {
 	EnvType      string `json:"env_type" binding:"required"` // jupyter | vscode
+	EnvPreset    string `json:"env_preset"`                  // base | pytorch | custom（可选，默认 base）
 	Nodes        int    `json:"nodes"`                       // 默认 1
 	CPUs         int    `json:"cpus"`                        // 默认 2
 	MemoryMB     int    `json:"memory_mb"`                   // 默认 4096
+	GPUs         int    `json:"gpus"`                        // GPU 数量（0=CPU standard分区, >0=GPU performance分区）
 	TimeLimitMin int    `json:"time_limit_min"`              // 会话时长（分钟，1.4；0=默认 2h，上限 12h）
 }
 
@@ -46,6 +54,7 @@ type ContainerLaunchRequest struct {
 type ContainerLaunchResponse struct {
 	ContainerID string             `json:"container_id"`
 	EnvType     string             `json:"env_type"`
+	EnvPreset   string             `json:"env_preset,omitempty"`
 	Status      string             `json:"status"`
 	WebURL      string             `json:"web_url"`
 	Allocated   *ContainerInstance `json:"allocated"`

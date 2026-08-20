@@ -12,6 +12,8 @@ function WebIDEPage() {
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [envType, setEnvType] = useState<'jupyter' | 'vscode'>('jupyter');
+  const [envPreset, setEnvPreset] = useState('base');
+  const [gpus, setGpus] = useState('0');
   const [cpus, setCpus] = useState('2');
   const [memMb, setMemMb] = useState('4096');
   const [durationMin, setDurationMin] = useState('120');
@@ -43,11 +45,14 @@ function WebIDEPage() {
     try {
       const r = await slurm.launchContainer({
         env_type: envType,
+        env_preset: envPreset,
+        gpus: Number(gpus) || 0,
         cpus: Number(cpus) || 2,
         memory_mb: Number(memMb) || 4096,
         time_limit_min: Number(durationMin) || 120,
       });
-      setInfo(`已启动 ${envType} 会话（作业 #${r.allocated?.job_id ?? '-'}）。等状态变 RUNNING 后点"打开 IDE"。`);
+      const gpuTag = Number(gpus) > 0 ? ` [${gpus} GPU]` : '';
+      setInfo(`已启动 ${envType}${gpuTag} 会话（作业 #${r.allocated?.job_id ?? '-'}）。等状态变 RUNNING 后点"打开 IDE"。`);
       await refresh();
     } catch (e: any) {
       setError(`启动失败：${e?.message || e}`);
@@ -110,7 +115,7 @@ function WebIDEPage() {
         }}
       >
         <label style={{ display: 'grid', gap: '0.25rem', fontSize: '0.8rem', color: 'var(--text-muted,#94a3b8)' }}>
-          环境
+          编辑器
           <Select
             value={envType}
             onChange={(v) => setEnvType(v as 'jupyter' | 'vscode')}
@@ -121,19 +126,44 @@ function WebIDEPage() {
           />
         </label>
         <label style={{ display: 'grid', gap: '0.25rem', fontSize: '0.8rem', color: 'var(--text-muted,#94a3b8)' }}>
-          CPU
+          运行环境
+          <Select
+            width={160}
+            value={envPreset}
+            onChange={setEnvPreset}
+            options={[
+              { value: 'base', label: '基础 Python 3.10' },
+              { value: 'pytorch', label: 'PyTorch AI 环境' },
+              { value: 'custom', label: '自建持久化 venv' },
+            ]}
+          />
+        </label>
+        <label style={{ display: 'grid', gap: '0.25rem', fontSize: '0.8rem', color: 'var(--text-muted,#94a3b8)' }}>
+          GPU 资源
+          <Select
+            width={140}
+            value={gpus}
+            onChange={setGpus}
+            options={[
+              { value: '0', label: '无 GPU (CPU)' },
+              { value: '1', label: '1× GPU (加速卡)' },
+            ]}
+          />
+        </label>
+        <label style={{ display: 'grid', gap: '0.25rem', fontSize: '0.8rem', color: 'var(--text-muted,#94a3b8)' }}>
+          CPU 核数
           <input className="form-control" type="number" min="1" max="8" value={cpus}
-            onChange={(e) => setCpus(e.target.value)} style={{ width: 90 }} />
+            onChange={(e) => setCpus(e.target.value)} style={{ width: 80 }} />
         </label>
         <label style={{ display: 'grid', gap: '0.25rem', fontSize: '0.8rem', color: 'var(--text-muted,#94a3b8)' }}>
           内存 MB
-          <input className="form-control" type="number" min="512" max="5950" step="256" value={memMb}
-            onChange={(e) => setMemMb(e.target.value)} style={{ width: 110 }} />
+          <input className="form-control" type="number" min="512" max="16384" step="256" value={memMb}
+            onChange={(e) => setMemMb(e.target.value)} style={{ width: 100 }} />
         </label>
         <label style={{ display: 'grid', gap: '0.25rem', fontSize: '0.8rem', color: 'var(--text-muted,#94a3b8)' }}>
           时长（分钟）
           <Select
-            width={110}
+            width={140}
             value={durationMin}
             onChange={setDurationMin}
             options={[
@@ -162,6 +192,8 @@ function WebIDEPage() {
         <div style={{ display: 'grid', gap: '0.75rem' }}>
           {sessions.map((s) => {
             const running = s.status === 'RUNNING';
+            const hasGpu = (s.gpus ?? 0) > 0;
+            const idleMin = s.idle_minutes ?? 0;
             return (
               <div
                 key={s.container_id}
@@ -179,12 +211,32 @@ function WebIDEPage() {
                   transition: 'box-shadow .3s ease',
                 }}
               >
-                <div style={{ display: 'grid', gap: '0.2rem', fontSize: '0.88rem' }}>
-                  <div>
-                    <strong>{s.env_type === 'vscode' ? 'VS Code' : 'JupyterLab'}</strong> · 作业 #{s.job_id} · {s.node || '...'}
+                <div style={{ display: 'grid', gap: '0.25rem', fontSize: '0.88rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <strong>{s.env_type === 'vscode' ? 'VS Code' : 'JupyterLab'}</strong>
+                    {s.env_preset && s.env_preset !== 'base' && (
+                      <span style={{ fontSize: '0.75rem', padding: '0.1rem 0.4rem', borderRadius: 4, background: 'rgba(99,102,241,0.15)', color: '#818cf8' }}>
+                        {s.env_preset}
+                      </span>
+                    )}
+                    {hasGpu ? (
+                      <span style={{ fontSize: '0.75rem', padding: '0.1rem 0.4rem', borderRadius: 4, background: 'rgba(16,185,129,0.15)', color: '#34d399', fontWeight: 600 }}>
+                        ⚡ {s.gpus} GPU
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: '0.75rem', padding: '0.1rem 0.4rem', borderRadius: 4, background: 'rgba(148,163,184,0.15)', color: '#94a3b8' }}>
+                        CPU
+                      </span>
+                    )}
+                    <span style={{ color: 'var(--text-muted,#888)' }}>· 作业 #{s.job_id} · {s.node || '...'}</span>
                   </div>
-                  <div style={{ color: 'var(--text-muted,#94a3b8)', fontSize: '0.8rem' }}>
-                    CPU {s.cpus} · 内存 {s.memory_mb}MB · 节点 {s.nodes}
+                  <div style={{ color: 'var(--text-muted,#94a3b8)', fontSize: '0.8rem', display: 'flex', gap: '0.8rem', flexWrap: 'wrap' }}>
+                    <span>CPU {s.cpus} · 内存 {s.memory_mb}MB · 节点 {s.nodes}</span>
+                    {running && (
+                      <span style={{ color: idleMin >= 45 ? '#f59e0b' : 'var(--text-muted,#94a3b8)' }}>
+                        {idleMin === 0 ? '刚刚活跃' : `已空闲 ${idleMin} 分钟`}
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
@@ -234,8 +286,10 @@ function WebIDEPage() {
           })}
         </div>
       )}
-      <div style={{ marginTop: '1rem', fontSize: '0.78rem', color: 'var(--text-muted,#888)' }}>
-        提示：启动后约 10–30s 进入 RUNNING；VS Code 与 Jupyter 均支持，点"打开 IDE"在新标签页打开。
+      <div style={{ marginTop: '1rem', fontSize: '0.78rem', color: 'var(--text-muted,#888)', lineHeight: '1.5' }}>
+        💡 <strong>使用提示与防浪费机制</strong>：<br />
+        1. 启动后约 10–30s 进入 RUNNING；VS Code 与 Jupyter 均支持在网页内流畅交互。<br />
+        2. <strong>空闲自动回收（Idle Auto-Reclaim）</strong>：会话在连续无活跃超过 60 分钟后会自动释放，避免昂贵算力与 GPU 机时闲置浪费；如需长时间运行建议改用批量批处理作业（Jobs 页面提交）。
       </div>
     </div>
   );
