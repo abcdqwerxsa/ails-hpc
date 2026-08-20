@@ -22,9 +22,14 @@ rsync -avz --inplace -e "ssh -o BatchMode=yes" config/   ${REMOTE_HOST}:${REMOTE
 rsync -avz --exclude node_modules -e "ssh -o BatchMode=yes" apps/web/  ${REMOTE_HOST}:${REMOTE_DIR}/apps/web/
 rsync -avz -e "ssh -o BatchMode=yes" deploy/slurm-cluster/ails-apiserver.service \
     ${REMOTE_HOST}:/etc/systemd/system/ails-apiserver.service
-# 2.4 用户库每日备份 timer（sqlite3 在线快照，7 份轮转按星期）
+# 2.4 用户库每日备份 timer（sqlite3 在线快照，7 份轮转按星期）+ .env 备份（root:600）
 rsync -avz -e "ssh -o BatchMode=yes" deploy/slurm-cluster/ails-db-backup.service deploy/slurm-cluster/ails-db-backup.timer \
+    deploy/slurm-cluster/ails-env-backup.service deploy/slurm-cluster/ails-env-backup.timer \
     ${REMOTE_HOST}:/etc/systemd/system/
+# 2.5 Casdoor SSO 部署定义（compose + 权威 app.conf；data/ 只在服务器侧——经
+# ails-db-backup 每日快照，不入仓不覆盖）
+rsync -avz -e "ssh -o BatchMode=yes" deploy/slurm-cluster/casdoor/docker-compose.yml deploy/slurm-cluster/casdoor/conf/ \
+    ${REMOTE_HOST}:${REMOTE_DIR}/casdoor/
 
 echo "3. Installing systemd service on remote Slurm server (192.168.20.226:${PORT})..."
 echo "   Requires ${REMOTE_DIR}/.env containing AILS_JWT_SECRET (server is fail-closed without it)."
