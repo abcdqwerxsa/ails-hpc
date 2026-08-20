@@ -2,6 +2,7 @@
 // 状态自持）。分区面板仍在 routes/scheduler.tsx 内（原 partitions.tsx 整体迁入）。
 import { useEffect, useState, type ChangeEvent } from 'react';
 import { slurm, type QOSInfo, type Reservation, type TenantInfo } from '../services/slurm';
+import { Select } from './select';
 import { Field, MiniBtn, StatusBadge, cardStyle, emptyStyle, mono, th, td } from './panel_ui';
 
 export function ReservationsPanel() {
@@ -156,26 +157,18 @@ export function QOSPanel() {
           <input className="form-control" value={qosForm.grpTRES} onChange={(e) => setQosForm({ ...qosForm, grpTRES: e.target.value })} placeholder="cpu=32,mem=64G" />
         </Field>
         <Field label="绑定租户">
-          <select
-            className="form-control"
+          <Select
             value={qosBindTenant}
-            onChange={(e: ChangeEvent<HTMLSelectElement>) => setQosBindTenant(e.target.value)}
-          >
-            {tenants.map((t) => (
-              <option key={t.slug} value={t.slug}>{t.slug}</option>
-            ))}
-          </select>
+            onChange={setQosBindTenant}
+            options={tenants.map((t) => ({ value: t.slug, label: t.slug }))}
+          />
         </Field>
         <Field label="绑定 QOS">
-          <select
-            className="form-control"
+          <Select
             value={qosBindName}
-            onChange={(e: ChangeEvent<HTMLSelectElement>) => setQosBindName(e.target.value)}
-          >
-            {(qosList.length > 0 ? qosList.map((q) => q.name) : []).map((n) => (
-              <option key={n} value={n}>{n}</option>
-            ))}
-          </select>
+            onChange={setQosBindName}
+            options={(qosList.length > 0 ? qosList.map((q) => q.name) : []).map((n) => ({ value: n, label: n }))}
+          />
         </Field>
         <div style={{ display: 'flex', alignItems: 'end', gap: '0.5rem' }}>
           <button className="btn-primary" type="button" onClick={submitQos} style={{ padding: '0.45rem 1.2rem' }}>创建 QOS</button>

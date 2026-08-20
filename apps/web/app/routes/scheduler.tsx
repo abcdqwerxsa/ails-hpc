@@ -2,6 +2,7 @@ import { createFileRoute } from '@tanstack/react-router';
 import { Fragment, useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { slurm, type Partition, type PartitionDetail, type UpdatePartitionRequest } from '../services/slurm';
 import { can, getStoredUser } from '../services/auth';
+import { Select } from '../components/select';
 import { QOSPanel, ReservationsPanel } from '../components/scheduler_sections';
 
 // 2026-08-19 IA 重组：原「分区」页扩为「调度管理」——分区/预约/QOS 同属 Slurm 调度器
@@ -292,39 +293,25 @@ function PartitionEditor({
       {err && <Notice color="#f43f5e" bg="rgba(244,63,94,.12)">{err}</Notice>}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(200px,1fr))', gap: '0.75rem' }}>
         <Field label={`State（${detail ? cur(detail.state) : '…'}）`}>
-          <select
-            className="form-control"
+          <Select
             value={form.state}
-            onChange={(e) => setForm({ ...form, state: e.target.value })}
-          >
-            <option value="">不变更</option>
-            {['UP', 'DOWN', 'DRAIN', 'INACTIVE'].map((s) => (
-              <option key={s} value={s}>{s}</option>
-            ))}
-          </select>
+            onChange={(v) => setForm({ ...form, state: v })}
+            options={[{ value: '', label: '不变更' }, ...['UP', 'DOWN', 'DRAIN', 'INACTIVE'].map((s) => ({ value: s, label: s }))]}
+          />
         </Field>
         <Field label={`Default（${detail ? cur(detail.default) : '…'}）`}>
-          <select
-            className="form-control"
+          <Select
             value={form.default}
-            onChange={(e) => setForm({ ...form, default: e.target.value })}
-          >
-            <option value="">不变更</option>
-            <option value="YES">YES</option>
-            <option value="NO">NO</option>
-          </select>
+            onChange={(v) => setForm({ ...form, default: v })}
+            options={[{ value: '', label: '不变更' }, { value: 'YES', label: 'YES' }, { value: 'NO', label: 'NO' }]}
+          />
         </Field>
         <Field label={`OverSubscribe（${detail ? cur(detail.overSubscribe) : '…'}）`}>
-          <select
-            className="form-control"
+          <Select
             value={form.overSubscribe}
-            onChange={(e) => setForm({ ...form, overSubscribe: e.target.value })}
-          >
-            <option value="">不变更</option>
-            {['YES', 'NO', 'EXCLUSIVE', 'FORCE', 'FORCE:1'].map((s) => (
-              <option key={s} value={s}>{s}</option>
-            ))}
-          </select>
+            onChange={(v) => setForm({ ...form, overSubscribe: v })}
+            options={[{ value: '', label: '不变更' }, ...['YES', 'NO', 'EXCLUSIVE', 'FORCE', 'FORCE:1'].map((s) => ({ value: s, label: s }))]}
+          />
         </Field>
         <Field label={`MaxTime（${detail ? cur(detail.maxTime) : '…'}）`}>
           <input

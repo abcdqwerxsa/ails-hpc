@@ -5,6 +5,7 @@ import { useState, useEffect, type ChangeEvent } from 'react';
 import { slurm, type AuditEntry } from '../services/slurm';
 import { can, getStoredUser } from '../services/auth';
 import { RolesPanel } from '../components/roles_panel';
+import { Select } from '../components/select';
 import { MiniBtn, cardStyle, emptyStyle, mono, th, td } from '../components/panel_ui';
 
 export const Route = createFileRoute('/rbac')({ component: RbacPage });
@@ -87,17 +88,14 @@ function AuditPanel() {
             onChange={(e) => setAuditFilter(e.target.value)}
             style={{ width: 150 }}
           />
-          <select
-            className="form-control form-control-sm"
+          <Select
+            small
+            width={190}
             value={auditAction}
-            onChange={(e: ChangeEvent<HTMLSelectElement>) => setAuditAction(e.target.value)}
-            style={{ width: 190 }}
-          >
-            <option value="">全部动作</option>
-            {AUDIT_ACTIONS.map((a) => (
-              <option key={a.value} value={a.value}>{a.label}</option>
-            ))}
-          </select>
+            onChange={setAuditAction}
+            options={[{ value: '', label: '全部动作' }, ...AUDIT_ACTIONS.map((a) => ({ value: a.value, label: a.label }))]}
+            ariaLabel="按动作过滤"
+          />
           <MiniBtn onClick={loadAudit}>查询</MiniBtn>
         </div>
       </div>

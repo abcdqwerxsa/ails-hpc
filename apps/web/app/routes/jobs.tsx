@@ -2,6 +2,7 @@ import { createFileRoute } from '@tanstack/react-router';
 import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
 import { slurm, type JobDetail, type JobSummary, type Partition } from '../services/slurm';
 import { can } from '../services/auth';
+import { Select } from '../components/select';
 
 export const Route = createFileRoute('/jobs')({ component: JobsPage });
 
@@ -215,20 +216,16 @@ function JobsPage() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))', gap: '0.75rem' }}>
           <Field label="作业名"><input className="form-control" value={form.name} onChange={field('name')} placeholder="my-job" /></Field>
           <Field label="分区">
-            <select
-              className="form-control"
+            <Select
               value={form.partition}
-              onChange={(e: ChangeEvent<HTMLSelectElement>) =>
-                setForm({ ...form, partition: e.target.value, gpus: e.target.value === 'performance' ? form.gpus : '0' })
+              onChange={(v) =>
+                setForm({ ...form, partition: v, gpus: v === 'performance' ? form.gpus : '0' })
               }
-            >
-              {(partitions.length > 0 ? partitions.map((p) => p.name) : ['standard']).map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                  {name === 'performance' ? '（P 核）' : name === 'standard' ? '（E 核）' : ''}
-                </option>
-              ))}
-            </select>
+              options={(partitions.length > 0 ? partitions.map((p) => p.name) : ['standard']).map((name) => ({
+                value: name,
+                label: `${name}${name === 'performance' ? '（P 核）' : name === 'standard' ? '（E 核）' : ''}`,
+              }))}
+            />
           </Field>
           <Field label="节点数"><input className="form-control" type="number" min="1" value={form.nodes} onChange={field('nodes')} /></Field>
           <Field label="任务数"><input className="form-control" type="number" min="1" value={form.tasks} onChange={field('tasks')} /></Field>
@@ -245,21 +242,21 @@ function JobsPage() {
             />
           </Field>
           <Field label="GPU 卡数">
-            <select
-              className="form-control"
+            <Select
               value={form.gpus}
-              onChange={(e: ChangeEvent<HTMLSelectElement>) =>
+              onChange={(v) =>
                 setForm({
                   ...form,
-                  gpus: e.target.value,
+                  gpus: v,
                   // GPU 只在 performance 分区：选了 GPU 自动切分区；取消 GPU 不回切（尊重用户选择）
-                  partition: Number(e.target.value) > 0 ? 'performance' : form.partition,
+                  partition: Number(v) > 0 ? 'performance' : form.partition,
                 })
               }
-            >
-              <option value="0">0（不申请）</option>
-              <option value="1">1 卡（P 核分区）</option>
-            </select>
+              options={[
+                { value: '0', label: '0（不申请）' },
+                { value: '1', label: '1 卡（P 核分区）' },
+              ]}
+            />
           </Field>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
