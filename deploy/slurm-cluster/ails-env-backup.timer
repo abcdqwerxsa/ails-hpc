@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily AILES .env backup (offset from db backup)
+
+[Timer]
+OnCalendar=*-*-* 04:23:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

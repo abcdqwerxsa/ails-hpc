@@ -1,0 +1,20 @@
+services:
+  casdoor:
+    image: quay.io/nilpo1/casdoor:v3.154.4
+    container_name: casdoor
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - driverName=sqlite
+      - dataSourceName=file:/data/casdoor.db?cache=shared
+    volumes:
+      - ./conf:/conf
+      - ./data:/data
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8000'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s

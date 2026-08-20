@@ -1,0 +1,10 @@
+[Unit]
+Description=AILS portal .env backup (JWT/OIDC secrets)
+After=ails-apiserver.service
+
+[Service]
+Type=oneshot
+# .env 为 root:600（含 AILS_JWT_SECRET 与 AILS_OIDC_CLIENT_SECRET），ails 用户读不到
+# ——本单元以 root 运行，快照后立刻 chmod 600（P2 收尾：安全审计 2026-08-19 遗留项）。
+ExecStart=/bin/sh -c 'D=/opt/slurm-cluster/var/lib/ails/backups; cp /opt/slurm-cluster/.env $D/env-$(date +%%u) && chmod 600 $D/env-$(date +%%u)'
+WorkingDirectory=/opt/slurm-cluster
