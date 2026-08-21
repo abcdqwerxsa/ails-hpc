@@ -17,16 +17,14 @@ function AdminPage() {
   if (!showPlatform && !showTenant) {
     return (
       <div>
-        <h2 style={{ marginTop: 0, marginBottom: '1rem' }}>用户管理</h2>
         <Notice color="#f43f5e" bg="rgba(239,68,68,.1)">当前账号无管理权限。</Notice>
       </div>
     );
   }
   return (
     <div>
-      <h2 style={{ marginTop: 0, marginBottom: '1rem' }}>用户管理</h2>
       {showTenant && <TenantUsersPanel />}
-      {showPlatform && <PlatformAdminPanel />}
+      {showPlatform && <PlatformAdminPanel showTenantTopMargin={showTenant} />}
     </div>
   );
 }
@@ -280,7 +278,7 @@ const PLATFORM_ROLES = [
   { value: 'admin', label: 'admin（平台管理员）' },
 ];
 
-function PlatformAdminPanel() {
+function PlatformAdminPanel({ showTenantTopMargin }: { showTenantTopMargin?: boolean }) {
   const [tenants, setTenants] = useState<TenantInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -483,9 +481,7 @@ function PlatformAdminPanel() {
   }, []);
 
   return (
-    <div>
-      <h3 style={{ marginTop: '2rem', marginBottom: '1rem' }}>平台管理</h3>
-
+    <div style={showTenantTopMargin ? { marginTop: '2rem' } : undefined}>
       {error && <Notice color="#f43f5e" bg="rgba(239,68,68,.1)">{error}</Notice>}
       {info && <Notice color="#10b981" bg="rgba(16,185,129,.1)">{info}</Notice>}
 

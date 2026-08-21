@@ -74,7 +74,6 @@ function BillingPage() {
   if (!can('billing:read')) {
     return (
       <div>
-        <h2 style={{ marginTop: 0, marginBottom: '1rem' }}>计费</h2>
         <div style={{ padding: '0.65rem 0.9rem', background: 'rgba(239,68,68,.1)', color: '#f43f5e', borderRadius: 8, fontSize: '.9rem' }}>
           当前账号无计费读取权限（billing:read）。
         </div>
@@ -83,8 +82,6 @@ function BillingPage() {
   }
   return (
     <div>
-      <h2 style={{ marginTop: 0, marginBottom: '1rem' }}>计费与资源用量</h2>
-
       {error && <Notice color="#f43f5e" bg="rgba(239,68,68,.1)">{error}</Notice>}
       {info && <Notice color="#10b981" bg="rgba(16,185,129,.1)">{info}</Notice>}
 

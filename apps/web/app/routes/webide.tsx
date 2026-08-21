@@ -94,8 +94,6 @@ function WebIDEPage() {
 
   return (
     <div>
-      <h2 style={{ marginTop: 0, marginBottom: '1rem' }}>Web-IDE（交互式开发环境）</h2>
-
       {error && <Notice color="#f43f5e" bg="rgba(239,68,68,.1)">{error}</Notice>}
       {info && <Notice color="#10b981" bg="rgba(16,185,129,.1)">{info}</Notice>}
 

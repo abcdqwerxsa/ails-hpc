@@ -44,7 +44,6 @@ function RbacPage() {
 
   return (
     <div>
-      <h2 style={{ marginTop: 0, marginBottom: '1rem' }}>RBAC 管理</h2>
       {!showPlatformRoles && !showTenantRoles && !showAudit && (
         <div style={{ padding: '0.6rem 0.9rem', color: 'var(--accent-rose)', background: 'rgba(239,68,68,.1)', borderRadius: 8, fontSize: '0.88rem' }}>
           当前账号无 RBAC 管理权限。

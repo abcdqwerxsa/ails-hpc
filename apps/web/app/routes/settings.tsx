@@ -160,8 +160,6 @@ function SettingsPage() {
 
   return (
     <div>
-      <h2 style={{ marginTop: 0, marginBottom: '1rem' }}>安全设置</h2>
-
       {error && <div style={{ padding: '0.6rem 0.9rem', color: '#f43f5e', background: 'rgba(239,68,68,.1)', borderRadius: 8, marginBottom: '1rem', fontSize: '0.88rem' }}>{error}</div>}
       {info && <div style={{ padding: '0.6rem 0.9rem', color: '#10b981', background: 'rgba(16,185,129,.1)', borderRadius: 8, marginBottom: '1rem', fontSize: '0.88rem' }}>{info}</div>}
 

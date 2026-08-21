@@ -53,8 +53,6 @@ function SchedulerPage() {
         .partitions-page .pt-row:hover { background: var(--bg-card-hover, #222632); }
       `}</style>
 
-      <h2 style={{ marginTop: 0, marginBottom: '1.5rem' }}>调度管理</h2>
-
       {error && <Notice color="#f43f5e" bg="rgba(244,63,94,.12)">{error}</Notice>}
       {info && <Notice color="#10b981" bg="rgba(16,185,129,.12)">{info}</Notice>}
 
