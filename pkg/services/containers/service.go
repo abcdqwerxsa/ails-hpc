@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,6 +27,8 @@ var (
 	ErrQuotaExceeded      = errors.New("requested resources exceed workspace quota")
 	ErrContainerNotFound  = errors.New("interactive session not found or already recycled")
 )
+
+var qosNameRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,31}$`)
 
 const (
 	idePartitionCPU  = "standard"    // E 核默认分区
@@ -83,6 +86,7 @@ type CliSubmitOpts struct {
 	Nodes       int
 	Tasks       int
 	TimeLimit   int // 分钟
+	QOS         string
 }
 
 type containerServiceImpl struct {
@@ -123,6 +127,9 @@ func defaultCliSubmit(o CliSubmitOpts) (int, error) {
 	}
 	if o.Gpus > 0 {
 		args = append(args, fmt.Sprintf("--gres=gpu:%d", o.Gpus))
+	}
+	if o.QOS != "" {
+		args = append(args, fmt.Sprintf("--qos=%s", o.QOS))
 	}
 	if o.Nodes > 1 {
 		args = append(args, fmt.Sprintf("--nodes=%d", o.Nodes))
@@ -219,9 +226,14 @@ func (s *containerServiceImpl) LaunchContainer(ctx context.Context, req *Contain
 		envPreset = "base"
 	}
 
+	qos := strings.TrimSpace(req.QOS)
+	if qos != "" && !qosNameRE.MatchString(qos) {
+		return nil, ErrInvalidQOS
+	}
+
 	sessionID := newSessionID()
 	port := portFor(sessionID)
-	script := buildIDEScript(envType, envPreset, sessionID, port, cpus, memoryMB, req.GPUs, nodes, clusterUser)
+	script := buildIDEScript(envType, envPreset, sessionID, port, cpus, memoryMB, req.GPUs, nodes, clusterUser, qos)
 
 	timeLimit := ideTimeLimit
 	// 1.4：会话时长可调（分钟；默认 2h，1..720min 上限 12h）
@@ -248,6 +260,7 @@ func (s *containerServiceImpl) LaunchContainer(ctx context.Context, req *Contain
 			Nodes:       nodes,
 			Tasks:       1,
 			TimeLimit:   timeLimitMin,
+			QOS:         qos,
 		}
 		var err error
 		jobID, err = s.cliSubmit(opts)
@@ -269,6 +282,9 @@ func (s *containerServiceImpl) LaunchContainer(ctx context.Context, req *Contain
 			"HOME": "/shared",
 		}
 		subReq.Job.Account = account
+		if qos != "" {
+			subReq.Job.Qos = qos
+		}
 
 		resp, err := s.jobs.SubmitJobAs(subReq, clusterUser)
 		if err != nil {
@@ -294,6 +310,7 @@ func (s *containerServiceImpl) LaunchContainer(ctx context.Context, req *Contain
 		CPUs:         cpus,
 		MemoryMB:     memoryMB,
 		GPUs:         req.GPUs,
+		QOS:          qos,
 		CreatedAt:    time.Now(),
 		LastActiveAt: time.Now(),
 		IdleMinutes:  0,
@@ -353,6 +370,7 @@ func (s *containerServiceImpl) ListActiveContainers(ctx context.Context) ([]*Con
 			CPUs:         m.CPUs,
 			MemoryMB:     m.MemoryMB,
 			GPUs:         m.GPUs,
+			QOS:          m.QOS,
 			CreatedAt:    createdAt,
 			LastActiveAt: lastActiveAt,
 			IdleMinutes:  idleMin,
@@ -546,11 +564,14 @@ func (s *containerServiceImpl) reapIdleSessions(ctx context.Context, timeoutMin 
 
 // buildIDEScript 生成在计算节点上拉起 IDE 应用并回写连接信息的 sbatch 脚本。
 // 应用 auth 关闭——访问由 apiserver 的 JWT 网关守门；base_url 对齐反代前缀。
-func buildIDEScript(envType, envPreset, sessionID string, port, cpus, memoryMB, gpus, nodes int, clusterUser string) string {
+func buildIDEScript(envType, envPreset, sessionID string, port, cpus, memoryMB, gpus, nodes int, clusterUser string, qos string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "#!/bin/bash\n")
-	fmt.Fprintf(&b, "# AILS interactive dev session env=%s preset=%s session=%s port=%d cpus=%d mem=%d gpus=%d nodes=%d\n",
-		envType, envPreset, sessionID, port, cpus, memoryMB, gpus, nodes)
+	if qos != "" {
+		fmt.Fprintf(&b, "#SBATCH --qos=%s\n", qos)
+	}
+	fmt.Fprintf(&b, "# AILS interactive dev session env=%s preset=%s session=%s port=%d cpus=%d mem=%d gpus=%d nodes=%d qos=%s\n",
+		envType, envPreset, sessionID, port, cpus, memoryMB, gpus, nodes, qos)
 	fmt.Fprintf(&b, "SESSION_ID=%q\n", sessionID)
 	fmt.Fprintf(&b, "PORT=%d\n", port)
 	fmt.Fprintf(&b, "BASE_URL=%q\n", ideBaseURLPath+"/"+sessionID)
@@ -564,8 +585,8 @@ func buildIDEScript(envType, envPreset, sessionID string, port, cpus, memoryMB, 
 	}
 	// 应用启动前先回写连接信息，apiserver 据此反代
 	fmt.Fprintf(&b, "cat > /shared/sessions/${SESSION_ID}.json <<EOF\n")
-	fmt.Fprintf(&b, "{\"session_id\":\"${SESSION_ID}\",\"job_id\":${SLURM_JOB_ID:-0},\"node\":\"${NODE_NAME}\",\"node_ip\":\"${NODE_IP}\",\"port\":${PORT},\"env_type\":\"%s\",\"env_preset\":\"%s\",\"cpus\":%d,\"memory_mb\":%d,\"gpus\":%d,\"nodes\":%d,\"owner\":\"%s\"}\n",
-		envType, envPreset, cpus, memoryMB, gpus, nodes, clusterUser)
+	fmt.Fprintf(&b, "{\"session_id\":\"${SESSION_ID}\",\"job_id\":${SLURM_JOB_ID:-0},\"node\":\"${NODE_NAME}\",\"node_ip\":\"${NODE_IP}\",\"port\":${PORT},\"env_type\":\"%s\",\"env_preset\":\"%s\",\"cpus\":%d,\"memory_mb\":%d,\"gpus\":%d,\"nodes\":%d,\"owner\":\"%s\",\"qos\":\"%s\"}\n",
+		envType, envPreset, cpus, memoryMB, gpus, nodes, clusterUser, qos)
 	fmt.Fprintf(&b, "EOF\n")
 	// 应用输出重定向到会话日志，便于排查启动失败
 	fmt.Fprintf(&b, "exec > /shared/sessions/${SESSION_ID}.log 2>&1\n")

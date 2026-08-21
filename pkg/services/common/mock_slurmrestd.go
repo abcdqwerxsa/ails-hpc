@@ -24,6 +24,7 @@ type MockJob struct {
 	Script     string `json:"script"`
 	Account    string `json:"account"`   // 提交时写入的 Slurm account（== clusterUser）
 	User       string `json:"user_name"` // submit 请求的 X-SLURM-USER-NAME（per-user 身份）
+	QOS        string `json:"qos,omitempty"`
 }
 
 // MockSlurmServer encapsulates an in-memory SlurmREST v0.0.37 HTTP mock server
@@ -232,6 +233,7 @@ func (m *MockSlurmServer) handleGetJobs(w http.ResponseWriter, r *http.Request) 
 			"submit_time": j.SubmitTime,
 			"account":     j.Account,
 			"user_name":   j.User,
+			"qos":         j.QOS,
 		})
 	}
 	m.mu.RUnlock()
@@ -263,6 +265,7 @@ func (m *MockSlurmServer) handleSubmitJob(w http.ResponseWriter, r *http.Request
 			Nodes     []int  `json:"nodes"`
 			TimeLimit int    `json:"time_limit"`
 			Account   string `json:"account"`
+			Qos       string `json:"qos"`
 		} `json:"job"`
 	}
 
@@ -306,6 +309,7 @@ func (m *MockSlurmServer) handleSubmitJob(w http.ResponseWriter, r *http.Request
 		Script:     reqPayload.Script,
 		Account:    reqPayload.Job.Account,
 		User:       r.Header.Get("X-SLURM-USER-NAME"),
+		QOS:        reqPayload.Job.Qos,
 	}
 	m.jobs[jobID] = mockJob
 	m.mu.Unlock()

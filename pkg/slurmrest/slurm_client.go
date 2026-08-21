@@ -429,6 +429,7 @@ type JobsResponse struct {
 		TimeLimit  int    `json:"time_limit"`
 		SubmitTime int64  `json:"submit_time"`
 		Account    string `json:"account"` // 归属隔离：提交者用户名（submit 时写入）
+		Qos        string `json:"qos,omitempty"`
 	} `json:"jobs"`
 }
 
@@ -589,6 +590,7 @@ type SlurmJobSubmitReq struct {
 		// Account 携带提交者用户名，作为 apiserver 层归属隔离的 owner 载体
 		// （集群 AccountingStorageEnforce=none，不校验 account 存在性，可安全复用）。
 		Account string `json:"account,omitempty"`
+		Qos     string `json:"qos,omitempty"`
 	} `json:"job"`
 }
 

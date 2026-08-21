@@ -360,6 +360,125 @@ func (h *AdminHandler) DeleteReservation(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "reservation deleted"})
 }
 
+type createQOSRequest struct {
+	Name                 string `json:"name" binding:"required"`
+	Description          string `json:"description"`
+	Priority             string `json:"priority"`
+	GrpTRES              string `json:"grpTRES"`
+	MaxTRESPerUser       string `json:"maxTRESPerUser"`
+	MaxJobsPerUser       string `json:"maxJobsPerUser"`
+	MaxSubmitJobsPerUser string `json:"maxSubmitJobsPerUser"`
+	MaxWallDuration      string `json:"maxWallDuration"`
+
+	// 别名支持
+	Grp_TRES                 string `json:"grp_tres"`
+	Max_TRES                 string `json:"max_tres"`
+	MaxTRES                  string `json:"maxTRES"`
+	Max_TRES_Per_User        string `json:"max_tres_per_user"`
+	Max_TRES_PU              string `json:"max_tres_pu"`
+	Max_Jobs                 string `json:"max_jobs"`
+	MaxJobs                  string `json:"maxJobs"`
+	Max_Jobs_Per_User        string `json:"max_jobs_per_user"`
+	Max_Jobs_PU              string `json:"max_jobs_pu"`
+	Max_Submit_Jobs_Per_User string `json:"max_submit_jobs_per_user"`
+	Max_Submit_PU            string `json:"max_submit_pu"`
+	Max_Wall                 string `json:"max_wall"`
+	MaxWall                  string `json:"maxWall"`
+	Max_Wall_Duration        string `json:"max_wall_duration"`
+}
+
+func (r createQOSRequest) toUpdates() QOSUpdates {
+	u := QOSUpdates{
+		Description:          strings.TrimSpace(r.Description),
+		Priority:             strings.TrimSpace(r.Priority),
+		GrpTRES:              strings.TrimSpace(r.GrpTRES),
+		MaxTRESPerUser:       strings.TrimSpace(r.MaxTRESPerUser),
+		MaxJobsPerUser:       strings.TrimSpace(r.MaxJobsPerUser),
+		MaxSubmitJobsPerUser: strings.TrimSpace(r.MaxSubmitJobsPerUser),
+		MaxWallDuration:      strings.TrimSpace(r.MaxWallDuration),
+	}
+	if u.GrpTRES == "" {
+		u.GrpTRES = strings.TrimSpace(r.Grp_TRES)
+	}
+	if u.MaxTRESPerUser == "" {
+		for _, v := range []string{r.Max_TRES_Per_User, r.Max_TRES_PU, r.MaxTRES, r.Max_TRES} {
+			if strings.TrimSpace(v) != "" {
+				u.MaxTRESPerUser = strings.TrimSpace(v)
+				break
+			}
+		}
+	}
+	if u.MaxJobsPerUser == "" {
+		for _, v := range []string{r.Max_Jobs_Per_User, r.Max_Jobs_PU, r.MaxJobs, r.Max_Jobs} {
+			if strings.TrimSpace(v) != "" {
+				u.MaxJobsPerUser = strings.TrimSpace(v)
+				break
+			}
+		}
+	}
+	if u.MaxSubmitJobsPerUser == "" {
+		for _, v := range []string{r.Max_Submit_Jobs_Per_User, r.Max_Submit_PU} {
+			if strings.TrimSpace(v) != "" {
+				u.MaxSubmitJobsPerUser = strings.TrimSpace(v)
+				break
+			}
+		}
+	}
+	if u.MaxWallDuration == "" {
+		for _, v := range []string{r.Max_Wall_Duration, r.MaxWall, r.Max_Wall} {
+			if strings.TrimSpace(v) != "" {
+				u.MaxWallDuration = strings.TrimSpace(v)
+				break
+			}
+		}
+	}
+	u.MaxTRES = u.MaxTRESPerUser
+	u.MaxJobs = u.MaxJobsPerUser
+	u.MaxWall = u.MaxWallDuration
+	return u
+}
+
+type updateQOSRequest struct {
+	Description          string `json:"description"`
+	Priority             string `json:"priority"`
+	GrpTRES              string `json:"grpTRES"`
+	MaxTRESPerUser       string `json:"maxTRESPerUser"`
+	MaxJobsPerUser       string `json:"maxJobsPerUser"`
+	MaxSubmitJobsPerUser string `json:"maxSubmitJobsPerUser"`
+	MaxWallDuration      string `json:"maxWallDuration"`
+
+	// 别名支持
+	Grp_TRES                 string `json:"grp_tres"`
+	Max_TRES                 string `json:"max_tres"`
+	MaxTRES                  string `json:"maxTRES"`
+	Max_TRES_Per_User        string `json:"max_tres_per_user"`
+	Max_TRES_PU              string `json:"max_tres_pu"`
+	Max_Jobs                 string `json:"max_jobs"`
+	MaxJobs                  string `json:"maxJobs"`
+	Max_Jobs_Per_User        string `json:"max_jobs_per_user"`
+	Max_Jobs_PU              string `json:"max_jobs_pu"`
+	Max_Submit_Jobs_Per_User string `json:"max_submit_jobs_per_user"`
+	Max_Submit_PU            string `json:"max_submit_pu"`
+	Max_Wall                 string `json:"max_wall"`
+	MaxWall                  string `json:"maxWall"`
+	Max_Wall_Duration        string `json:"max_wall_duration"`
+}
+
+func (r updateQOSRequest) toUpdates() QOSUpdates {
+	req := createQOSRequest{
+		Description: r.Description, Priority: r.Priority, GrpTRES: r.GrpTRES,
+		MaxTRESPerUser: r.MaxTRESPerUser, MaxJobsPerUser: r.MaxJobsPerUser,
+		MaxSubmitJobsPerUser: r.MaxSubmitJobsPerUser, MaxWallDuration: r.MaxWallDuration,
+		Grp_TRES: r.Grp_TRES, Max_TRES: r.Max_TRES, MaxTRES: r.MaxTRES,
+		Max_TRES_Per_User: r.Max_TRES_Per_User, Max_TRES_PU: r.Max_TRES_PU,
+		Max_Jobs: r.Max_Jobs, MaxJobs: r.MaxJobs, Max_Jobs_Per_User: r.Max_Jobs_Per_User,
+		Max_Jobs_PU: r.Max_Jobs_PU, Max_Submit_Jobs_Per_User: r.Max_Submit_Jobs_Per_User,
+		Max_Submit_PU: r.Max_Submit_PU, Max_Wall: r.Max_Wall, MaxWall: r.MaxWall,
+		Max_Wall_Duration: r.Max_Wall_Duration,
+	}
+	return req.toUpdates()
+}
+
 // ListQOS GET /api/v1/admin/qos
 func (h *AdminHandler) ListQOS(c *gin.Context) {
 	qs, err := h.service.ListQOS(c.Request.Context())
@@ -370,23 +489,79 @@ func (h *AdminHandler) ListQOS(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"qos": qs})
 }
 
-// CreateQOS POST /api/v1/admin/qos {name,grpTRES?}
-func (h *AdminHandler) CreateQOS(c *gin.Context) {
-	var req struct {
-		Name    string `json:"name" binding:"required"`
-		GrpTRES string `json:"grpTRES"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.BadRequest(c, "name is required")
+// GetQOS GET /api/v1/admin/qos/:name
+func (h *AdminHandler) GetQOS(c *gin.Context) {
+	q, err := h.service.GetQOS(c.Request.Context(), c.Param("name"))
+	if errors.Is(err, ErrQOSNotFound) {
+		httpx.NotFound(c, "qos not found")
 		return
 	}
-	actor, _ := actorAndTenant(c)
-	q, err := h.service.CreateQOS(c.Request.Context(), actor, req.Name, req.GrpTRES, requestID(c))
 	if err != nil {
 		httpx.BadRequest(c, err.Error())
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"qos": q})
+}
+
+// CreateQOS POST /api/v1/admin/qos
+func (h *AdminHandler) CreateQOS(c *gin.Context) {
+	var req createQOSRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.BadRequest(c, "name is required")
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		httpx.BadRequest(c, "name is required")
+		return
+	}
+	actor, _ := actorAndTenant(c)
+	q, err := h.service.CreateQOS(c.Request.Context(), actor, name, req.toUpdates(), requestID(c))
+	if err != nil {
+		httpx.BadRequest(c, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"qos": q})
+}
+
+// UpdateQOS PATCH /api/v1/admin/qos/:name
+func (h *AdminHandler) UpdateQOS(c *gin.Context) {
+	var req updateQOSRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.BadRequest(c, "invalid payload")
+		return
+	}
+	updates := req.toUpdates()
+	if err := ValidateQOSUpdates(updates); err != nil {
+		httpx.BadRequest(c, err.Error())
+		return
+	}
+	actor, _ := actorAndTenant(c)
+	name := c.Param("name")
+	if err := h.service.UpdateQOS(c.Request.Context(), actor, name, updates, requestID(c)); err != nil {
+		if errors.Is(err, ErrQOSNotFound) {
+			httpx.NotFound(c, "qos not found")
+			return
+		}
+		httpx.BadRequest(c, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "qos updated"})
+}
+
+// DeleteQOS DELETE /api/v1/admin/qos/:name
+func (h *AdminHandler) DeleteQOS(c *gin.Context) {
+	actor, _ := actorAndTenant(c)
+	name := c.Param("name")
+	if err := h.service.DeleteQOS(c.Request.Context(), actor, name, requestID(c)); err != nil {
+		if errors.Is(err, ErrQOSNotFound) {
+			httpx.NotFound(c, "qos not found")
+			return
+		}
+		httpx.BadRequest(c, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "qos deleted"})
 }
 
 // SetTenantQOS PATCH /api/v1/admin/tenants/:slug/qos {name}
@@ -404,6 +579,126 @@ func (h *AdminHandler) SetTenantQOS(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "tenant qos updated"})
+}
+
+// GetUserQOS GET /api/v1/admin/users/:username/qos —— 平台管理员查询指定用户 QOS 关联。
+func (h *AdminHandler) GetUserQOS(c *gin.Context) {
+	username := c.Param("username")
+	info, err := h.service.GetUserQOS(c.Request.Context(), username, "")
+	if errors.Is(err, store.ErrNotFound) {
+		httpx.NotFound(c, "user not found")
+		return
+	}
+	if errors.Is(err, ErrReadOnlyStore) {
+		httpx.ServiceUnavailable(c, "admin API requires AILS_USER_STORE=db (yaml seed is read-only)", nil)
+		return
+	}
+	if err != nil {
+		httpx.BadRequest(c, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"qos":         info,
+		"userQos":     info,
+		"username":    info.Username,
+		"clusterUser": info.ClusterUser,
+		"account":     info.Account,
+		"tenantSlug":  info.TenantSlug,
+		"defaultQos":  info.DefaultQOS,
+		"defaultQOS":  info.DefaultQOS,
+		"allowedQos":  info.AllowedQOS,
+		"allowedQOS":  info.AllowedQOS,
+	})
+}
+
+// SetUserQOS PATCH /api/v1/admin/users/:username/qos —— 平台管理员设置指定用户 QOS。
+func (h *AdminHandler) SetUserQOS(c *gin.Context) {
+	var req UserQOSUpdates
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.BadRequest(c, "invalid payload")
+		return
+	}
+	actor, _ := actorAndTenant(c)
+	username := c.Param("username")
+	if err := h.service.SetUserQOS(c.Request.Context(), actor, username, "", req, requestID(c)); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			httpx.NotFound(c, "user not found")
+			return
+		}
+		if errors.Is(err, ErrQOSNotFound) {
+			httpx.NotFound(c, "qos not found")
+			return
+		}
+		if errors.Is(err, ErrReadOnlyStore) {
+			httpx.ServiceUnavailable(c, "admin API requires AILS_USER_STORE=db (yaml seed is read-only)", nil)
+			return
+		}
+		if errors.Is(err, ErrAdminTarget) {
+			httpx.Error(c, http.StatusForbidden, err.Error())
+			return
+		}
+		httpx.BadRequest(c, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"message":    "user qos updated",
+		"username":   username,
+		"defaultQos": req.DefaultQOS,
+		"defaultQOS": req.DefaultQOS,
+		"allowedQos": req.AllowedQOS,
+		"allowedQOS": req.AllowedQOS,
+	})
+}
+
+// SetMyUserQOS PATCH /api/v1/tenants/me/users/:username/qos —— 租户管理员设置本租户用户 QOS。
+func (h *AdminHandler) SetMyUserQOS(c *gin.Context) {
+	var req UserQOSUpdates
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.BadRequest(c, "invalid payload")
+		return
+	}
+	actor, tenant := actorAndTenant(c)
+	username := c.Param("username")
+	if err := h.service.SetUserQOS(c.Request.Context(), actor, username, tenant, req, requestID(c)); err != nil {
+		if errors.Is(err, store.ErrNotFound) || errors.Is(err, ErrAdminTarget) {
+			httpx.NotFound(c, "user not found")
+			return
+		}
+		if errors.Is(err, ErrQOSNotFound) {
+			httpx.NotFound(c, "qos not found")
+			return
+		}
+		if errors.Is(err, ErrReadOnlyStore) {
+			httpx.ServiceUnavailable(c, "admin API requires AILS_USER_STORE=db (yaml seed is read-only)", nil)
+			return
+		}
+		httpx.BadRequest(c, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"message":    "user qos updated",
+		"username":   username,
+		"defaultQos": req.DefaultQOS,
+		"defaultQOS": req.DefaultQOS,
+		"allowedQos": req.AllowedQOS,
+		"allowedQOS": req.AllowedQOS,
+	})
+}
+
+// GetAvailableQOS GET /api/v1/slurm/qos/available —— 当前认证用户获取可用 QOS 清单与默认 QOS。
+func (h *AdminHandler) GetAvailableQOS(c *gin.Context) {
+	actor, tenant := actorAndTenant(c)
+	if actor == "" {
+		sc := scopeOf(c)
+		actor = sc.Username
+		tenant = sc.TenantSlug
+	}
+	resp, err := h.service.GetAvailableQOS(c.Request.Context(), actor, tenant)
+	if err != nil {
+		httpx.Internal(c, "admin.GetAvailableQOS", err)
+		return
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 // --- 分区管理（partitions:manage；scontrol 直通，同 4.2 教义） ---

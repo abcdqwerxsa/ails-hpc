@@ -23,6 +23,7 @@ var (
 	sbatchDepRE    = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_:?*().,\-]*$`)
 	jobNameRE      = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.\-]{0,63}$`)
 	jobPartitionRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_\-]{0,31}$`)
+	qosNameRE      = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,31}$`)
 )
 
 type JobService interface {
@@ -78,6 +79,7 @@ type CliSubmitOpts struct {
 	TimeLimit   int    // 分钟（sbatch --time 单位）
 	ArraySpec   string // sbatch --array（4.1；空=不用）
 	Dependency  string // sbatch --dependency（4.1；空=不用）
+	QOS         string
 }
 
 // defaultCliSubmit 生产实现：脚本写入 /shared/portal-jobs/<name>-<rand>.job，
@@ -103,6 +105,9 @@ func defaultCliSubmit(o CliSubmitOpts) (int, error) {
 	}
 	if o.Gpus > 0 {
 		args = append(args, fmt.Sprintf("--gres=gpu:%d", o.Gpus))
+	}
+	if o.QOS != "" {
+		args = append(args, "--qos="+o.QOS)
 	}
 	if o.ArraySpec != "" {
 		args = append(args, "--array="+o.ArraySpec)
@@ -187,6 +192,9 @@ func (s *jobServiceImpl) SubmitJob(ctx context.Context, req *SubmitJobRequest, c
 	if req.Partition != "" && !jobPartitionRE.MatchString(req.Partition) {
 		return nil, ErrInvalidPartition
 	}
+	if req.QOS != "" && !qosNameRE.MatchString(req.QOS) {
+		return nil, ErrInvalidQOS
+	}
 
 	if cpus > 1000 || req.Nodes > 100 {
 		return nil, ErrInvalidResourceLimit
@@ -247,6 +255,7 @@ func (s *jobServiceImpl) SubmitJob(ctx context.Context, req *SubmitJobRequest, c
 			Script: req.Script, MemoryMB: req.MemoryMB, Gpus: req.Gpus,
 			Nodes: nodesCount, Tasks: req.Tasks, TimeLimit: timeLimit,
 			ArraySpec: req.ArraySpec, Dependency: req.Dependency,
+			QOS: req.QOS,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("gpu job submit: %w", err)
@@ -269,6 +278,9 @@ func (s *jobServiceImpl) SubmitJob(ctx context.Context, req *SubmitJobRequest, c
 		}
 		slurmReq.Job.Account = account            // 真实 Slurm account（== clusterUser），AccountingStorageEnforce=associations 校验其关联存在
 		slurmReq.Job.MemoryPerNode = req.MemoryMB // 0=缺省（DefMemPerCPU 350/核）
+		if req.QOS != "" {
+			slurmReq.Job.Qos = req.QOS
+		}
 		// 1.2 输出管理：统一落 /shared/jobs/%j.out（stdout/stderr 合流；%j 由 Slurm 展开，
 		// 实测可用），cwd=/shared（容器家目录是临时的）。旧作业输出在临时 home 即丢。
 		slurmReq.Job.CurrentWorkingDirectory = "/shared"
@@ -297,6 +309,7 @@ func (s *jobServiceImpl) SubmitJob(ctx context.Context, req *SubmitJobRequest, c
 		TimeLimit:  timeLimit,
 		SubmitTime: time.Now().Unix(),
 		Owner:      clusterUser,
+		QOS:        req.QOS,
 	}
 
 	s.mu.Lock()
@@ -338,6 +351,7 @@ func (s *jobServiceImpl) ListJobs(ctx context.Context) ([]JobSummary, error) {
 					TimeLimit:  j.TimeLimit,
 					SubmitTime: j.SubmitTime,
 					Owner:      j.Account, // 归属隔离：从 slurm account 回填
+					QOS:        j.Qos,
 				}
 			}
 		} else {
@@ -399,7 +413,7 @@ func (s *jobServiceImpl) JobDetail(ctx context.Context, jobID int) (*JobDetail, 
 		return nil, ErrJobNotFound
 	}
 	out, err := s.sacctRun("-n", "-P", "-j", strconv.Itoa(jobID),
-		"-o", "JobID,JobName,User,Account,Partition,State,ElapsedRaw,ExitCode,Start,End,Submit")
+		"-o", "JobID,JobName,User,Account,Partition,State,ElapsedRaw,ExitCode,Start,End,Submit,QOS")
 	if err != nil {
 		return nil, fmt.Errorf("sacct: %w", err)
 	}
@@ -411,6 +425,9 @@ func (s *jobServiceImpl) JobDetail(ctx context.Context, jobID int) (*JobDetail, 
 		d := &JobDetail{
 			Name: f[1], Owner: f[2], Account: f[3], Partition: f[4], State: f[5],
 			ExitCode: f[7], Start: f[8], End: f[9], Submit: f[10],
+		}
+		if len(f) >= 12 {
+			d.QOS = f[11]
 		}
 		d.JobID = jobID
 		d.ElapsedSec, _ = strconv.Atoi(f[6])

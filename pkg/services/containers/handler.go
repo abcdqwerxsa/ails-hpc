@@ -86,7 +86,7 @@ func (h *ContainerHandler) LaunchContainer(c *gin.Context) {
 	_, _, clusterUser, account := callerFromCtx(c)
 	res, err := h.service.LaunchContainer(c.Request.Context(), &req, clusterUser, account)
 	if err != nil {
-		if errors.Is(err, ErrUnsupportedEnvType) || errors.Is(err, ErrInvalidResources) || errors.Is(err, ErrQuotaExceeded) {
+		if errors.Is(err, ErrUnsupportedEnvType) || errors.Is(err, ErrInvalidResources) || errors.Is(err, ErrQuotaExceeded) || errors.Is(err, ErrInvalidQOS) {
 			httpx.BadRequest(c, err.Error())
 			return
 		}

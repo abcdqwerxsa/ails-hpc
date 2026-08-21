@@ -89,6 +89,7 @@ func NewRouter(h Handlers) *gin.Engine {
 		clusterRead.GET("/partitions", h.Cluster.GetPartitions)
 		clusterRead.GET("/monitor/snapshot", h.Monitor.GetSnapshot)
 		clusterRead.GET("/monitor/history", h.Monitor.GetHistory)
+		clusterRead.GET("/qos/available", h.Admin.GetAvailableQOS)
 
 		// 管理员独占：节点 DRAIN/RESUME
 		slurm.POST("/nodes/:name/state", auth.RequirePermission(auth.PermNodesManage), h.Nodes.UpdateNodeState)
@@ -134,8 +135,13 @@ func NewRouter(h Handlers) *gin.Engine {
 		platformAdmin.POST("/reservations", auth.RequirePermission(auth.PermReservationsManage), h.Admin.CreateReservation)
 		platformAdmin.DELETE("/reservations/:name", auth.RequirePermission(auth.PermReservationsManage), h.Admin.DeleteReservation)
 		platformAdmin.GET("/qos", auth.RequirePermission(auth.PermQosManage), h.Admin.ListQOS)
+		platformAdmin.GET("/qos/:name", auth.RequirePermission(auth.PermQosManage), h.Admin.GetQOS)
 		platformAdmin.POST("/qos", auth.RequirePermission(auth.PermQosManage), h.Admin.CreateQOS)
+		platformAdmin.PATCH("/qos/:name", auth.RequirePermission(auth.PermQosManage), h.Admin.UpdateQOS)
+		platformAdmin.DELETE("/qos/:name", auth.RequirePermission(auth.PermQosManage), h.Admin.DeleteQOS)
 		platformAdmin.PATCH("/tenants/:slug/qos", auth.RequirePermission(auth.PermQosManage), h.Admin.SetTenantQOS)
+		platformAdmin.GET("/users/:username/qos", auth.RequirePermission(auth.PermQosManage), h.Admin.GetUserQOS)
+		platformAdmin.PATCH("/users/:username/qos", auth.RequirePermission(auth.PermQosManage), h.Admin.SetUserQOS)
 		// 分区属性查看/修改（v2 增量；scontrol 直通）
 		partitionsManage := auth.RequirePermission(auth.PermPartitionsManage)
 		platformAdmin.GET("/partitions/:name", partitionsManage, h.Admin.GetPartition)
@@ -148,8 +154,8 @@ func NewRouter(h Handlers) *gin.Engine {
 		platformAdmin.PATCH("/roles/:name", rolesManage, h.Admin.UpdatePlatformRole)
 		platformAdmin.DELETE("/roles/:name", rolesManage, h.Admin.DeletePlatformRole)
 		platformAdmin.PATCH("/users/:username/role", rolesManage, h.Admin.AssignPlatformRole)
-	// 租户迁移（含同事务角色改派——可授予 admin，故门面同 roles:manage）
-	platformAdmin.PATCH("/users/:username/tenant", rolesManage, h.Admin.MovePlatformUserTenant)
+		// 租户迁移（含同事务角色改派——可授予 admin，故门面同 roles:manage）
+		platformAdmin.PATCH("/users/:username/tenant", rolesManage, h.Admin.MovePlatformUserTenant)
 
 		// 租户管理（tenant_admin；租户归属以 claims 为权威，不信任请求体）
 		tenants := api.Group("/tenants")
@@ -157,6 +163,7 @@ func NewRouter(h Handlers) *gin.Engine {
 		tenants.POST("/me/users", auth.RequirePermission(auth.PermTenantUsersManage), h.Admin.CreateTenantUser)
 		tenants.PATCH("/me/users/:username", auth.RequirePermission(auth.PermTenantUsersManage), h.Admin.UpdateMyUser)
 		tenants.POST("/me/users/:username/password", auth.RequirePermission(auth.PermTenantUsersResetPassword), h.Admin.ResetMyUserPassword)
+		tenants.PATCH("/me/users/:username/qos", auth.RequirePermission(auth.PermTenantUsersManage), h.Admin.SetMyUserQOS)
 		// R3 租户自定义角色 CRUD + 指派（权限 ⊆ 调用者——防提权在 service 层）
 		tenantRoles := auth.RequirePermission(auth.PermTenantRolesManage)
 		tenants.GET("/me/roles", tenantRoles, h.Admin.ListMyRoles)

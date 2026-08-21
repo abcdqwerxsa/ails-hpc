@@ -209,3 +209,76 @@ func TestCancelJob(t *testing.T) {
 		t.Errorf("expected mock job state 'CANCELLED', got '%s'", job.JobState)
 	}
 }
+
+func TestSubmitJob_WithQOS_MockServer(t *testing.T) {
+	mockServer, router := setupTestRouter()
+	defer mockServer.Close()
+
+	reqBody := jobs.SubmitJobRequest{
+		Name:      "test_job_qos",
+		Partition: "standard",
+		Nodes:     1,
+		Tasks:     1,
+		TimeLimit: "3600",
+		Script:    "#!/bin/bash\necho hello",
+		QOS:       "vip",
+	}
+	bodyBytes, _ := json.Marshal(reqBody)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/slurm/jobs/submit", bytes.NewBuffer(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d. Body: %s", w.Code, w.Body.String())
+	}
+
+	var resp jobs.SubmitJobResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+
+	job, exists := mockServer.GetJob(resp.JobID)
+	if !exists {
+		t.Fatalf("job %d not found in mock server", resp.JobID)
+	}
+	if job.QOS != "vip" {
+		t.Errorf("expected mock job QOS 'vip', got %q", job.QOS)
+	}
+}
+
+func TestListJobs_WithQOS(t *testing.T) {
+	mockServer, router := setupTestRouter()
+	defer mockServer.Close()
+
+	mockServer.AddJob(&common.MockJob{
+		JobID:     1002,
+		Name:      "job_qos_1002",
+		Partition: "standard",
+		JobState:  "RUNNING",
+		Nodes:     "node2",
+		TimeLimit: 3600,
+		QOS:       "gpu-short",
+	})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/slurm/jobs", nil)
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+
+	var resp jobs.JobListResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+
+	if len(resp.Jobs) != 1 {
+		t.Fatalf("expected 1 job, got %d", len(resp.Jobs))
+	}
+	if resp.Jobs[0].QOS != "gpu-short" {
+		t.Errorf("expected job QOS 'gpu-short', got %q", resp.Jobs[0].QOS)
+	}
+}

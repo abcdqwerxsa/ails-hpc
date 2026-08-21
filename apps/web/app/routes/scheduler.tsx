@@ -3,6 +3,7 @@ import { Fragment, useEffect, useState, type FormEvent, type ReactNode } from 'r
 import { slurm, type Partition, type PartitionDetail, type UpdatePartitionRequest } from '../services/slurm';
 import { can, getStoredUser } from '../services/auth';
 import { Select } from '../components/select';
+import { NeuSegmented } from '../components/panel_ui';
 import { QOSPanel, ReservationsPanel } from '../components/scheduler_sections';
 
 // 2026-08-19 IA 重组：原「分区」页扩为「调度管理」——分区/预约/QOS 同属 Slurm 调度器
@@ -15,14 +16,20 @@ const EMPTY_EDIT = {
   nodes: '', allowAccounts: '', allowGroups: '',
 };
 
+type SchedulerTab = 'all' | 'partitions' | 'reservations' | 'qos';
+
 function SchedulerPage() {
   const [parts, setParts] = useState<Partition[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [editing, setEditing] = useState(''); // 正在编辑的分区名
+  const [activeTab, setActiveTab] = useState<SchedulerTab>('all');
 
-  const canManage = can('partitions:manage', getStoredUser());
+  const user = getStoredUser();
+  const canManage = can('partitions:manage', user);
+  const canResv = can('reservations:manage', user);
+  const canQos = can('qos:manage', user);
 
   const reload = async () => {
     try {
@@ -46,6 +53,13 @@ function SchedulerPage() {
   const totalCpus = parts.reduce((s, p) => s + (p.total_cpus || 0), 0);
   const totalNodes = parts.reduce((s, p) => s + (p.total_nodes || 0), 0);
 
+  const tabOptions: { label: string; value: SchedulerTab }[] = [
+    { label: '全部视图', value: 'all' },
+    { label: '分区管理', value: 'partitions' },
+    ...(canResv ? [{ label: '预约管理', value: 'reservations' as SchedulerTab }] : []),
+    ...(canQos ? [{ label: 'QOS 策略治理', value: 'qos' as SchedulerTab }] : []),
+  ];
+
   return (
     <div className="partitions-page">
       <style>{`
@@ -56,170 +70,183 @@ function SchedulerPage() {
       {error && <Notice color="#f43f5e" bg="rgba(244,63,94,.12)">{error}</Notice>}
       {info && <Notice color="#10b981" bg="rgba(16,185,129,.12)">{info}</Notice>}
 
-      <h3 style={{ margin: '0 0 1rem', fontSize: '1.1rem' }}>分区</h3>
-
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-          gap: '1rem',
-          marginBottom: '1.5rem',
-        }}
-      >
-        <Stat label="分区总数" value={loading ? '—' : String(parts.length)} />
-        <Stat label="分区 CPU 合计" value={loading ? '—' : String(totalCpus)} />
-        <Stat label="分区节点合计" value={loading ? '—' : String(totalNodes)} />
-        <Stat
-          label="分区 GPU 合计"
-          value={loading ? '—' : String(parts.reduce((s, p) => s + (p.gpus || 0), 0))}
-          color="var(--accent-violet,#A855F7)"
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+        <h2 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 700 }}>调度与资源治理 (Scheduler)</h2>
+        <NeuSegmented
+          options={tabOptions}
+          value={activeTab}
+          onChange={(v) => setActiveTab(v as SchedulerTab)}
         />
       </div>
 
-      {loading ? (
-        <div
-          className="table-card"
-          style={{ padding: '2.5rem', textAlign: 'center', color: 'var(--text-muted,#94a3b8)' }}
-        >
-          加载中…
-        </div>
-      ) : parts.length === 0 ? (
-        <div
-          className="table-card"
-          style={{ padding: '2.5rem', textAlign: 'center', color: 'var(--text-muted,#94a3b8)' }}
-        >
-          暂无分区数据
-        </div>
-      ) : (
-        <div className="table-card">
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
-              <thead>
-                <tr style={{ textAlign: 'left' }}>
-                  <th style={th}>名称</th>
-                  <th style={th}>节点</th>
-                  <th style={th}>总 CPU</th>
-                  <th style={th}>总内存</th>
-                  <th style={th}>GPU</th>
-                  <th style={th}>总节点数</th>
-                  <th style={th}>集群 CPU 占比</th>
-                  {canManage && <th style={th}>操作</th>}
-                </tr>
-              </thead>
-              <tbody>
-                {parts.map((p, i) => {
-                  const pct = totalCpus > 0 ? Math.round(((p.total_cpus || 0) / totalCpus) * 100) : 0;
-                  const isLast = i === parts.length - 1;
-                  const rowBorder = isLast && editing !== p.name ? 'none' : '1px solid var(--border-color,#2a2f3a)';
-                  return (
-                    <Fragment key={p.name}>
-                      <tr
-                        className="pt-row"
-                        style={{
-                          borderBottom: rowBorder,
-                        }}
-                      >
-                        <td style={td}>
-                          <span style={{ fontWeight: 700, color: 'var(--text-main,#f1f5f9)' }}>{p.name}</span>
-                        </td>
-                        <td
-                          style={{
-                            ...td,
-                            fontFamily: "'JetBrains Mono', monospace",
-                            fontSize: '0.8rem',
-                            color: 'var(--text-muted,#94a3b8)',
-                          }}
-                        >
-                          {p.nodes || '-'}
-                        </td>
-                        <td style={{ ...td, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>
-                          {p.total_cpus}
-                        </td>
-                        <td style={{ ...td, fontFamily: "'JetBrains Mono', monospace" }}>
-                          {p.total_memory_mb ? `${(p.total_memory_mb / 1024).toFixed(1)} GB` : '—'}
-                        </td>
-                        <td style={{ ...td, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>
-                          {p.gpus ? (
-                            <span style={{ color: 'var(--accent-violet,#A855F7)' }}>
-                              {p.alloc_gpus ?? 0}/{p.gpus} 卡
-                            </span>
-                          ) : (
-                            <span style={{ color: 'var(--text-muted,#94a3b8)' }}>—</span>
-                          )}
-                        </td>
-                        <td style={{ ...td, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>
-                          {p.total_nodes}
-                        </td>
-                        <td style={td}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                            <div
-                              style={{
-                                flex: 1,
-                                maxWidth: 140,
-                                height: 8,
-                                background: 'var(--bg-card-hover,#222632)',
-                                borderRadius: 6,
-                                overflow: 'hidden',
-                                boxShadow: 'var(--shadow-inset-deep)',
-                              }}
-                            >
-                              <div
-                                style={{
-                                  width: `${pct}%`,
-                                  height: '100%',
-                                  background: 'var(--accent-cyan,#06B6D4)',
-                                  boxShadow: 'var(--accent-cyan-glow)',
-                                  transition: 'width .3s ease',
-                                }}
-                              />
-                            </div>
-                            <span
-                              style={{
-                                fontSize: '0.75rem',
-                                color: 'var(--text-muted,#94a3b8)',
-                                fontFamily: "'JetBrains Mono', monospace",
-                                minWidth: '2.5rem',
-                              }}
-                            >
-                              {pct}%
-                            </span>
-                          </div>
-                        </td>
-                        {canManage && (
-                          <td style={td}>
-                            <MiniBtn onClick={() => setEditing(editing === p.name ? '' : p.name)}>
-                              {editing === p.name ? '收起' : '编辑'}
-                            </MiniBtn>
-                          </td>
-                        )}
-                      </tr>
-                      {editing === p.name && (
-                        <tr style={{ background: 'var(--bg-card-hover,#222632)' }}>
-                          <td colSpan={canManage ? 8 : 7} style={{ padding: '1rem 1.25rem 1.25rem' }}>
-                            <PartitionEditor
-                              name={p.name}
-                              onDone={async () => {
-                                setEditing('');
-                                setInfo(`分区 ${p.name} 已更新（Slurm 生效）`);
-                                await reload();
-                              }}
-                              onCancel={() => setEditing('')}
-                            />
-                          </td>
-                        </tr>
-                      )}
-                    </Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
+      {(activeTab === 'all' || activeTab === 'partitions') && (
+        <div>
+          <h3 style={{ margin: '0 0 1rem', fontSize: '1.05rem' }}>分区状态 (Partitions)</h3>
+
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+              gap: '1rem',
+              marginBottom: '1.5rem',
+            }}
+          >
+            <Stat label="分区总数" value={loading ? '—' : String(parts.length)} />
+            <Stat label="分区 CPU 合计" value={loading ? '—' : String(totalCpus)} />
+            <Stat label="分区节点合计" value={loading ? '—' : String(totalNodes)} />
+            <Stat
+              label="分区 GPU 合计"
+              value={loading ? '—' : String(parts.reduce((s, p) => s + (p.gpus || 0), 0))}
+              color="var(--accent-violet,#A855F7)"
+            />
           </div>
+
+          {loading ? (
+            <div
+              className="table-card"
+              style={{ padding: '2.5rem', textAlign: 'center', color: 'var(--text-muted,#94a3b8)' }}
+            >
+              加载中…
+            </div>
+          ) : parts.length === 0 ? (
+            <div
+              className="table-card"
+              style={{ padding: '2.5rem', textAlign: 'center', color: 'var(--text-muted,#94a3b8)' }}
+            >
+              暂无分区数据
+            </div>
+          ) : (
+            <div className="table-card">
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+                  <thead>
+                    <tr style={{ textAlign: 'left' }}>
+                      <th style={th}>名称</th>
+                      <th style={th}>节点</th>
+                      <th style={th}>总 CPU</th>
+                      <th style={th}>总内存</th>
+                      <th style={th}>GPU</th>
+                      <th style={th}>总节点数</th>
+                      <th style={th}>集群 CPU 占比</th>
+                      {canManage && <th style={th}>操作</th>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {parts.map((p, i) => {
+                      const pct = totalCpus > 0 ? Math.round(((p.total_cpus || 0) / totalCpus) * 100) : 0;
+                      const isLast = i === parts.length - 1;
+                      const rowBorder = isLast && editing !== p.name ? 'none' : '1px solid var(--border-color,#2a2f3a)';
+                      return (
+                        <Fragment key={p.name}>
+                          <tr
+                            className="pt-row"
+                            style={{
+                              borderBottom: rowBorder,
+                            }}
+                          >
+                            <td style={td}>
+                              <span style={{ fontWeight: 700, color: 'var(--text-main,#f1f5f9)' }}>{p.name}</span>
+                            </td>
+                            <td
+                              style={{
+                                ...td,
+                                fontFamily: "'JetBrains Mono', monospace",
+                                fontSize: '0.8rem',
+                                color: 'var(--text-muted,#94a3b8)',
+                              }}
+                            >
+                              {p.nodes || '-'}
+                            </td>
+                            <td style={{ ...td, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>
+                              {p.total_cpus}
+                            </td>
+                            <td style={{ ...td, fontFamily: "'JetBrains Mono', monospace" }}>
+                              {p.total_memory_mb ? `${(p.total_memory_mb / 1024).toFixed(1)} GB` : '—'}
+                            </td>
+                            <td style={{ ...td, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>
+                              {p.gpus ? (
+                                <span style={{ color: 'var(--accent-violet,#A855F7)' }}>
+                                  {p.alloc_gpus ?? 0}/{p.gpus} 卡
+                                </span>
+                              ) : (
+                                <span style={{ color: 'var(--text-muted,#94a3b8)' }}>—</span>
+                              )}
+                            </td>
+                            <td style={{ ...td, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>
+                              {p.total_nodes}
+                            </td>
+                            <td style={td}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                                <div
+                                  style={{
+                                    flex: 1,
+                                    maxWidth: 140,
+                                    height: 8,
+                                    background: 'var(--bg-card-hover,#222632)',
+                                    borderRadius: 6,
+                                    overflow: 'hidden',
+                                    boxShadow: 'var(--shadow-inset-deep)',
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      width: `${pct}%`,
+                                      height: '100%',
+                                      background: 'var(--accent-cyan,#06B6D4)',
+                                      boxShadow: 'var(--accent-cyan-glow)',
+                                      transition: 'width .3s ease',
+                                    }}
+                                  />
+                                </div>
+                                <span
+                                  style={{
+                                    fontSize: '0.75rem',
+                                    color: 'var(--text-muted,#94a3b8)',
+                                    fontFamily: "'JetBrains Mono', monospace",
+                                    minWidth: '2.5rem',
+                                  }}
+                                >
+                                  {pct}%
+                                </span>
+                              </div>
+                            </td>
+                            {canManage && (
+                              <td style={td}>
+                                <MiniBtn onClick={() => setEditing(editing === p.name ? '' : p.name)}>
+                                  {editing === p.name ? '收起' : '编辑'}
+                                </MiniBtn>
+                              </td>
+                            )}
+                          </tr>
+                          {editing === p.name && (
+                            <tr style={{ background: 'var(--bg-card-hover,#222632)' }}>
+                              <td colSpan={canManage ? 8 : 7} style={{ padding: '1rem 1.25rem 1.25rem' }}>
+                                <PartitionEditor
+                                  name={p.name}
+                                  onDone={async () => {
+                                    setEditing('');
+                                    setInfo(`分区 ${p.name} 已更新（Slurm 生效）`);
+                                    await reload();
+                                  }}
+                                  onCancel={() => setEditing('')}
+                                />
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
-      {/* 预约 / QOS（自 admin.tsx 迁入；各自权限门） */}
-      {can('reservations:manage', getStoredUser()) && <ReservationsPanel />}
-      {can('qos:manage', getStoredUser()) && <QOSPanel />}
+      {/* 预约 / QOS（自 admin.tsx 迁入；各自权限门 + Tab 过滤） */}
+      {canResv && (activeTab === 'all' || activeTab === 'reservations') && <ReservationsPanel />}
+      {canQos && (activeTab === 'all' || activeTab === 'qos') && <QOSPanel />}
     </div>
   );
 }

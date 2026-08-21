@@ -226,3 +226,130 @@ func TestSubmit_ArrayDependencyViaCLI(t *testing.T) {
 		t.Fatalf("injection dep: want 400 got %d", w.Code)
 	}
 }
+
+// TestSubmit_QOSViaREST：QOS 透传 REST Job.Qos；actAs=clusterUser。
+func TestSubmit_QOSViaREST(t *testing.T) {
+	api := &fakeAPI{}
+	cli := &fakeCli{}
+	svc := jobs.NewJobServiceWithDeps(api, cli.submit)
+
+	resp, err := svc.SubmitJob(context.Background(), &jobs.SubmitJobRequest{
+		Name: "qos_job", Script: "echo hi", QOS: "gpu-vip",
+	}, "ailsmember", "ailsmember")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.JobID != 777 {
+		t.Fatalf("jobID=%d want 777(REST)", resp.JobID)
+	}
+	if api.last.Job.Qos != "gpu-vip" {
+		t.Errorf("job.qos=%q want 'gpu-vip'", api.last.Job.Qos)
+	}
+	if api.lastAs != "ailsmember" || api.calls != 1 || cli.calls != 0 {
+		t.Errorf("REST path: as=%q calls=%d cli=%d", api.lastAs, api.calls, cli.calls)
+	}
+}
+
+// TestSubmit_QOSViaCLI：gpus>0 携带 QOS 透传至 CliSubmitOpts.QOS。
+func TestSubmit_QOSViaCLI(t *testing.T) {
+	api := &fakeAPI{}
+	cli := &fakeCli{}
+	svc := jobs.NewJobServiceWithDeps(api, cli.submit)
+
+	resp, err := svc.SubmitJob(context.Background(), &jobs.SubmitJobRequest{
+		Name: "gpu_qos", Script: "nvidia-smi", Partition: "performance", Gpus: 1, QOS: "high-priority",
+	}, "ailsmember", "ailsmember")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.JobID != 888 {
+		t.Fatalf("jobID=%d want 888(CLI)", resp.JobID)
+	}
+	if cli.opts.QOS != "high-priority" {
+		t.Errorf("cli.opts.QOS=%q want 'high-priority'", cli.opts.QOS)
+	}
+	if api.calls != 0 {
+		t.Error("GPU job must not go through REST")
+	}
+}
+
+// TestSubmit_QOSOmittedDefault：未指定 QOS 时不透传 QOS（空值），由 Slurm 应用关联默认 QOS。
+func TestSubmit_QOSOmittedDefault(t *testing.T) {
+	api := &fakeAPI{}
+	cli := &fakeCli{}
+	svc := jobs.NewJobServiceWithDeps(api, cli.submit)
+
+	// REST path with omitted QOS
+	_, err := svc.SubmitJob(context.Background(), &jobs.SubmitJobRequest{
+		Name: "def_job", Script: "echo hi",
+	}, "ailsmember", "ailsmember")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if api.last.Job.Qos != "" {
+		t.Errorf("expected empty Qos in REST submit, got %q", api.last.Job.Qos)
+	}
+
+	// CLI path with omitted QOS
+	_, err = svc.SubmitJob(context.Background(), &jobs.SubmitJobRequest{
+		Name: "def_gpu_job", Script: "nvidia-smi", Partition: "performance", Gpus: 1,
+	}, "ailsmember", "ailsmember")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cli.opts.QOS != "" {
+		t.Errorf("expected empty QOS in CLI opts, got %q", cli.opts.QOS)
+	}
+}
+
+// TestSubmit_QOSAntiInjection：非法与恶意 QOS 载荷全部拦截返回 400。
+func TestSubmit_QOSAntiInjection(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc := jobs.NewJobServiceWithDeps(&fakeAPI{}, (&fakeCli{}).submit)
+	h := jobs.NewJobHandler(svc)
+	r := gin.New()
+	r.POST("/submit", h.SubmitJob)
+
+	injectionCases := []struct {
+		qos  string
+		desc string
+	}{
+		{"gpu-vip; rm -rf /", "Semicolon command injection"},
+		{"gpu-vip; touch /tmp/pwned", "Semicolon file creation"},
+		{"vip$(id)", "Subshell command substitution"},
+		{"vip`id`", "Backtick command substitution"},
+		{"'gpu-vip'", "Single quotes wrapping"},
+		{"\"gpu-vip\"", "Double quotes wrapping"},
+		{"gpu-vip' OR '1'='1", "SQL injection style"},
+		{"gpu-vip|cat /etc/passwd", "Pipe command injection"},
+		{"gpu-vip && reboot", "Logical AND injection"},
+		{"gpu-vip\n--exclusive", "Newline header injection"},
+		{"gpu-vip\r\n--exclusive", "CRLF injection"},
+		{"gpu-vip\x00pwn", "Null byte injection"},
+		{"1vip", "Leading digit"},
+		{"_vip", "Leading underscore"},
+		{"-vip", "Leading hyphen"},
+		{"--qos=vip", "Double dash option injection"},
+		{"gpu vip", "Space separated"},
+		{"toolong_qos_name_exceeding_32_characters_limit", "Overflow >32 chars"},
+		{"../etc/passwd", "Path traversal"},
+		{"vip/normal", "Slash in name"},
+	}
+
+	for _, tc := range injectionCases {
+		t.Run(tc.desc, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			body, _ := json.Marshal(map[string]any{
+				"name":   "job1",
+				"script": "echo hi",
+				"qos":    tc.qos,
+			})
+			req, _ := http.NewRequest("POST", "/submit", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+			if w.Code != http.StatusBadRequest {
+				t.Errorf("[%s] qos=%q: want 400 Bad Request, got %d, body=%s", tc.desc, tc.qos, w.Code, w.Body.String())
+			}
+		})
+	}
+}

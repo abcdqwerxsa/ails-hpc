@@ -1,10 +1,52 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useCallback, useEffect, useState, type ChangeEvent, type ReactNode } from 'react';
 import { can } from '../services/auth';
-import { slurm, ideFullURL, type ContainerInstance } from '../services/slurm';
+import { slurm, ideFullURL, type ContainerInstance, type QOSInfo } from '../services/slurm';
 import { Select } from '../components/select';
 
 export const Route = createFileRoute('/webide')({ component: WebIDEPage });
+
+function QOSBadge({ qos }: { qos?: string }) {
+  const name = (qos || 'normal').toLowerCase();
+  let bg = 'rgba(6, 182, 212, 0.12)';
+  let color = 'var(--accent-cyan,#06b6d4)';
+  let border = 'rgba(6, 182, 212, 0.25)';
+
+  if (name.includes('vip') || name.includes('high') || name.includes('prio')) {
+    bg = 'rgba(245, 158, 11, 0.15)';
+    color = '#f59e0b';
+    border = 'rgba(245, 158, 11, 0.3)';
+  } else if (name.includes('debug') || name.includes('test')) {
+    bg = 'rgba(16, 185, 129, 0.15)';
+    color = '#34d399';
+    border = 'rgba(16, 185, 129, 0.3)';
+  } else if (name.includes('gpu')) {
+    bg = 'rgba(168, 85, 247, 0.15)';
+    color = '#c084fc';
+    border = 'rgba(168, 85, 247, 0.3)';
+  }
+
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '0.3rem',
+        padding: '0.12rem 0.45rem',
+        borderRadius: 5,
+        fontSize: '0.72rem',
+        fontFamily: "'JetBrains Mono', monospace",
+        fontWeight: 700,
+        background: bg,
+        color,
+        border: `1px solid ${border}`,
+      }}
+    >
+      <span style={{ width: 5, height: 5, borderRadius: '50%', background: color }} />
+      {qos || 'normal'}
+    </span>
+  );
+}
 
 function WebIDEPage() {
   const [sessions, setSessions] = useState<ContainerInstance[]>([]);
@@ -17,6 +59,8 @@ function WebIDEPage() {
   const [cpus, setCpus] = useState('2');
   const [memMb, setMemMb] = useState('4096');
   const [durationMin, setDurationMin] = useState('120');
+  const [selectedQos, setSelectedQos] = useState('normal');
+  const [availableQosList, setAvailableQosList] = useState<QOSInfo[]>([]);
   const [launching, setLaunching] = useState(false);
   const [acting, setActing] = useState('');
 
@@ -38,6 +82,27 @@ function WebIDEPage() {
     return () => clearInterval(t);
   }, [refresh]);
 
+  useEffect(() => {
+    slurm
+      .getAvailableQOS()
+      .then((r) => {
+        const list =
+          r.allowedQos && r.allowedQos.length > 0
+            ? r.allowedQos
+            : r.allowedQOS && r.allowedQOS.length > 0
+            ? r.allowedQOS
+            : r.availableQos && r.availableQos.length > 0
+            ? r.availableQos
+            : [{ name: 'normal', description: '标准调度策略' }];
+        setAvailableQosList(list);
+        const def = r.defaultQos || r.defaultQOS || list[0]?.name || 'normal';
+        setSelectedQos(def);
+      })
+      .catch(() => {
+        setAvailableQosList([{ name: 'normal', description: '标准调度策略' }]);
+      });
+  }, []);
+
   const launch = async () => {
     setLaunching(true);
     setError('');
@@ -50,9 +115,10 @@ function WebIDEPage() {
         cpus: Number(cpus) || 2,
         memory_mb: Number(memMb) || 4096,
         time_limit_min: Number(durationMin) || 120,
+        qos: selectedQos?.trim() || undefined,
       });
       const gpuTag = Number(gpus) > 0 ? ` [${gpus} GPU]` : '';
-      setInfo(`已启动 ${envType}${gpuTag} 会话（作业 #${r.allocated?.job_id ?? '-'}）。等状态变 RUNNING 后点"打开 IDE"。`);
+      setInfo(`已启动 ${envType}${gpuTag} 会话（作业 #${r.allocated?.job_id ?? '-'} · QOS: ${selectedQos}）。等状态变 RUNNING 后点"打开 IDE"。`);
       await refresh();
     } catch (e: any) {
       setError(`启动失败：${e?.message || e}`);
@@ -174,11 +240,64 @@ function WebIDEPage() {
             ]}
           />
         </label>
+        <label style={{ display: 'grid', gap: '0.25rem', fontSize: '0.8rem', color: 'var(--text-muted,#94a3b8)' }}>
+          QOS 策略
+          <Select
+            width={160}
+            value={selectedQos}
+            onChange={setSelectedQos}
+            options={availableQosList.map((q) => ({
+              value: q.name,
+              label: `${q.name}${q.description ? ` (${q.description})` : ''}`,
+            }))}
+          />
+        </label>
         {can('ide:manage') && (
           <button className="btn-primary" onClick={launch} disabled={launching} style={{ padding: '0.5rem 1.5rem' }}>
             {launching ? '启动中…' : '启动 IDE 会话'}
           </button>
         )}
+
+        {/* QOS 策略提示卡 */}
+        {(() => {
+          const curQos = availableQosList.find((q) => q.name === selectedQos);
+          if (!curQos) return null;
+          return (
+            <div
+              style={{
+                width: '100%',
+                marginTop: '0.5rem',
+                padding: '0.5rem 0.75rem',
+                borderRadius: 8,
+                background: 'rgba(255,255,255,0.02)',
+                border: '1px solid var(--border-color,#2a2f3a)',
+                display: 'flex',
+                gap: '1rem',
+                flexWrap: 'wrap',
+                alignItems: 'center',
+                fontSize: '0.76rem',
+                color: 'var(--text-muted,#94a3b8)',
+              }}
+            >
+              <div style={{ color: 'var(--text-main,#f1f5f9)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                <span>调度策略：</span>
+                <QOSBadge qos={curQos.name} />
+              </div>
+              {curQos.priority && (
+                <span>🚀 优先级: <strong style={{ color: 'var(--accent-cyan,#06b6d4)' }}>{curQos.priority}</strong></span>
+              )}
+              {(curQos.max_wall || curQos.max_wall_duration) && (
+                <span>⏱️ 最大时长: <strong>{curQos.max_wall_duration || curQos.max_wall}</strong></span>
+              )}
+              {(curQos.max_tres_per_user || curQos.max_tres) && (
+                <span>⚡ 配额限制: <strong>{curQos.max_tres_per_user || curQos.max_tres}</strong></span>
+              )}
+              {curQos.description && (
+                <span style={{ fontStyle: 'italic', color: 'var(--text-dim,#64748b)' }}>({curQos.description})</span>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
       <h3 style={{ margin: '0 0 0.75rem', fontSize: '1.05rem' }}>活跃会话</h3>
@@ -212,6 +331,7 @@ function WebIDEPage() {
                 <div style={{ display: 'grid', gap: '0.25rem', fontSize: '0.88rem' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                     <strong>{s.env_type === 'vscode' ? 'VS Code' : 'JupyterLab'}</strong>
+                    <QOSBadge qos={s.qos || 'normal'} />
                     {s.env_preset && s.env_preset !== 'base' && (
                       <span style={{ fontSize: '0.75rem', padding: '0.1rem 0.4rem', borderRadius: 4, background: 'rgba(99,102,241,0.15)', color: '#818cf8' }}>
                         {s.env_preset}

@@ -96,6 +96,7 @@ export interface JobSummary {
   time_limit: number;
   submit_time: number;
   owner?: string; // 提交者 clusterUser（slurm account 回填）
+  qos?: string; // Slurm 实际关联的 QOS
 }
 export interface JobDetail {
   job_id: number;
@@ -110,6 +111,7 @@ export interface JobDetail {
   end?: string;
   submit?: string;
   stdout_tail?: string;
+  qos?: string; // 作业 QOS
 }
 export interface HistoryEntry {
   job_id: number;
@@ -145,6 +147,7 @@ export interface SubmitJobRequest {
   time_limit: string; // 后端 FlexTimeLimit 兼容 string|int
   script: string;
   current_working_directory?: string;
+  qos?: string; // 注入用户选择的 QOS
 }
 export interface SubmitJobResponse {
   code: number;
@@ -174,6 +177,7 @@ export interface ContainerInstance {
   cpus: number;
   memory_mb: number;
   gpus?: number;
+  qos?: string; // 会话绑定的 QOS
   created_at: string;
   last_active_at?: string;
   idle_minutes?: number;
@@ -189,6 +193,7 @@ export interface ContainerLaunchRequest {
   memory_mb?: number;
   gpus?: number; // GPU 数量（0=CPU, 1=1 GPU）
   time_limit_min?: number; // 会话时长分钟（1.4；默认 120，上限 720）
+  qos?: string; // 用户指定的 Slurm QOS
 }
 export interface ContainerLaunchResponse {
   container_id: string;
@@ -340,10 +345,92 @@ export interface Reservation {
 }
 export interface QOSInfo {
   name: string;
+  description?: string;
   priority?: string;
   grp_tres?: string;
+  grpTRES?: string;
   max_tres?: string;
+  maxTRES?: string;
+  max_tres_per_user?: string;
+  maxTRESPerUser?: string;
+  max_jobs?: string;
+  maxJobs?: string;
+  max_jobs_per_user?: string;
+  maxJobsPerUser?: string;
+  max_submit_jobs_per_user?: string;
+  maxSubmitJobsPerUser?: string;
   max_wall?: string;
+  maxWall?: string;
+  max_wall_duration?: string;
+  maxWallDuration?: string;
+}
+
+export interface CreateQOSRequest {
+  name: string;
+  description?: string;
+  priority?: string;
+  grpTRES?: string;
+  grp_tres?: string;
+  maxTRESPerUser?: string;
+  max_tres_per_user?: string;
+  maxJobsPerUser?: string;
+  max_jobs_per_user?: string;
+  maxSubmitJobsPerUser?: string;
+  max_submit_jobs_per_user?: string;
+  maxWallDuration?: string;
+  max_wall_duration?: string;
+}
+
+export interface UpdateQOSRequest {
+  description?: string;
+  priority?: string;
+  grpTRES?: string;
+  grp_tres?: string;
+  maxTRESPerUser?: string;
+  max_tres_per_user?: string;
+  maxJobsPerUser?: string;
+  max_jobs_per_user?: string;
+  maxSubmitJobsPerUser?: string;
+  max_submit_jobs_per_user?: string;
+  maxWallDuration?: string;
+  max_wall_duration?: string;
+}
+
+export interface UserQOSInfo {
+  username?: string;
+  clusterUser?: string;
+  account?: string;
+  tenantSlug?: string;
+  defaultQos: string;
+  defaultQOS?: string;
+  allowedQos: string[];
+  allowedQOS?: string[];
+  qos?: {
+    username?: string;
+    clusterUser?: string;
+    account?: string;
+    tenantSlug?: string;
+    defaultQos?: string;
+    defaultQOS?: string;
+    allowedQos?: string[];
+    allowedQOS?: string[];
+  };
+}
+
+export interface UserQOSUpdates {
+  defaultQos?: string;
+  defaultQOS?: string;
+  allowedQos?: string[];
+  allowedQOS?: string[];
+}
+export type SetUserQOSRequest = UserQOSUpdates;
+
+export interface AvailableQOSResponse {
+  defaultQos: string;
+  defaultQOS?: string;
+  allowedQos: QOSInfo[];
+  allowedQOS?: QOSInfo[];
+  availableQos?: QOSInfo[];
 }
 // 分区管理（scontrol show/update partition 解析视图；空串=未设置/不变更）
 export interface PartitionDetail {
@@ -597,16 +684,46 @@ export const slurm = {
   deleteReservation: (name: string) =>
     apiFetch<{ message: string }>(`/admin/reservations/${encodeURIComponent(name)}`, { method: "DELETE" }),
   listQOS: () => apiFetch<{ qos: QOSInfo[] }>("/admin/qos"),
-  createQOS: (name: string, grpTRES?: string) =>
-    apiFetch<{ qos: QOSInfo }>("/admin/qos", {
+  getQOS: (name: string) => apiFetch<{ qos: QOSInfo }>(`/admin/qos/${encodeURIComponent(name)}`),
+  createQOS: (reqOrName: CreateQOSRequest | string, grpTRES?: string) => {
+    const body = typeof reqOrName === "string" ? { name: reqOrName, grpTRES } : reqOrName;
+    return apiFetch<{ qos: QOSInfo }>("/admin/qos", {
       method: "POST",
-      body: JSON.stringify({ name, grpTRES }),
+      body: JSON.stringify(body),
+    });
+  },
+  updateQOS: (name: string, payload: UpdateQOSRequest) =>
+    apiFetch<{ message: string }>(`/admin/qos/${encodeURIComponent(name)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
     }),
+  deleteQOS: (name: string) =>
+    apiFetch<{ message: string }>(`/admin/qos/${encodeURIComponent(name)}`, { method: "DELETE" }),
   setTenantQOS: (slug: string, name: string) =>
     apiFetch<{ message: string }>(`/admin/tenants/${encodeURIComponent(slug)}/qos`, {
       method: "PATCH",
       body: JSON.stringify({ name }),
     }),
+  getUserQOS: (username: string) =>
+    apiFetch<UserQOSInfo>(`/admin/users/${encodeURIComponent(username)}/qos`),
+  setUserQOS: (username: string, payload: UserQOSUpdates) =>
+    apiFetch<{ message: string; username?: string; defaultQos: string; allowedQos: string[] }>(
+      `/admin/users/${encodeURIComponent(username)}/qos`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      },
+    ),
+  setTenantUserQOS: (username: string, payload: UserQOSUpdates) =>
+    apiFetch<{ message: string; username?: string; defaultQos: string; allowedQos: string[] }>(
+      `/tenants/me/users/${encodeURIComponent(username)}/qos`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      },
+    ),
+  getAvailableQOS: () =>
+    apiFetch<AvailableQOSResponse>("/slurm/qos/available"),
   // 分区管理（partitions:manage；编辑弹层当前值 + 属性修改，留空字段不变更）
   getPartition: (name: string) =>
     apiFetch<{ partition: PartitionDetail }>(`/admin/partitions/${encodeURIComponent(name)}`),

@@ -8,10 +8,12 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"ails-hpc/pkg/auth"
+	"ails-hpc/pkg/services/admin"
 	"ails-hpc/pkg/services/billing"
 	"ails-hpc/pkg/services/cluster"
 	"ails-hpc/pkg/services/common"
@@ -715,4 +717,306 @@ func TestRouter_AuthMe(t *testing.T) {
 	if !permSet[auth.PermRolesManage] || permSet[auth.PermJobsSubmit] {
 		t.Errorf("admin /auth/me perms wrong: %v", resp.User.Permissions)
 	}
+}
+
+// TestRouter_QOS_Endpoints_And_RBAC 验证 QOS 完整 CRUD 端点及 PermQosManage RBAC 拦截。
+func TestRouter_QOS_Endpoints_And_RBAC(t *testing.T) {
+	r, _, adminSvc := setupRBACStack(t)
+
+	// 配置 Mock Runner 输出
+	adminSvc.SetClusterRunner(func(args ...string) ([]byte, error) {
+		cmd := strings.Join(args, " ")
+		if strings.Contains(cmd, "show qos") {
+			return []byte("normal|0||||||\ngpu-vip|1000|gres/gpu=4,cpu=32|gres/gpu=1,cpu=8|02:00:00|1|5|\n"), nil
+		}
+		if strings.Contains(cmd, "modify qos nonexistent") || strings.Contains(cmd, "delete qos nonexistent") {
+			return []byte("sacctmgr: error: Unknown QOS: nonexistent\n"), nil
+		}
+		return []byte(""), nil
+	})
+
+	// 签发测试令牌
+	adminTok := loginViaAPI(t, r, "padmin", "platform123")  // 平台管理员，持 PermQosManage
+	memberTok := loginViaAPI(t, r, "alice", "alice12345")   // 普通成员，无 PermQosManage
+	tadminTok := loginViaAPI(t, r, "tadmin", "tenant12345") // 租户管理员，无平台 PermQosManage
+
+	// 1. GET /api/v1/admin/qos
+	t.Run("GET /admin/qos", func(t *testing.T) {
+		// 未认证 -> 401
+		code, _ := doAuth(r, http.MethodGet, "/api/v1/admin/qos", "", "")
+		if code != http.StatusUnauthorized {
+			t.Errorf("unauth: want 401 got %d", code)
+		}
+
+		// 普通成员 -> 403
+		code, _ = doAuth(r, http.MethodGet, "/api/v1/admin/qos", "", memberTok)
+		if code != http.StatusForbidden {
+			t.Errorf("member: want 403 got %d", code)
+		}
+
+		// 平台管理员 -> 200 OK + QOS 列表
+		code, body := doAuth(r, http.MethodGet, "/api/v1/admin/qos", "", adminTok)
+		if code != http.StatusOK {
+			t.Fatalf("admin: want 200 got %d (body: %s)", code, body)
+		}
+		var resp struct {
+			QOS []admin.QOS `json:"qos"`
+		}
+		if err := json.Unmarshal([]byte(body), &resp); err != nil || len(resp.QOS) != 2 {
+			t.Errorf("invalid list response: %s", body)
+		}
+	})
+
+	// 2. GET /api/v1/admin/qos/:name
+	t.Run("GET /admin/qos/:name", func(t *testing.T) {
+		// 未认证 -> 401
+		code, _ := doAuth(r, http.MethodGet, "/api/v1/admin/qos/gpu-vip", "", "")
+		if code != http.StatusUnauthorized {
+			t.Errorf("unauth: want 401 got %d", code)
+		}
+
+		// 普通成员 -> 403
+		code, _ = doAuth(r, http.MethodGet, "/api/v1/admin/qos/gpu-vip", "", memberTok)
+		if code != http.StatusForbidden {
+			t.Errorf("member: want 403 got %d", code)
+		}
+
+		// 平台管理员查询存在 -> 200 OK
+		code, body := doAuth(r, http.MethodGet, "/api/v1/admin/qos/gpu-vip", "", adminTok)
+		if code != http.StatusOK {
+			t.Fatalf("admin get: want 200 got %d (body: %s)", code, body)
+		}
+		var resp struct {
+			QOS admin.QOS `json:"qos"`
+		}
+		if err := json.Unmarshal([]byte(body), &resp); err != nil || resp.QOS.Name != "gpu-vip" {
+			t.Errorf("invalid get response: %s", body)
+		}
+
+		// 查询不存在 -> 404
+		code, _ = doAuth(r, http.MethodGet, "/api/v1/admin/qos/nonexistent", "", adminTok)
+		if code != http.StatusNotFound {
+			t.Errorf("admin get nonexistent: want 404 got %d", code)
+		}
+	})
+
+	// 3. POST /api/v1/admin/qos
+	t.Run("POST /admin/qos", func(t *testing.T) {
+		payload := `{
+			"name": "ai-train",
+			"priority": "500",
+			"grp_tres": "gres/gpu=8",
+			"max_tres_pu": "gres/gpu=2",
+			"max_jobs_pu": "2",
+			"max_wall": "12:00:00"
+		}`
+
+		// 租户管理员 -> 403
+		code, _ := doAuth(r, http.MethodPost, "/api/v1/admin/qos", payload, tadminTok)
+		if code != http.StatusForbidden {
+			t.Errorf("tadmin create: want 403 got %d", code)
+		}
+
+		// 平台管理员合法创建 -> 200 OK
+		code, body := doAuth(r, http.MethodPost, "/api/v1/admin/qos", payload, adminTok)
+		if code != http.StatusOK {
+			t.Fatalf("admin create: want 200 got %d (body: %s)", code, body)
+		}
+
+		// 平台管理员非法参数创建（名称包含特殊字符）-> 400 Bad Request
+		badPayload := `{"name": "bad;name!"}`
+		code, _ = doAuth(r, http.MethodPost, "/api/v1/admin/qos", badPayload, adminTok)
+		if code != http.StatusBadRequest {
+			t.Errorf("admin create invalid: want 400 got %d", code)
+		}
+	})
+
+	// 4. PATCH /api/v1/admin/qos/:name
+	t.Run("PATCH /admin/qos/:name", func(t *testing.T) {
+		patchPayload := `{"priority": "800", "max_jobs_pu": "4"}`
+
+		// 普通成员 -> 403
+		code, _ := doAuth(r, http.MethodPatch, "/api/v1/admin/qos/ai-train", patchPayload, memberTok)
+		if code != http.StatusForbidden {
+			t.Errorf("member patch: want 403 got %d", code)
+		}
+
+		// 平台管理员合法更新 -> 200 OK
+		code, body := doAuth(r, http.MethodPatch, "/api/v1/admin/qos/ai-train", patchPayload, adminTok)
+		if code != http.StatusOK {
+			t.Fatalf("admin patch: want 200 got %d (body: %s)", code, body)
+		}
+
+		// 空修改体 -> 400 Bad Request
+		code, _ = doAuth(r, http.MethodPatch, "/api/v1/admin/qos/ai-train", `{}`, adminTok)
+		if code != http.StatusBadRequest {
+			t.Errorf("admin empty patch: want 400 got %d", code)
+		}
+
+		// 修改不存在的 QOS -> 404 Not Found
+		code, _ = doAuth(r, http.MethodPatch, "/api/v1/admin/qos/nonexistent", patchPayload, adminTok)
+		if code != http.StatusNotFound {
+			t.Errorf("admin patch nonexistent: want 404 got %d", code)
+		}
+	})
+
+	// 5. DELETE /api/v1/admin/qos/:name
+	t.Run("DELETE /admin/qos/:name", func(t *testing.T) {
+		// 普通成员 -> 403
+		code, _ := doAuth(r, http.MethodDelete, "/api/v1/admin/qos/ai-train", "", memberTok)
+		if code != http.StatusForbidden {
+			t.Errorf("member delete: want 403 got %d", code)
+		}
+
+		// 平台管理员删除合法 QOS -> 200 OK
+		code, body := doAuth(r, http.MethodDelete, "/api/v1/admin/qos/ai-train", "", adminTok)
+		if code != http.StatusOK {
+			t.Fatalf("admin delete: want 200 got %d (body: %s)", code, body)
+		}
+
+		// 删除不存在的 QOS -> 404 Not Found
+		code, _ = doAuth(r, http.MethodDelete, "/api/v1/admin/qos/nonexistent", "", adminTok)
+		if code != http.StatusNotFound {
+			t.Errorf("admin delete nonexistent: want 404 got %d", code)
+		}
+
+		// 非法名称删除 -> 400 Bad Request
+		code, _ = doAuth(r, http.MethodDelete, "/api/v1/admin/qos/invalid;name", "", adminTok)
+		if code != http.StatusBadRequest {
+			t.Errorf("admin delete invalid name: want 400 got %d", code)
+		}
+	})
+}
+
+// TestRouter_UserQOS_Endpoints_And_Scoping 测试用户级 QOS 端点、RBAC 鉴权与多租户作用域隔离
+func TestRouter_UserQOS_Endpoints_And_Scoping(t *testing.T) {
+	r, _, adminSvc := setupRBACStack(t)
+
+	adminSvc.SetClusterRunner(func(args ...string) ([]byte, error) {
+		cmd := strings.Join(args, " ")
+		if strings.Contains(cmd, "show assoc") {
+			return []byte("alice|hpc-lab|normal,gpu-vip|normal\n"), nil
+		}
+		if strings.Contains(cmd, "show qos") {
+			return []byte("Name|Priority|GrpTRES|MaxTRESPU|MaxWall|MaxJobsPU|MaxSubmitPU|Description\n" +
+				"normal|0||||||Standard default\n" +
+				"gpu-vip|1000|gres/gpu=4|gres/gpu=1|02:00:00|1|5|VIP GPU\n"), nil
+		}
+		return []byte(""), nil
+	})
+
+	adminTok := loginViaAPI(t, r, "padmin", "platform123")
+	tadminTok := loginViaAPI(t, r, "tadmin", "tenant12345")
+	memberTok := loginViaAPI(t, r, "alice", "alice12345")
+
+	// 1. GET /api/v1/slurm/qos/available (All authenticated roles)
+	t.Run("GET /slurm/qos/available", func(t *testing.T) {
+		// Unauthenticated -> 401
+		code, _ := doAuth(r, http.MethodGet, "/api/v1/slurm/qos/available", "", "")
+		if code != http.StatusUnauthorized {
+			t.Errorf("unauth want 401 got %d", code)
+		}
+
+		// Member -> 200
+		code, body := doAuth(r, http.MethodGet, "/api/v1/slurm/qos/available", "", memberTok)
+		if code != http.StatusOK {
+			t.Fatalf("member available qos: want 200 got %d (%s)", code, body)
+		}
+		var resp admin.AvailableQOSResponse
+		if err := json.Unmarshal([]byte(body), &resp); err != nil || len(resp.AllowedQOS) == 0 {
+			t.Errorf("invalid available qos response: %s", body)
+		}
+
+		// Tenant admin -> 200
+		code, _ = doAuth(r, http.MethodGet, "/api/v1/slurm/qos/available", "", tadminTok)
+		if code != http.StatusOK {
+			t.Errorf("tadmin available qos: want 200 got %d", code)
+		}
+	})
+
+	// 2. GET /api/v1/admin/users/:username/qos (Platform Admin only)
+	t.Run("GET /admin/users/:username/qos", func(t *testing.T) {
+		// Member -> 403
+		code, _ := doAuth(r, http.MethodGet, "/api/v1/admin/users/alice/qos", "", memberTok)
+		if code != http.StatusForbidden {
+			t.Errorf("member get user qos: want 403 got %d", code)
+		}
+
+		// Tenant Admin -> 403
+		code, _ = doAuth(r, http.MethodGet, "/api/v1/admin/users/alice/qos", "", tadminTok)
+		if code != http.StatusForbidden {
+			t.Errorf("tenant admin get platform user qos: want 403 got %d", code)
+		}
+
+		// Platform Admin -> 200
+		code, body := doAuth(r, http.MethodGet, "/api/v1/admin/users/alice/qos", "", adminTok)
+		if code != http.StatusOK {
+			t.Fatalf("admin get user qos: want 200 got %d (%s)", code, body)
+		}
+
+		// Nonexistent user -> 404
+		code, _ = doAuth(r, http.MethodGet, "/api/v1/admin/users/nonexistent/qos", "", adminTok)
+		if code != http.StatusNotFound {
+			t.Errorf("admin get nonexistent user qos: want 404 got %d", code)
+		}
+	})
+
+	// 3. PATCH /api/v1/admin/users/:username/qos (Platform Admin only)
+	t.Run("PATCH /admin/users/:username/qos", func(t *testing.T) {
+		payload := `{"defaultQOS":"gpu-vip","allowedQOS":["normal","gpu-vip"]}`
+
+		// Member -> 403
+		code, _ := doAuth(r, http.MethodPatch, "/api/v1/admin/users/alice/qos", payload, memberTok)
+		if code != http.StatusForbidden {
+			t.Errorf("member patch user qos: want 403 got %d", code)
+		}
+
+		// Tenant Admin -> 403
+		code, _ = doAuth(r, http.MethodPatch, "/api/v1/admin/users/alice/qos", payload, tadminTok)
+		if code != http.StatusForbidden {
+			t.Errorf("tenant admin patch platform user qos: want 403 got %d", code)
+		}
+
+		// Platform Admin -> 200
+		code, body := doAuth(r, http.MethodPatch, "/api/v1/admin/users/alice/qos", payload, adminTok)
+		if code != http.StatusOK {
+			t.Fatalf("admin patch user qos: want 200 got %d (%s)", code, body)
+		}
+
+		// Invalid payload (default not in allowed) -> 400
+		badPayload := `{"defaultQOS":"vip","allowedQOS":["normal"]}`
+		code, _ = doAuth(r, http.MethodPatch, "/api/v1/admin/users/alice/qos", badPayload, adminTok)
+		if code != http.StatusBadRequest {
+			t.Errorf("admin patch bad qos: want 400 got %d", code)
+		}
+	})
+
+	// 4. PATCH /api/v1/tenants/me/users/:username/qos (Tenant Admin Scoping)
+	t.Run("TenantAdmin_Scoping", func(t *testing.T) {
+		payload := `{"defaultQOS":"gpu-vip","allowedQOS":["normal","gpu-vip"]}`
+
+		// Member -> 403
+		code, _ := doAuth(r, http.MethodPatch, "/api/v1/tenants/me/users/alice/qos", payload, memberTok)
+		if code != http.StatusForbidden {
+			t.Errorf("member tenant patch: want 403 got %d", code)
+		}
+
+		// Tenant Admin own tenant user (alice in hpc-lab) -> 200
+		code, body := doAuth(r, http.MethodPatch, "/api/v1/tenants/me/users/alice/qos", payload, tadminTok)
+		if code != http.StatusOK {
+			t.Fatalf("tadmin update own user: want 200 got %d (%s)", code, body)
+		}
+
+		// Tenant Admin cross-tenant user (biomember in bio-lab) -> 404 (Anti-IDOR)
+		code, _ = doAuth(r, http.MethodPatch, "/api/v1/tenants/me/users/biomember/qos", payload, tadminTok)
+		if code != http.StatusNotFound {
+			t.Errorf("tadmin update cross tenant user: want 404 got %d", code)
+		}
+
+		// Tenant Admin update system admin (padmin) -> 404 (Anti-Privilege Escalation)
+		code, _ = doAuth(r, http.MethodPatch, "/api/v1/tenants/me/users/padmin/qos", payload, tadminTok)
+		if code != http.StatusNotFound {
+			t.Errorf("tadmin update padmin: want 404 got %d", code)
+		}
+	})
 }

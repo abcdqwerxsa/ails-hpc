@@ -1,6 +1,14 @@
 package containers
 
-import "time"
+import (
+	"errors"
+	"time"
+)
+
+var (
+	// ErrInvalidQOS QOS 名称白名单校验失败
+	ErrInvalidQOS = errors.New("invalid qos name: want ^[A-Za-z][A-Za-z0-9_-]{0,31}$")
+)
 
 // ContainerInstance 表示一个作为 Slurm 作业运行的交互式开发会话
 // （Jupyter Lab / code-server）。"Container" 为历史命名，实际是 Slurm 交互会话。
@@ -17,6 +25,7 @@ type ContainerInstance struct {
 	CPUs         int       `json:"cpus"`
 	MemoryMB     int       `json:"memory_mb"`
 	GPUs         int       `json:"gpus"`
+	QOS          string    `json:"qos,omitempty"` // 会话绑定的 QOS
 	CreatedAt    time.Time `json:"created_at"`
 	LastActiveAt time.Time `json:"last_active_at,omitempty"`
 	IdleMinutes  int       `json:"idle_minutes"`
@@ -37,6 +46,7 @@ type SessionMeta struct {
 	GPUs      int    `json:"gpus,omitempty"`
 	Nodes     int    `json:"nodes"`
 	Owner     string `json:"owner"` // 归属隔离：提交者 clusterUser（unix 身份，launch 时写入）
+	QOS       string `json:"qos,omitempty"`
 }
 
 // ContainerLaunchRequest defines the request body for launching an interactive session
@@ -48,6 +58,7 @@ type ContainerLaunchRequest struct {
 	MemoryMB     int    `json:"memory_mb"`                   // 默认 4096
 	GPUs         int    `json:"gpus"`                        // GPU 数量（0=CPU standard分区, >0=GPU performance分区）
 	TimeLimitMin int    `json:"time_limit_min"`              // 会话时长（分钟，1.4；0=默认 2h，上限 12h）
+	QOS          string `json:"qos,omitempty"`               // 用户指定的 Slurm QOS (可选)
 }
 
 // ContainerLaunchResponse defines the response payload for a launched session

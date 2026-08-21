@@ -1,11 +1,53 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
-import { slurm, type JobDetail, type JobSummary, type Partition } from '../services/slurm';
+import { slurm, type JobDetail, type JobSummary, type Partition, type QOSInfo } from '../services/slurm';
 import { can } from '../services/auth';
 import { Select } from '../components/select';
 import { Field, MiniBtn, NeuSegmented, Notice, StatusBadge, th, td } from '../components/panel_ui';
 
 export const Route = createFileRoute('/jobs')({ component: JobsPage });
+
+export function QOSBadge({ qos }: { qos?: string }) {
+  const name = (qos || 'normal').toLowerCase();
+  let bg = 'rgba(6, 182, 212, 0.12)';
+  let color = 'var(--accent-cyan,#06b6d4)';
+  let border = 'rgba(6, 182, 212, 0.25)';
+
+  if (name.includes('vip') || name.includes('high') || name.includes('prio')) {
+    bg = 'rgba(245, 158, 11, 0.15)';
+    color = '#f59e0b';
+    border = 'rgba(245, 158, 11, 0.3)';
+  } else if (name.includes('debug') || name.includes('test')) {
+    bg = 'rgba(16, 185, 129, 0.15)';
+    color = '#34d399';
+    border = 'rgba(16, 185, 129, 0.3)';
+  } else if (name.includes('gpu')) {
+    bg = 'rgba(168, 85, 247, 0.15)';
+    color = '#c084fc';
+    border = 'rgba(168, 85, 247, 0.3)';
+  }
+
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '0.3rem',
+        padding: '0.15rem 0.5rem',
+        borderRadius: 6,
+        fontSize: '0.75rem',
+        fontFamily: "'JetBrains Mono', monospace",
+        fontWeight: 700,
+        background: bg,
+        color,
+        border: `1px solid ${border}`,
+      }}
+    >
+      <span style={{ width: 6, height: 6, borderRadius: '50%', background: color }} />
+      {qos || 'normal'}
+    </span>
+  );
+}
 
 const emptyForm = {
   name: '',
@@ -16,17 +58,19 @@ const emptyForm = {
   tasks: '1',
   time_limit: '60',
   script: '#!/bin/bash\nsleep 30\n',
+  qos: 'normal',
 };
 
 // 常用模板（v3-P1）：一键填充表单后按需修改。
 const TEMPLATES: { label: string; hint: string; form: typeof emptyForm }[] = [
   {
     label: 'CPU 小任务',
-    hint: 'standard（E 核）· 30 分钟 · 不申请 GPU',
+    hint: 'standard（E 核）· 30 分钟 · 不申请 GPU · normal QOS',
     form: {
       ...emptyForm,
       name: 'cpu-demo',
       time_limit: '30',
+      qos: 'normal',
       script: '#!/bin/bash\n# CPU 小任务模板：E 核分区，适合编译 / 数据处理 / 轻量计算\nsrun hostname\n# python preprocess.py\n',
     },
   },
@@ -39,6 +83,7 @@ const TEMPLATES: { label: string; hint: string; form: typeof emptyForm }[] = [
       partition: 'performance',
       gpus: '1',
       time_limit: '240',
+      qos: 'normal',
       script: '#!/bin/bash\n# 单卡 PyTorch 训练模板：P 核分区 + 1 GPU\n# 数据与代码建议放 /shared（节点间可见）\ncd /shared/$USER\npython -u train.py --epochs 10 --batch-size 32\n',
     },
   },
@@ -49,6 +94,7 @@ const TEMPLATES: { label: string; hint: string; form: typeof emptyForm }[] = [
       ...emptyForm,
       name: 'batch-sweep',
       time_limit: '1440',
+      qos: 'normal',
       script: '#!/bin/bash\n# 长时 CPU 批处理模板：参数扫描 / 批量后处理\nfor i in $(seq 1 100); do\n  srun -n1 ./worker.sh $i &\ndone\nwait\n',
     },
   },
@@ -76,16 +122,38 @@ function JobsPage() {
   const [detailErr, setDetailErr] = useState('');
   const [detailLoading, setDetailLoading] = useState(false);
   const [partitions, setPartitions] = useState<Partition[]>([]);
+  const [availableQosList, setAvailableQosList] = useState<QOSInfo[]>([]);
+  const [defaultQos, setDefaultQos] = useState<string>('normal');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [arraySpec, setArraySpec] = useState('');
   const [dependency, setDependency] = useState('');
 
-  // 分区列表
+  // 分区列表与可用 QOS 发现
   useEffect(() => {
     slurm
       .getPartitions()
       .then((r) => setPartitions(r.partitions || []))
       .catch(() => {});
+
+    slurm
+      .getAvailableQOS()
+      .then((r) => {
+        const list =
+          r.allowedQos && r.allowedQos.length > 0
+            ? r.allowedQos
+            : r.allowedQOS && r.allowedQOS.length > 0
+            ? r.allowedQOS
+            : r.availableQos && r.availableQos.length > 0
+            ? r.availableQos
+            : [{ name: 'normal', description: '标准调度策略' }];
+        setAvailableQosList(list);
+        const def = r.defaultQos || r.defaultQOS || list[0]?.name || 'normal';
+        setDefaultQos(def);
+        setForm((f) => ({ ...f, qos: f.qos || def }));
+      })
+      .catch(() => {
+        setAvailableQosList([{ name: 'normal', description: '标准调度策略' }]);
+      });
   }, []);
 
   const refresh = useCallback(async () => {
@@ -127,9 +195,10 @@ function JobsPage() {
         tasks: Number(form.tasks) || 1,
         time_limit: String(form.time_limit || '60'),
         script: form.script,
+        qos: form.qos?.trim() || undefined,
       });
-      setInfo(`已提交：作业 #${r.job_id}`);
-      setForm(emptyForm);
+      setInfo(`已提交：作业 #${r.job_id}${form.qos ? ` (QOS: ${form.qos})` : ''}`);
+      setForm({ ...emptyForm, qos: defaultQos });
       await refresh();
     } catch (err: any) {
       setError(`提交失败：${err?.message || err}`);
@@ -222,6 +291,16 @@ function JobsPage() {
                 }))}
               />
             </Field>
+            <Field label="QOS 策略">
+              <Select
+                value={form.qos}
+                onChange={(v) => setForm({ ...form, qos: v })}
+                options={availableQosList.map((q) => ({
+                  value: q.name,
+                  label: `${q.name}${q.description ? ` (${q.description})` : ''}${q.priority ? ` · 优先级 ${q.priority}` : ''}`,
+                }))}
+              />
+            </Field>
             <Field label="节点数"><input className="form-control" type="number" min="1" value={form.nodes} onChange={field('nodes')} /></Field>
             <Field label="任务数"><input className="form-control" type="number" min="1" value={form.tasks} onChange={field('tasks')} /></Field>
             <Field label="时限(分钟)"><input className="form-control" value={form.time_limit} onChange={field('time_limit')} /></Field>
@@ -253,6 +332,49 @@ function JobsPage() {
               />
             </Field>
           </div>
+
+          {/* QOS 配额提示卡 */}
+          {(() => {
+            const curQos = availableQosList.find((q) => q.name === form.qos);
+            if (!curQos) return null;
+            return (
+              <div
+                style={{
+                  background: 'var(--bg-card-hover, rgba(255,255,255,0.03))',
+                  border: '1px solid var(--border-color,#2a2f3a)',
+                  borderRadius: 8,
+                  padding: '0.65rem 0.9rem',
+                  fontSize: '0.78rem',
+                  display: 'flex',
+                  gap: '1.1rem',
+                  flexWrap: 'wrap',
+                  alignItems: 'center',
+                  color: 'var(--text-muted,#94a3b8)',
+                }}
+              >
+                <div style={{ color: 'var(--text-main,#f1f5f9)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                  <span>QOS 配额策略：</span>
+                  <QOSBadge qos={curQos.name} />
+                </div>
+                {curQos.priority && (
+                  <div>🚀 优先级: <span style={{ color: 'var(--accent-cyan,#06b6d4)', fontWeight: 700 }}>{curQos.priority}</span></div>
+                )}
+                {(curQos.max_wall || curQos.max_wall_duration) && (
+                  <div>⏱️ 限时: <span style={{ color: 'var(--text-main,#f1f5f9)', fontWeight: 600 }}>{curQos.max_wall_duration || curQos.max_wall}</span></div>
+                )}
+                {(curQos.max_tres_per_user || curQos.max_tres) && (
+                  <div>⚡ 单人上限: <span style={{ color: 'var(--text-main,#f1f5f9)', fontWeight: 600 }}>{curQos.max_tres_per_user || curQos.max_tres}</span></div>
+                )}
+                {(curQos.max_jobs_per_user || curQos.max_jobs) && (
+                  <div>📊 并发作业: <span style={{ color: '#f59e0b', fontWeight: 600 }}>{curQos.max_jobs_per_user || curQos.max_jobs}</span></div>
+                )}
+                {curQos.description && (
+                  <div style={{ color: 'var(--text-dim,#64748b)', fontStyle: 'italic' }}>({curQos.description})</div>
+                )}
+              </div>
+            );
+          })()}
+
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <button type="button" className="neu-btn" onClick={() => setShowAdvanced(!showAdvanced)}>
               {showAdvanced ? '收起高级选项' : '高级选项（数组/依赖）'}
@@ -306,6 +428,7 @@ function JobsPage() {
                 <th style={th}>名称</th>
                 <th style={th}>用户</th>
                 <th style={th}>分区</th>
+                <th style={th}>QOS</th>
                 <th style={th}>状态</th>
                 <th style={th}>节点</th>
                 <th style={th}>时限</th>
@@ -320,6 +443,9 @@ function JobsPage() {
                   <td style={{ ...td, fontWeight: 600 }}>{j.name}</td>
                   <td style={td}>{j.owner || '-'}</td>
                   <td style={td}>{j.partition}</td>
+                  <td style={td}>
+                    <QOSBadge qos={j.qos || 'normal'} />
+                  </td>
                   <td style={td}>
                     <StatusBadge status={j.job_state} />
                   </td>
@@ -369,6 +495,7 @@ function JobsPage() {
                   <DetailKV k="属主" v={detail.owner} />
                   <DetailKV k="账户" v={detail.account} />
                   <DetailKV k="分区" v={detail.partition} />
+                  <DetailKV k="QOS 策略" v={detail.qos || 'normal'} />
                   <DetailKV k="耗时" v={detail.elapsed_sec != null ? `${Math.floor(detail.elapsed_sec / 60)}m${detail.elapsed_sec % 60}s` : undefined} />
                   <DetailKV k="退出码" v={detail.exit_code} />
                   <DetailKV k="提交" v={detail.submit} />

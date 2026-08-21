@@ -3,13 +3,16 @@ package admin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
+	"ails-hpc/pkg/auth"
 	"ails-hpc/pkg/slurmrest"
+	"ails-hpc/pkg/store"
 )
 
 // 预约与 QOS 管理（roadmap 4.2）：admin 直通 scontrol/sacctmgr。
@@ -38,14 +41,276 @@ type Reservation struct {
 	State     string `json:"state,omitempty"` // ACTIVE/INACTIVE
 }
 
-// QOS 是一条 Slurm QOS（sacctmgr show qos -P 解析）。
+// ErrQOSNotFound QOS 不存在。
+var ErrQOSNotFound = errors.New("admin: qos not found")
+
+// QOS 是一条 Slurm QOS 完整属性对象（sacctmgr show qos -nP 解析）。
 type QOS struct {
-	Name     string `json:"name"`
-	Priority string `json:"priority,omitempty"`
-	GrpTRES  string `json:"grp_tres,omitempty"`
-	MaxTRES  string `json:"max_tres,omitempty"`
-	MaxWall  string `json:"max_wall,omitempty"`
-	MaxJobs  string `json:"max_jobs,omitempty"`
+	Name                 string `json:"name"`
+	Description          string `json:"description,omitempty"`
+	Priority             string `json:"priority,omitempty"`
+	GrpTRES              string `json:"grp_tres,omitempty"`
+	MaxTRES              string `json:"max_tres,omitempty"`
+	MaxTRESPerUser       string `json:"max_tres_per_user,omitempty"`
+	MaxJobs              string `json:"max_jobs,omitempty"`
+	MaxJobsPerUser       string `json:"max_jobs_per_user,omitempty"`
+	MaxSubmitJobsPerUser string `json:"max_submit_jobs_per_user,omitempty"`
+	MaxWall              string `json:"max_wall,omitempty"`
+	MaxWallDuration      string `json:"max_wall_duration,omitempty"`
+}
+
+// QOSUpdates 是 QOS 可设置与修改的字段集合（空串表示不设置/不变更）。
+type QOSUpdates struct {
+	Description          string `json:"description,omitempty"`
+	Priority             string `json:"priority,omitempty"`
+	GrpTRES              string `json:"grpTRES,omitempty"`
+	MaxTRES              string `json:"maxTRES,omitempty"`
+	MaxTRESPerUser       string `json:"maxTRESPerUser,omitempty"`
+	MaxJobs              string `json:"maxJobs,omitempty"`
+	MaxJobsPerUser       string `json:"maxJobsPerUser,omitempty"`
+	MaxSubmitJobsPerUser string `json:"maxSubmitJobsPerUser,omitempty"`
+	MaxWall              string `json:"maxWall,omitempty"`
+	MaxWallDuration      string `json:"maxWallDuration,omitempty"`
+}
+
+// QOSParams 是 QOSUpdates 的别名。
+type QOSParams = QOSUpdates
+
+// UnmarshalJSON 兼容 camelCase、snake_case 及缩写别名。
+func (u *QOSUpdates) UnmarshalJSON(data []byte) error {
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	getString := func(keys ...string) string {
+		for _, k := range keys {
+			if v, ok := raw[k]; ok && v != nil {
+				if s, ok := v.(string); ok {
+					return strings.TrimSpace(s)
+				}
+				return fmt.Sprintf("%v", v)
+			}
+		}
+		return ""
+	}
+	u.Description = getString("description", "Description")
+	u.Priority = getString("priority", "Priority")
+	u.GrpTRES = getString("grpTRES", "grp_tres", "GrpTRES")
+	u.MaxTRES = getString("maxTRES", "max_tres", "MaxTRES")
+	u.MaxTRESPerUser = getString("maxTRESPerUser", "max_tres_per_user", "max_tres_pu", "maxTRESPU", "MaxTRESPerUser")
+	if u.MaxTRESPerUser == "" {
+		u.MaxTRESPerUser = u.MaxTRES
+	}
+	u.MaxJobs = getString("maxJobs", "max_jobs", "MaxJobs")
+	u.MaxJobsPerUser = getString("maxJobsPerUser", "max_jobs_per_user", "max_jobs_pu", "maxJobsPU", "MaxJobsPerUser")
+	if u.MaxJobsPerUser == "" {
+		u.MaxJobsPerUser = u.MaxJobs
+	}
+	u.MaxSubmitJobsPerUser = getString("maxSubmitJobsPerUser", "max_submit_jobs_per_user", "max_submit_pu", "maxSubmitPU", "MaxSubmitJobsPerUser")
+	u.MaxWall = getString("maxWall", "max_wall", "MaxWall", "maxWallDuration", "max_wall_duration", "MaxWallDuration")
+	u.MaxWallDuration = u.MaxWall
+	return nil
+}
+
+// unixSafeRE 是 unix 用户名/Slurm 账号的安全字符集：小写字母或下划线开头，仅 [a-z0-9_-]，至多 32 字符。
+var unixSafeRE = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
+
+// UserQOSInfo 表示用户在 Slurm 中的 QOS 关联详情（默认 QOS 与可用 QOS 清单）。
+type UserQOSInfo struct {
+	Username    string   `json:"username"`
+	ClusterUser string   `json:"clusterUser"`
+	Account     string   `json:"account"`
+	TenantSlug  string   `json:"tenantSlug"`
+	DefaultQOS  string   `json:"defaultQos"`
+	AllowedQOS  []string `json:"allowedQos"`
+}
+
+// UserQOS 是 UserQOSInfo 的别名。
+type UserQOS = UserQOSInfo
+
+// UserQOSUpdates 包含修改用户 QOS 关联的字段。
+type UserQOSUpdates struct {
+	DefaultQOS string   `json:"defaultQos"`
+	AllowedQOS []string `json:"allowedQos"`
+}
+
+// UnmarshalJSON 兼容 camelCase、PascalCase、snake_case 及缩写别名。
+func (u *UserQOSUpdates) UnmarshalJSON(data []byte) error {
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	getString := func(keys ...string) string {
+		for _, k := range keys {
+			if v, ok := raw[k]; ok && v != nil {
+				if s, ok := v.(string); ok {
+					return strings.TrimSpace(s)
+				}
+				return fmt.Sprintf("%v", v)
+			}
+		}
+		return ""
+	}
+	u.DefaultQOS = getString("defaultQos", "defaultQOS", "default_qos", "defaultqos", "DefaultQOS", "DefaultQos")
+
+	getStringSlice := func(keys ...string) []string {
+		for _, k := range keys {
+			if v, ok := raw[k]; ok && v != nil {
+				if slice, ok := v.([]any); ok {
+					res := make([]string, 0, len(slice))
+					for _, item := range slice {
+						if itemStr, ok := item.(string); ok {
+							res = append(res, strings.TrimSpace(itemStr))
+						}
+					}
+					return res
+				}
+				if str, ok := v.(string); ok {
+					parts := strings.Split(str, ",")
+					res := make([]string, 0, len(parts))
+					for _, p := range parts {
+						if tr := strings.TrimSpace(p); tr != "" {
+							res = append(res, tr)
+						}
+					}
+					return res
+				}
+			}
+		}
+		return nil
+	}
+	u.AllowedQOS = getStringSlice("allowedQos", "allowedQOS", "allowed_qos", "allowedqos", "AllowedQOS", "AllowedQos")
+	return nil
+}
+
+// AvailableQOSResponse 包含当前用户可用的 QOS 完整属性对象列表与默认 QOS。
+type AvailableQOSResponse struct {
+	DefaultQOS   string `json:"defaultQos"`
+	AllowedQOS   []QOS  `json:"allowedQos"`
+	AvailableQOS []QOS  `json:"availableQos,omitempty"`
+}
+
+// ValidateUserQOSUpdates 校验更新载荷。
+func ValidateUserQOSUpdates(u *UserQOSUpdates) error {
+	u.DefaultQOS = strings.TrimSpace(u.DefaultQOS)
+	cleanAllowed := make([]string, 0, len(u.AllowedQOS))
+	seen := make(map[string]bool)
+	for _, q := range u.AllowedQOS {
+		trimmed := strings.TrimSpace(q)
+		if trimmed != "" && !seen[trimmed] {
+			seen[trimmed] = true
+			cleanAllowed = append(cleanAllowed, trimmed)
+		}
+	}
+	u.AllowedQOS = cleanAllowed
+
+	if u.DefaultQOS == "" && len(u.AllowedQOS) == 0 {
+		return errors.New("at least one of defaultQos or allowedQos must be provided")
+	}
+	if u.DefaultQOS != "" && u.DefaultQOS != "-1" && !qosNameRE.MatchString(u.DefaultQOS) {
+		return fmt.Errorf("invalid defaultQos %q", u.DefaultQOS)
+	}
+	for _, q := range u.AllowedQOS {
+		if q != "-1" && !qosNameRE.MatchString(q) {
+			return fmt.Errorf("invalid qos name %q", q)
+		}
+	}
+	if u.DefaultQOS != "" && len(u.AllowedQOS) > 0 {
+		found := false
+		for _, q := range u.AllowedQOS {
+			if q == u.DefaultQOS {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("defaultQos %q must be included in allowedQos", u.DefaultQOS)
+		}
+	}
+	return nil
+}
+
+// qosNameRE QOS 名称白名单：英文字母开头，允许字母、数字、下划线、中划线，长度 1-32。
+var qosNameRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,31}$`)
+
+// qosValueREs 逐字段安全白名单校验（防范 Shell 注入，严格遵从 Slurm 语法）：
+// - Description: 中英文、数字、常见安全符号（长度 1-128，禁止引号、反引号、$、分号、换行等）
+// - Priority: 整数 0 到 4294967295 或 -1
+// - GrpTRES: cpu=N, mem=NG, gres/gpu=N, gres/gpu:model=N 等逗号分隔格式，或 -1
+// - MaxTRESPerUser: 结构同 GrpTRES
+// - MaxJobsPerUser: 整数或 UNLIMITED 或 -1
+// - MaxSubmitJobsPerUser: 整数或 UNLIMITED 或 -1
+// - MaxWallDuration: 分钟数、MM:SS、HH:MM:SS、D-HH:MM:SS 或 UNLIMITED 或 -1
+var qosValueREs = map[string]*regexp.Regexp{
+	"Description":          regexp.MustCompile(`^[0-9A-Za-z\p{Han} .,()_\-\[\]/:+]{1,128}$`),
+	"Priority":             regexp.MustCompile(`^(-1|0|[1-9][0-9]{0,9})$`),
+	"GrpTRES":              regexp.MustCompile(`^([a-zA-Z0-9_/-]+(:[a-zA-Z0-9_-]+)?=[0-9]+[KMGTkmgt]?(,[a-zA-Z0-9_/-]+(:[a-zA-Z0-9_-]+)?=[0-9]+[KMGTkmgt]?)*|-1)$`),
+	"MaxTRESPerUser":       regexp.MustCompile(`^([a-zA-Z0-9_/-]+(:[a-zA-Z0-9_-]+)?=[0-9]+[KMGTkmgt]?(,[a-zA-Z0-9_/-]+(:[a-zA-Z0-9_-]+)?=[0-9]+[KMGTkmgt]?)*|-1)$`),
+	"MaxJobsPerUser":       regexp.MustCompile(`^(?i)(UNLIMITED|-1|0|[1-9][0-9]{0,7})$`),
+	"MaxSubmitJobsPerUser": regexp.MustCompile(`^(?i)(UNLIMITED|-1|0|[1-9][0-9]{0,7})$`),
+	"MaxWallDuration":      regexp.MustCompile(`^(?i)(UNLIMITED|-1|[0-9]{1,6}|[0-9]{1,4}:[0-5][0-9](:[0-5][0-9])?|[0-9]{1,3}-[0-9]{1,2}(:[0-5][0-9](:[0-5][0-9])?)?)$`),
+}
+
+var qosFields = []struct {
+	Key     string // sacctmgr 命令行参数名
+	JSONKey string
+	Get     func(QOSUpdates) string
+}{
+	{"Description", "description", func(u QOSUpdates) string { return u.Description }},
+	{"Priority", "priority", func(u QOSUpdates) string { return u.Priority }},
+	{"GrpTRES", "grpTRES", func(u QOSUpdates) string { return u.GrpTRES }},
+	{"MaxTRESPerUser", "maxTRESPerUser", func(u QOSUpdates) string {
+		if u.MaxTRESPerUser != "" {
+			return u.MaxTRESPerUser
+		}
+		return u.MaxTRES
+	}},
+	{"MaxJobsPerUser", "maxJobsPerUser", func(u QOSUpdates) string {
+		if u.MaxJobsPerUser != "" {
+			return u.MaxJobsPerUser
+		}
+		return u.MaxJobs
+	}},
+	{"MaxSubmitJobsPerUser", "maxSubmitJobsPerUser", func(u QOSUpdates) string { return u.MaxSubmitJobsPerUser }},
+	{"MaxWallDuration", "maxWallDuration", func(u QOSUpdates) string {
+		if u.MaxWallDuration != "" {
+			return u.MaxWallDuration
+		}
+		return u.MaxWall
+	}},
+}
+
+// ValidateQOSFields 校验所填写的 QOS 字段值是否合法（用于 CreateQOS，允许字段为空）。
+func ValidateQOSFields(u QOSUpdates) error {
+	for _, f := range qosFields {
+		v := strings.TrimSpace(f.Get(u))
+		if v == "" {
+			continue
+		}
+		if re, ok := qosValueREs[f.Key]; ok && !re.MatchString(v) {
+			return fmt.Errorf("invalid %s value %q", f.Key, v)
+		}
+	}
+	return nil
+}
+
+// ValidateQOSUpdates 校验更新载荷（用于 UpdateQOS，至少需修改一个字段且各字段合法）。
+func ValidateQOSUpdates(u QOSUpdates) error {
+	set := 0
+	for _, f := range qosFields {
+		v := strings.TrimSpace(f.Get(u))
+		if v == "" {
+			continue
+		}
+		set++
+		if re, ok := qosValueREs[f.Key]; ok && !re.MatchString(v) {
+			return fmt.Errorf("invalid %s value %q", f.Key, v)
+		}
+	}
+	if set == 0 {
+		return fmt.Errorf("no qos fields to update")
+	}
+	return nil
 }
 
 // nameRE 予約/QOS 名白名单。
@@ -232,56 +497,284 @@ func parseReservations(out string) []Reservation {
 	return res
 }
 
-// ListQOS sacctmgr -nP show qos。
-func (s *Service) ListQOS(ctx context.Context) ([]QOS, error) {
-	out, err := s.runCluster("sh", "-c",
-		`sacctmgr -nP show qos format=name,priority,grptres,maxtrespu,maxwallpu,grpj || sacctmgr -nP show qos format=name,priority,grptres,maxtres,maxwall,grpj`)
-	if err != nil {
-		return nil, fmt.Errorf("sacctmgr show qos: %w", err)
+// ParseQOSList 解析 sacctmgr show qos 输出，支持表头自适应及多版本无表头降级回退。
+func ParseQOSList(out string) []QOS {
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) == 0 || (len(lines) == 1 && strings.TrimSpace(lines[0]) == "") {
+		return []QOS{}
 	}
-	qos := []QOS{}
-	for _, ln := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		f := strings.Split(ln, "|")
-		if len(f) < 1 || f[0] == "" {
+
+	qosList := make([]QOS, 0, len(lines))
+
+	firstLine := strings.TrimSpace(lines[0])
+	hasHeader := false
+	colMap := map[string]int{}
+	if strings.Contains(strings.ToLower(firstLine), "name|") || strings.HasPrefix(strings.ToLower(firstLine), "name") {
+		hasHeader = true
+		for idx, col := range strings.Split(firstLine, "|") {
+			colMap[strings.ToLower(strings.TrimSpace(col))] = idx
+		}
+		lines = lines[1:]
+	}
+
+	for _, ln := range lines {
+		ln = strings.TrimSpace(ln)
+		if ln == "" {
 			continue
 		}
-		q := QOS{Name: f[0]}
+		if !strings.Contains(ln, "|") {
+			continue
+		}
+		f := strings.Split(ln, "|")
+		if len(f) < 1 || strings.TrimSpace(f[0]) == "" {
+			continue
+		}
+
 		get := func(i int) string {
-			if i < len(f) && f[i] != "" {
-				return f[i]
+			if i >= 0 && i < len(f) {
+				return strings.TrimSpace(f[i])
 			}
 			return ""
 		}
-		q.Priority = get(1)
-		q.GrpTRES = get(2)
-		q.MaxTRES = get(3)
-		q.MaxWall = get(4)
-		q.MaxJobs = get(5)
-		qos = append(qos, q)
-	}
-	return qos, nil
-}
 
-// CreateQOS sacctmgr add qos <name>（可选直接带 GrpTRES）。幂等。v3-X1：成功后落审计。
-func (s *Service) CreateQOS(ctx context.Context, actor, name, grpTRES, rid string) (*QOS, error) {
-	if !nameRE.MatchString(name) {
-		return nil, fmt.Errorf("invalid qos name")
-	}
-	args := []string{"sacctmgr", "-i", "add", "qos", name}
-	if grpTRES != "" && limitRE.MatchString(grpTRES) {
-		args = append(args, "grptres="+grpTRES)
-	}
-	if _, err := s.runCluster(args...); err != nil {
-		return nil, fmt.Errorf("sacctmgr add qos: %w", err)
-	}
-	s.clusterAudit(ctx, actor, "qos.create", "qos:"+name, rid, `{"grpTRES":`+strconv.Quote(grpTRES)+`}`)
-	qos, _ := s.ListQOS(ctx)
-	for i := range qos {
-		if qos[i].Name == name {
-			return &qos[i], nil
+		var q QOS
+		if hasHeader {
+			getByHeader := func(keys ...string) string {
+				for _, k := range keys {
+					if idx, ok := colMap[k]; ok {
+						if v := get(idx); v != "" {
+							return v
+						}
+					}
+				}
+				return ""
+			}
+			q.Name = getByHeader("name")
+			q.Priority = getByHeader("priority")
+			q.GrpTRES = getByHeader("grptres")
+			q.MaxTRES = getByHeader("maxtres", "maxtrespj", "maxtresperjob")
+			q.MaxTRESPerUser = getByHeader("maxtrespu", "maxtresperuser")
+			if q.MaxTRES == "" && q.MaxTRESPerUser != "" {
+				q.MaxTRES = q.MaxTRESPerUser
+			}
+			if q.MaxTRESPerUser == "" && q.MaxTRES != "" {
+				q.MaxTRESPerUser = q.MaxTRES
+			}
+			q.MaxJobs = getByHeader("grpjobs", "maxjobs", "grpj")
+			q.MaxJobsPerUser = getByHeader("maxjobspu", "maxjobsperuser")
+			if q.MaxJobs == "" && q.MaxJobsPerUser != "" {
+				q.MaxJobs = q.MaxJobsPerUser
+			}
+			if q.MaxJobsPerUser == "" && q.MaxJobs != "" {
+				q.MaxJobsPerUser = q.MaxJobs
+			}
+			q.MaxSubmitJobsPerUser = getByHeader("maxsubmitpu", "maxsubmitjobspu", "maxsubmitjobsperuser")
+			q.MaxWall = getByHeader("maxwall", "maxwallpj", "maxwallduration", "maxwallpu")
+			q.MaxWallDuration = q.MaxWall
+			q.Description = getByHeader("description", "descr")
+		} else {
+			q.Name = get(0)
+			q.Priority = get(1)
+			q.GrpTRES = get(2)
+
+			if len(f) >= 7 && (qosValueREs["MaxWallDuration"].MatchString(get(4)) || get(4) == "" && (get(5) != "" || get(6) != "")) {
+				// 7/8 列格式: name, priority, grptres, maxtrespu, maxwall, maxjobspu, maxsubmitjobspu, description
+				q.MaxTRESPerUser = get(3)
+				q.MaxTRES = get(3)
+				q.MaxWall = get(4)
+				q.MaxWallDuration = get(4)
+				q.MaxJobsPerUser = get(5)
+				q.MaxJobs = get(5)
+				q.MaxSubmitJobsPerUser = get(6)
+				if len(f) >= 8 {
+					q.Description = get(7)
+				}
+			} else if len(f) >= 9 {
+				// 9 列格式: name, priority, grptres, maxtrespu, maxtres, maxjobspu, maxsubmitpu, maxwall, description
+				q.MaxTRESPerUser = get(3)
+				q.MaxTRES = get(4)
+				if q.MaxTRES == "" {
+					q.MaxTRES = q.MaxTRESPerUser
+				}
+				q.MaxJobsPerUser = get(5)
+				q.MaxJobs = q.MaxJobsPerUser
+				q.MaxSubmitJobsPerUser = get(6)
+				q.MaxWall = get(7)
+				q.MaxWallDuration = q.MaxWall
+				q.Description = get(8)
+			} else if len(f) >= 6 {
+				// 6 列降级格式: name, priority, grptres, maxtres, maxwall, grpj
+				q.MaxTRES = get(3)
+				q.MaxTRESPerUser = get(3)
+				q.MaxWall = get(4)
+				q.MaxWallDuration = get(4)
+				q.MaxJobs = get(5)
+				q.MaxJobsPerUser = get(5)
+			} else if len(f) >= 2 {
+				// Partial
+				if len(f) > 2 {
+					q.GrpTRES = get(2)
+				}
+			}
+		}
+
+		if q.Name != "" {
+			qosList = append(qosList, q)
 		}
 	}
-	return &QOS{Name: name}, nil
+
+	return qosList
+}
+
+// ListQOS sacctmgr -nP show qos 全量查询并解析。
+func (s *Service) ListQOS(ctx context.Context) ([]QOS, error) {
+	out, err := s.runCluster("sh", "-c",
+		`sacctmgr -nP show qos format=name,priority,grptres,maxtrespu,maxwall,maxjobspu,maxsubmitjobspu,description || `+
+			`sacctmgr -nP show qos format=name,priority,grptres,maxtresperuser,maxwall,maxjobsperuser,maxsubmitjobsperuser,description || `+
+			`sacctmgr -nP show qos format=name,priority,grptres,maxtres,maxwall,grpj`)
+	if err != nil {
+		return nil, fmt.Errorf("sacctmgr show qos: %w", err)
+	}
+	return ParseQOSList(string(out)), nil
+}
+
+// GetQOS 获取指定名称的 QOS 详情。
+func (s *Service) GetQOS(ctx context.Context, name string) (*QOS, error) {
+	if !qosNameRE.MatchString(name) {
+		return nil, fmt.Errorf("invalid qos name")
+	}
+	qosList, err := s.ListQOS(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range qosList {
+		if qosList[i].Name == name {
+			return &qosList[i], nil
+		}
+	}
+	return nil, ErrQOSNotFound
+}
+
+// CreateQOS 创建 Slurm QOS 并设置各项限制参数。成功后落审计。
+func (s *Service) CreateQOS(ctx context.Context, actor, name string, u QOSUpdates, rid string) (*QOS, error) {
+	if !qosNameRE.MatchString(name) {
+		return nil, fmt.Errorf("invalid qos name")
+	}
+	if err := ValidateQOSFields(u); err != nil {
+		return nil, err
+	}
+
+	spec := []string{}
+	for _, f := range qosFields {
+		if v := strings.TrimSpace(f.Get(u)); v != "" {
+			spec = append(spec, f.Key+"="+v)
+		}
+	}
+	quoted := make([]string, len(spec))
+	for i, kv := range spec {
+		quoted[i] = "'" + kv + "'"
+	}
+
+	cmd := "sacctmgr -i add qos " + name
+	if len(quoted) > 0 {
+		cmd += " " + strings.Join(quoted, " ")
+	}
+	cmd += " 2>&1"
+
+	out, err := s.runCluster("sh", "-c", cmd)
+	if err != nil {
+		return nil, fmt.Errorf("sacctmgr add qos: %w", err)
+	}
+	outStr := strings.TrimSpace(string(out))
+	if strings.Contains(strings.ToUpper(outStr), "ERROR") {
+		return nil, fmt.Errorf("sacctmgr add qos: %s", outStr)
+	}
+
+	detailBytes, _ := json.Marshal(u)
+	s.clusterAudit(ctx, actor, "qos.create", "qos:"+name, rid, string(detailBytes))
+
+	if q, err := s.GetQOS(ctx, name); err == nil && q != nil {
+		return q, nil
+	}
+	return &QOS{
+		Name:                 name,
+		Priority:             u.Priority,
+		GrpTRES:              u.GrpTRES,
+		MaxTRES:              u.MaxTRES,
+		MaxTRESPerUser:       u.MaxTRESPerUser,
+		MaxJobs:              u.MaxJobs,
+		MaxJobsPerUser:       u.MaxJobsPerUser,
+		MaxSubmitJobsPerUser: u.MaxSubmitJobsPerUser,
+		MaxWall:              u.MaxWall,
+		MaxWallDuration:      u.MaxWallDuration,
+		Description:          u.Description,
+	}, nil
+}
+
+// UpdateQOS 修改已有 QOS 限额配置（sacctmgr -i modify qos <name> set K=V...）。成功后落审计。
+func (s *Service) UpdateQOS(ctx context.Context, actor, name string, u QOSUpdates, rid string) error {
+	if !qosNameRE.MatchString(name) {
+		return fmt.Errorf("invalid qos name")
+	}
+	if err := ValidateQOSUpdates(u); err != nil {
+		return err
+	}
+
+	spec := []string{}
+	for _, f := range qosFields {
+		if v := strings.TrimSpace(f.Get(u)); v != "" {
+			spec = append(spec, f.Key+"="+v)
+		}
+	}
+	quoted := make([]string, len(spec))
+	for i, kv := range spec {
+		quoted[i] = "'" + kv + "'"
+	}
+
+	cmd := "sacctmgr -i modify qos " + name + " set " + strings.Join(quoted, " ") + " 2>&1"
+	out, err := s.runCluster("sh", "-c", cmd)
+	if err != nil {
+		return fmt.Errorf("sacctmgr modify qos: %w", err)
+	}
+	outStr := strings.TrimSpace(string(out))
+	upper := strings.ToUpper(outStr)
+	if strings.Contains(upper, "UNKNOWN QOS") || strings.Contains(upper, "NOTHING MODIFIED") || strings.Contains(upper, "NOTHING DELETED") || strings.Contains(upper, "UNKNOWN") {
+		return ErrQOSNotFound
+	}
+	if strings.Contains(upper, "ERROR") {
+		return fmt.Errorf("sacctmgr modify qos: %s", outStr)
+	}
+
+	detailBytes, _ := json.Marshal(u)
+	s.clusterAudit(ctx, actor, "qos.modify", "qos:"+name, rid, string(detailBytes))
+	return nil
+}
+
+// DeleteQOS 删除指定 QOS（sacctmgr -i delete qos <name>）。成功后落审计。
+func (s *Service) DeleteQOS(ctx context.Context, actor, name, rid string) error {
+	if !qosNameRE.MatchString(name) {
+		return fmt.Errorf("invalid qos name")
+	}
+	if strings.EqualFold(name, "normal") {
+		return fmt.Errorf("cannot delete default normal qos")
+	}
+
+	cmd := "sacctmgr -i delete qos " + name + " 2>&1"
+	out, err := s.runCluster("sh", "-c", cmd)
+	if err != nil {
+		return fmt.Errorf("sacctmgr delete qos: %w", err)
+	}
+	outStr := strings.TrimSpace(string(out))
+	upper := strings.ToUpper(outStr)
+	if strings.Contains(upper, "UNKNOWN QOS") || strings.Contains(upper, "NOTHING DELETED") || strings.Contains(upper, "NOTHING MODIFIED") || strings.Contains(upper, "UNKNOWN") {
+		return ErrQOSNotFound
+	}
+	if strings.Contains(upper, "ERROR") {
+		return fmt.Errorf("sacctmgr delete qos: %s", outStr)
+	}
+
+	s.clusterAudit(ctx, actor, "qos.delete", "qos:"+name, rid, "{}")
+	return nil
 }
 
 // SetTenantQOS 把 QOS 绑到租户父账号（sacctmgr modify account <parent> set qos=...）。
@@ -299,6 +792,387 @@ func (s *Service) SetTenantQOS(ctx context.Context, actor, tenantSlug, qosName, 
 	}
 	s.clusterAudit(ctx, actor, "tenant.qos", "tenant:"+tenantSlug, rid, `{"qos":`+strconv.Quote(qosName)+`}`)
 	return nil
+}
+
+// SetUserQOS 设置指定用户的 Slurm 关联 QOS（默认 QOS 与允许使用的 QOS 清单）。
+// actor: 操作人用户名
+// username: 目标平台用户名
+// tenantSlug: 调用者租户 Slug（租户管理员调用时非空；平台管理员调用时若为空则自动从用户库解析）
+// req: 包含 DefaultQOS 与 AllowedQOS
+// rid: 请求链路 Request ID
+func (s *Service) SetUserQOS(ctx context.Context, actor, username, tenantSlug string, req UserQOSUpdates, rid string) error {
+	if err := s.ensure(); err != nil {
+		return err
+	}
+	if !unixSafeRE.MatchString(username) {
+		return fmt.Errorf("invalid username %q", username)
+	}
+	if tenantSlug != "" && !unixSafeRE.MatchString(tenantSlug) {
+		return fmt.Errorf("invalid tenant slug %q", tenantSlug)
+	}
+	if err := ValidateUserQOSUpdates(&req); err != nil {
+		return err
+	}
+
+	var targetUser *auth.User
+	var targetTenant *store.Tenant
+
+	if tenantSlug != "" {
+		// 租户作用域调用（租户管理员）
+		t, err := s.st.TenantBySlug(ctx, tenantSlug)
+		if err != nil {
+			return err
+		}
+		targetTenant = t
+
+		users, err := s.st.ListTenantUsers(ctx, tenantSlug)
+		if err != nil {
+			return err
+		}
+		for _, u := range users {
+			if u.Username == username {
+				targetUser = &u
+				break
+			}
+		}
+		if targetUser == nil {
+			return store.ErrNotFound
+		}
+		// 防提权与关键系统管理员保护
+		if err := s.protectBuiltinAdmin(ctx, actor, username); err != nil {
+			return err
+		}
+	} else {
+		// 平台管理员调用
+		u, ok := s.st.Lookup(username)
+		if !ok {
+			return store.ErrNotFound
+		}
+		targetUser = u
+
+		ts := targetUser.TenantSlug
+		if ts == "" {
+			ts = targetUser.OrgSlug
+		}
+		t, err := s.st.TenantBySlug(ctx, ts)
+		if err != nil {
+			return err
+		}
+		targetTenant = t
+		tenantSlug = targetTenant.Slug
+	}
+
+	clusterUser := targetUser.ClusterUser
+	if clusterUser == "" {
+		clusterUser = targetUser.Username
+	}
+	parentAccount := targetTenant.ParentAccount
+	if parentAccount == "" {
+		parentAccount = targetTenant.Slug
+	}
+
+	// 构造 sacctmgr 命令
+	var setClauses []string
+	if len(req.AllowedQOS) > 0 {
+		setClauses = append(setClauses, "qos="+strings.Join(req.AllowedQOS, ","))
+	}
+	if req.DefaultQOS != "" {
+		setClauses = append(setClauses, "defaultqos="+req.DefaultQOS)
+	}
+
+	cmd := fmt.Sprintf("sacctmgr -i modify user %s account=%s set %s 2>&1", clusterUser, parentAccount, strings.Join(setClauses, " "))
+	out, err := s.runCluster("sh", "-c", cmd)
+	if err != nil {
+		return fmt.Errorf("sacctmgr modify user qos: %w", err)
+	}
+	outStr := strings.TrimSpace(string(out))
+	upper := strings.ToUpper(outStr)
+	if strings.Contains(upper, "UNKNOWN QOS") {
+		return ErrQOSNotFound
+	}
+	if strings.Contains(upper, "UNKNOWN USER") {
+		return store.ErrNotFound
+	}
+	if strings.Contains(upper, "ERROR") {
+		return fmt.Errorf("sacctmgr modify user qos: %s", outStr)
+	}
+
+	// 刷新 slurmctld association 缓存
+	_, _ = s.runCluster("scontrol", "reconfigure")
+
+	detailMap := map[string]any{
+		"tenant":     tenantSlug,
+		"defaultQOS": req.DefaultQOS,
+		"defaultQos": req.DefaultQOS,
+		"allowedQOS": req.AllowedQOS,
+		"allowedQos": req.AllowedQOS,
+	}
+	detailBytes, _ := json.Marshal(detailMap)
+	s.clusterAudit(ctx, actor, "qos.user.set", "user:"+username, rid, string(detailBytes))
+	return nil
+}
+
+// SetTenantUserQOS 租户管理员修改本租户成员 QOS。
+func (s *Service) SetTenantUserQOS(ctx context.Context, actor, tenantSlug, username string, req UserQOSUpdates, rid string) error {
+	return s.SetUserQOS(ctx, actor, username, tenantSlug, req, rid)
+}
+
+// ParseUserQOS 解析 sacctmgr show assoc 输出。
+func ParseUserQOS(out string, clusterUser, parentAccount string) *UserQOSInfo {
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	colMap := map[string]int{}
+	hasHeader := false
+
+	if len(lines) > 0 {
+		firstLine := strings.TrimSpace(lines[0])
+		if strings.Contains(strings.ToLower(firstLine), "user|") || strings.HasPrefix(strings.ToLower(firstLine), "user") {
+			hasHeader = true
+			for idx, col := range strings.Split(firstLine, "|") {
+				colMap[strings.ToLower(strings.TrimSpace(col))] = idx
+			}
+			lines = lines[1:]
+		}
+	}
+
+	var bestRow []string
+	for _, ln := range lines {
+		ln = strings.TrimSpace(ln)
+		if ln == "" || !strings.Contains(ln, "|") {
+			continue
+		}
+		f := strings.Split(ln, "|")
+		for i := range f {
+			f[i] = strings.TrimSpace(f[i])
+		}
+		if len(f) < 2 {
+			continue
+		}
+
+		userVal := f[0]
+		acctVal := f[1]
+		if hasHeader {
+			if uIdx, ok := colMap["user"]; ok && uIdx < len(f) {
+				userVal = f[uIdx]
+			}
+			if aIdx, ok := colMap["account"]; ok && aIdx < len(f) {
+				acctVal = f[aIdx]
+			}
+		}
+
+		if clusterUser != "" && !strings.EqualFold(userVal, clusterUser) {
+			continue
+		}
+
+		if parentAccount != "" && strings.EqualFold(acctVal, parentAccount) {
+			bestRow = f
+			break
+		}
+		if bestRow == nil {
+			bestRow = f
+		}
+	}
+
+	info := &UserQOSInfo{
+		ClusterUser: clusterUser,
+		Account:     parentAccount,
+		DefaultQOS:  "normal",
+		AllowedQOS:  []string{"normal"},
+	}
+
+	if bestRow != nil {
+		var qosRaw, defQosRaw, acctRaw, uRaw string
+		if hasHeader {
+			if idx, ok := colMap["qos"]; ok && idx < len(bestRow) {
+				qosRaw = bestRow[idx]
+			}
+			if idx, ok := colMap["defqos"]; ok && idx < len(bestRow) {
+				defQosRaw = bestRow[idx]
+			}
+			if idx, ok := colMap["account"]; ok && idx < len(bestRow) {
+				acctRaw = bestRow[idx]
+			}
+			if idx, ok := colMap["user"]; ok && idx < len(bestRow) {
+				uRaw = bestRow[idx]
+			}
+		} else {
+			if len(bestRow) > 0 {
+				uRaw = bestRow[0]
+			}
+			if len(bestRow) > 1 {
+				acctRaw = bestRow[1]
+			}
+			if len(bestRow) > 2 {
+				qosRaw = bestRow[2]
+			}
+			if len(bestRow) > 3 {
+				defQosRaw = bestRow[3]
+			}
+		}
+
+		if uRaw != "" {
+			info.ClusterUser = uRaw
+		}
+		if acctRaw != "" {
+			info.Account = acctRaw
+		}
+
+		var allowed []string
+		seen := map[string]bool{}
+		for _, q := range strings.FieldsFunc(qosRaw, func(r rune) bool {
+			return r == ',' || r == '+' || r == ' ' || r == '\t'
+		}) {
+			q = strings.TrimSpace(q)
+			if q != "" && !seen[q] {
+				seen[q] = true
+				allowed = append(allowed, q)
+			}
+		}
+
+		defQos := strings.TrimSpace(defQosRaw)
+		if len(allowed) > 0 {
+			info.AllowedQOS = allowed
+		}
+		if defQos != "" {
+			info.DefaultQOS = defQos
+		} else if len(info.AllowedQOS) > 0 {
+			if seen["normal"] {
+				info.DefaultQOS = "normal"
+			} else {
+				info.DefaultQOS = info.AllowedQOS[0]
+			}
+		}
+	}
+
+	return info
+}
+
+// GetUserQOS 查询指定用户的 Slurm 关联 QOS 详情。
+func (s *Service) GetUserQOS(ctx context.Context, username, tenantSlug string) (*UserQOSInfo, error) {
+	if err := s.ensure(); err != nil {
+		return nil, err
+	}
+	if !unixSafeRE.MatchString(username) {
+		return nil, fmt.Errorf("invalid username %q", username)
+	}
+	if tenantSlug != "" && !unixSafeRE.MatchString(tenantSlug) {
+		return nil, fmt.Errorf("invalid tenant slug %q", tenantSlug)
+	}
+
+	var targetUser *auth.User
+	var targetTenant *store.Tenant
+
+	if tenantSlug != "" {
+		t, err := s.st.TenantBySlug(ctx, tenantSlug)
+		if err != nil {
+			return nil, err
+		}
+		targetTenant = t
+
+		users, err := s.st.ListTenantUsers(ctx, tenantSlug)
+		if err != nil {
+			return nil, err
+		}
+		for _, u := range users {
+			if u.Username == username {
+				targetUser = &u
+				break
+			}
+		}
+		if targetUser == nil {
+			return nil, store.ErrNotFound
+		}
+	} else {
+		u, ok := s.st.Lookup(username)
+		if !ok {
+			return nil, store.ErrNotFound
+		}
+		targetUser = u
+
+		ts := targetUser.TenantSlug
+		if ts == "" {
+			ts = targetUser.OrgSlug
+		}
+		t, err := s.st.TenantBySlug(ctx, ts)
+		if err != nil {
+			return nil, err
+		}
+		targetTenant = t
+		tenantSlug = targetTenant.Slug
+	}
+
+	clusterUser := targetUser.ClusterUser
+	if clusterUser == "" {
+		clusterUser = targetUser.Username
+	}
+	parentAccount := targetTenant.ParentAccount
+	if parentAccount == "" {
+		parentAccount = targetTenant.Slug
+	}
+
+	cmd := fmt.Sprintf("sacctmgr -nP show assoc where user=%s format=User,Account,QOS,DefQOS", clusterUser)
+	out, err := s.runCluster("sh", "-c", cmd)
+	if err != nil {
+		return nil, fmt.Errorf("sacctmgr show assoc: %w", err)
+	}
+
+	info := ParseUserQOS(string(out), clusterUser, parentAccount)
+	info.Username = username
+	info.TenantSlug = tenantSlug
+	return info, nil
+}
+
+// GetAvailableQOS 查询用户可用的 QOS 策略对象清单与默认 QOS。
+func (s *Service) GetAvailableQOS(ctx context.Context, username, tenantSlug string) (*AvailableQOSResponse, error) {
+	userQOS, err := s.GetUserQOS(ctx, username, tenantSlug)
+	if err != nil {
+		return nil, err
+	}
+
+	allQOS, err := s.ListQOS(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	qosMap := make(map[string]QOS)
+	for _, q := range allQOS {
+		qosMap[strings.ToLower(q.Name)] = q
+	}
+
+	allowedObjects := make([]QOS, 0, len(userQOS.AllowedQOS))
+	for _, name := range userQOS.AllowedQOS {
+		if q, ok := qosMap[strings.ToLower(name)]; ok {
+			allowedObjects = append(allowedObjects, q)
+		} else {
+			allowedObjects = append(allowedObjects, QOS{Name: name})
+		}
+	}
+
+	if len(allowedObjects) == 0 {
+		if q, ok := qosMap["normal"]; ok {
+			allowedObjects = append(allowedObjects, q)
+		} else {
+			allowedObjects = append(allowedObjects, QOS{
+				Name:        "normal",
+				Priority:    "0",
+				Description: "Standard default QOS",
+			})
+		}
+	}
+
+	defaultQos := userQOS.DefaultQOS
+	if defaultQos == "" {
+		if len(allowedObjects) > 0 {
+			defaultQos = allowedObjects[0].Name
+		} else {
+			defaultQos = "normal"
+		}
+	}
+
+	return &AvailableQOSResponse{
+		DefaultQOS:   defaultQos,
+		AllowedQOS:   allowedObjects,
+		AvailableQOS: allowedObjects,
+	}, nil
 }
 
 // runCluster 执行集群管理命令（默认 slurmctld CLI；测试可换 Service.runner——nil 即默认）。

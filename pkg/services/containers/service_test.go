@@ -75,6 +75,7 @@ type jrow struct {
 	name, state, nodes string
 	submit             int64
 	account            string // P1-4：归属锚定字段（空=旧用例，SessionOwner 视为遗留空属主）
+	qos                string
 }
 
 func jobsResp(rows ...jrow) *slurmrest.JobsResponse {
@@ -89,7 +90,8 @@ func jobsResp(rows ...jrow) *slurmrest.JobsResponse {
 			TimeLimit  int    `json:"time_limit"`
 			SubmitTime int64  `json:"submit_time"`
 			Account    string `json:"account"`
-		}{JobID: x.id, Name: x.name, JobState: x.state, Nodes: x.nodes, SubmitTime: x.submit, Account: x.account})
+			Qos        string `json:"qos,omitempty"`
+		}{JobID: x.id, Name: x.name, JobState: x.state, Nodes: x.nodes, SubmitTime: x.submit, Account: x.account, Qos: x.qos})
 	}
 	return r
 }
@@ -363,6 +365,209 @@ func TestIdleReaper_ReclaimsExpiredSessions(t *testing.T) {
 	}
 	if len(jobs.cancelled) != 1 || jobs.cancelled[0] != 777 {
 		t.Errorf("expected job 777 to be cancelled in Slurm, got cancelled: %v", jobs.cancelled)
+	}
+}
+
+func TestLaunchContainer_CPU_QOS_Injected(t *testing.T) {
+	jobs := &fakeJobsAPI{submitResp: &slurmrest.SlurmJobSubmitResp{JobID: 42}}
+	svc := newSvc(jobs, &fakeMeta{m: map[string]containers.SessionMeta{}})
+
+	req := &containers.ContainerLaunchRequest{
+		EnvType:  "jupyter",
+		CPUs:     2,
+		MemoryMB: 4096,
+		QOS:      "vip",
+	}
+
+	resp, err := svc.LaunchContainer(context.Background(), req, "user1", "user1")
+	if err != nil {
+		t.Fatalf("LaunchContainer failed: %v", err)
+	}
+
+	if resp.Allocated.QOS != "vip" {
+		t.Errorf("expected Allocated.QOS 'vip', got %q", resp.Allocated.QOS)
+	}
+	if jobs.lastSubmit == nil {
+		t.Fatal("expected SubmitJobAs to be called")
+	}
+	if jobs.lastSubmit.Job.Qos != "vip" {
+		t.Errorf("expected Job.Qos 'vip', got %q", jobs.lastSubmit.Job.Qos)
+	}
+	if !strings.Contains(jobs.lastSubmit.Script, "#SBATCH --qos=vip\n") {
+		t.Errorf("expected script to contain '#SBATCH --qos=vip\\n', script:\n%s", jobs.lastSubmit.Script)
+	}
+	if !strings.Contains(jobs.lastSubmit.Script, `"qos":"vip"`) {
+		t.Errorf("expected script to record '\"qos\":\"vip\"', script:\n%s", jobs.lastSubmit.Script)
+	}
+}
+
+func TestLaunchContainer_GPU_QOS_Injected(t *testing.T) {
+	var capturedOpts containers.CliSubmitOpts
+	cliSubmit := func(opts containers.CliSubmitOpts) (int, error) {
+		capturedOpts = opts
+		return 9999, nil
+	}
+
+	jobs := &fakeJobsAPI{}
+	meta := &fakeMeta{m: map[string]containers.SessionMeta{}}
+	svc := containers.NewContainerServiceWithAllDeps(jobs, meta, cliSubmit)
+
+	req := &containers.ContainerLaunchRequest{
+		EnvType:  "jupyter",
+		GPUs:     1,
+		CPUs:     4,
+		MemoryMB: 8192,
+		QOS:      "gpu-vip",
+	}
+
+	resp, err := svc.LaunchContainer(context.Background(), req, "user1", "user1")
+	if err != nil {
+		t.Fatalf("LaunchContainer failed: %v", err)
+	}
+
+	if capturedOpts.QOS != "gpu-vip" {
+		t.Errorf("expected capturedOpts.QOS 'gpu-vip', got %q", capturedOpts.QOS)
+	}
+	if capturedOpts.Partition != "performance" {
+		t.Errorf("expected partition 'performance', got %q", capturedOpts.Partition)
+	}
+	if resp.Allocated.QOS != "gpu-vip" {
+		t.Errorf("expected Allocated.QOS 'gpu-vip', got %q", resp.Allocated.QOS)
+	}
+	if !strings.Contains(capturedOpts.Script, "#SBATCH --qos=gpu-vip\n") {
+		t.Errorf("expected script to contain '#SBATCH --qos=gpu-vip\\n', script:\n%s", capturedOpts.Script)
+	}
+	if !strings.Contains(capturedOpts.Script, `"qos":"gpu-vip"`) {
+		t.Errorf("expected script to record '\"qos\":\"gpu-vip\"', script:\n%s", capturedOpts.Script)
+	}
+}
+
+func TestLaunchContainer_OmittedQOS_Default(t *testing.T) {
+	var capturedOpts containers.CliSubmitOpts
+	cliSubmit := func(opts containers.CliSubmitOpts) (int, error) {
+		capturedOpts = opts
+		return 8888, nil
+	}
+
+	jobs := &fakeJobsAPI{submitResp: &slurmrest.SlurmJobSubmitResp{JobID: 42}}
+	meta := &fakeMeta{m: map[string]containers.SessionMeta{}}
+	svc := containers.NewContainerServiceWithAllDeps(jobs, meta, cliSubmit)
+
+	// CPU launch without QOS
+	reqCPU := &containers.ContainerLaunchRequest{EnvType: "vscode"}
+	respCPU, err := svc.LaunchContainer(context.Background(), reqCPU, "user1", "user1")
+	if err != nil {
+		t.Fatalf("LaunchContainer CPU failed: %v", err)
+	}
+	if respCPU.Allocated.QOS != "" {
+		t.Errorf("expected empty QOS, got %q", respCPU.Allocated.QOS)
+	}
+	if jobs.lastSubmit.Job.Qos != "" {
+		t.Errorf("expected empty Job.Qos in REST submit, got %q", jobs.lastSubmit.Job.Qos)
+	}
+	if strings.Contains(jobs.lastSubmit.Script, "#SBATCH --qos=") {
+		t.Errorf("script should not contain #SBATCH --qos= when omitted:\n%s", jobs.lastSubmit.Script)
+	}
+
+	// GPU launch without QOS
+	reqGPU := &containers.ContainerLaunchRequest{EnvType: "jupyter", GPUs: 1}
+	respGPU, err := svc.LaunchContainer(context.Background(), reqGPU, "user1", "user1")
+	if err != nil {
+		t.Fatalf("LaunchContainer GPU failed: %v", err)
+	}
+	if respGPU.Allocated.QOS != "" {
+		t.Errorf("expected empty QOS, got %q", respGPU.Allocated.QOS)
+	}
+	if capturedOpts.QOS != "" {
+		t.Errorf("expected empty QOS in CLI opts, got %q", capturedOpts.QOS)
+	}
+	if strings.Contains(capturedOpts.Script, "#SBATCH --qos=") {
+		t.Errorf("GPU script should not contain #SBATCH --qos= when omitted:\n%s", capturedOpts.Script)
+	}
+}
+
+func TestLaunchContainer_AntiInjection_QOS(t *testing.T) {
+	jobs := &fakeJobsAPI{submitResp: &slurmrest.SlurmJobSubmitResp{JobID: 42}}
+	var cliCalled bool
+	cliSubmit := func(opts containers.CliSubmitOpts) (int, error) {
+		cliCalled = true
+		return 8888, nil
+	}
+	svc := containers.NewContainerServiceWithAllDeps(jobs, &fakeMeta{m: map[string]containers.SessionMeta{}}, cliSubmit)
+
+	injectionCases := []struct {
+		qos  string
+		desc string
+	}{
+		{"vip; rm -rf /", "Semicolon injection"},
+		{"vip; touch /tmp/pwned", "Semicolon file creation"},
+		{"vip$(id)", "Subshell substitution"},
+		{"vip`id`", "Backtick substitution"},
+		{"'vip'", "Single quotes"},
+		{"\"vip\"", "Double quotes"},
+		{"vip|cat /etc/passwd", "Pipe injection"},
+		{"vip && reboot", "Logical AND"},
+		{"vip\n#SBATCH --nodes=100", "Newline injection"},
+		{"vip\r\n#SBATCH --nodes=100", "CRLF injection"},
+		{"vip\x00pwn", "Null byte"},
+		{"1vip", "Leading digit"},
+		{"_vip", "Leading underscore"},
+		{"-vip", "Leading hyphen"},
+		{"--qos=vip", "Double dash argument injection"},
+		{"vip normal", "Space separated"},
+		{"toolong_qos_name_exceeding_32_characters_limit", "Overflow >32 chars"},
+		{"../etc/passwd", "Path traversal"},
+	}
+
+	for _, tc := range injectionCases {
+		t.Run(tc.desc, func(t *testing.T) {
+			jobs.lastSubmit = nil
+			cliCalled = false
+
+			_, err := svc.LaunchContainer(context.Background(), &containers.ContainerLaunchRequest{
+				EnvType: "jupyter",
+				QOS:     tc.qos,
+			}, "user1", "user1")
+			if !errors.Is(err, containers.ErrInvalidQOS) {
+				t.Errorf("[%s] qos=%q: want ErrInvalidQOS, got %v", tc.desc, tc.qos, err)
+			}
+			if jobs.lastSubmit != nil {
+				t.Errorf("[%s] SubmitJobAs should not have been called", tc.desc)
+			}
+			if cliCalled {
+				t.Errorf("[%s] cliSubmit should not have been called", tc.desc)
+			}
+		})
+	}
+}
+
+func TestListActiveContainers_PopulatesQOS(t *testing.T) {
+	jobs := &fakeJobsAPI{jobs: jobsResp(
+		jrow{id: 1001, name: "jupyter-ide-aaa", state: "RUNNING", nodes: "node1", submit: 1},
+		jrow{id: 1002, name: "vscode-ide-bbb", state: "PENDING", submit: 2},
+	)}
+	meta := &fakeMeta{m: map[string]containers.SessionMeta{
+		"aaa": {SessionID: "aaa", NodeIP: "10.0.0.1", Port: 8900, CPUs: 2, MemoryMB: 4096, Nodes: 1, QOS: "vip"},
+		"bbb": {SessionID: "bbb", NodeIP: "10.0.0.2", Port: 8901, QOS: "normal"},
+	}}
+	svc := newSvc(jobs, meta)
+
+	list, err := svc.ListActiveContainers(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("want 2 active sessions, got %d", len(list))
+	}
+	byID := map[string]*containers.ContainerInstance{}
+	for _, c := range list {
+		byID[c.ID] = c
+	}
+	if byID["aaa"] == nil || byID["aaa"].QOS != "vip" {
+		t.Errorf("aaa QOS mismatch: %+v", byID["aaa"])
+	}
+	if byID["bbb"] == nil || byID["bbb"].QOS != "normal" {
+		t.Errorf("bbb QOS mismatch: %+v", byID["bbb"])
 	}
 }
 

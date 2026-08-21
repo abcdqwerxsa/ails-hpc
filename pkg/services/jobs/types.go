@@ -20,6 +20,7 @@ var (
 	// 注入、`/`/`..` 即任意路径写；分区进 sbatch -p。统一字符集校验）。
 	ErrInvalidJobName   = errors.New("invalid job name: want ^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 	ErrInvalidPartition = errors.New("invalid partition name: want ^[A-Za-z][A-Za-z0-9_-]{0,31}$")
+	ErrInvalidQOS       = errors.New("invalid qos name: want ^[A-Za-z][A-Za-z0-9_-]{0,31}$")
 )
 
 // FlexTimeLimit 支持 JSON 解包时兼容 string ("3600") 和 int (3600)
@@ -63,6 +64,7 @@ type SubmitJobRequest struct {
 	TimeLimit               FlexTimeLimit `json:"time_limit"`
 	Script                  string        `json:"script"`
 	CurrentWorkingDirectory string        `json:"current_working_directory"`
+	QOS                     string        `json:"qos,omitempty"`
 }
 
 // SubmitJobResponse 作业提交成功响应
@@ -99,6 +101,7 @@ type JobDetail struct {
 	Start      string `json:"start"`
 	End        string `json:"end"`
 	Submit     string `json:"submit"`
+	QOS        string `json:"qos,omitempty"`
 	// StdoutTail 输出文件尾部（/shared/jobs/<id>.out tail 200 行；空=尚无输出）。
 	StdoutTail string `json:"stdout_tail"`
 }
@@ -113,6 +116,7 @@ type JobSummary struct {
 	TimeLimit  int    `json:"time_limit"`
 	SubmitTime int64  `json:"submit_time"`
 	Owner      string `json:"owner,omitempty"` // 归属隔离：提交者（slurm account 回填）
+	QOS        string `json:"qos,omitempty"`
 }
 
 // JobListResponse 作业列表响应

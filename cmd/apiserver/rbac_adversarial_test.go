@@ -34,11 +34,11 @@ import (
 // noopProvisioner 测试供给桩（不触集群）。
 type noopProvisioner struct{}
 
-func (noopProvisioner) ProvisionAccount(account, parentAccount string) error  { return nil }
+func (noopProvisioner) ProvisionAccount(account, parentAccount string) error { return nil }
 func (noopProvisioner) ProvisionUser(cu string, uid, gid int, account, parentAccount string) error {
 	return nil
 }
-func (noopProvisioner) SetAccountLimits(account, setting string) error        { return nil }
+func (noopProvisioner) SetAccountLimits(account, setting string) error         { return nil }
 func (noopProvisioner) ReparentAccount(account, newParentAccount string) error { return nil }
 
 // setupRBACStack 全栈夹具：sqlite 库（system/hpc-lab/bio-lab + 种子用户）+ 生产路由表。
@@ -366,7 +366,7 @@ func TestRBAC_PartitionManageGate(t *testing.T) {
 	forged, err := auth.GenerateTokenClaims(auth.Claims{
 		Username: "alice", Role: auth.RoleMember, OrgSlug: "hpc-lab", TenantNS: "default",
 		ClusterUser: "alice", Account: "alice", TID: "hpc-lab", Ver: 0,
-		Perms:       []string{auth.PermPartitionsManage},
+		Perms: []string{auth.PermPartitionsManage},
 	})
 	if err != nil {
 		t.Fatalf("mint forged: %v", err)

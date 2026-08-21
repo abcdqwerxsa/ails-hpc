@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
-import { slurm, type AdminUser, type TenantInfo } from '../services/slurm';
+import { slurm, type AdminUser, type TenantInfo, type QOSInfo, type UserQOSUpdates } from '../services/slurm';
 import { can, getStoredUser } from '../services/auth';
 import { RoleAssignSelect, TenantMoveControl } from '../components/roles_panel';
 import { Select } from '../components/select';
@@ -43,6 +43,7 @@ function TenantUsersPanel() {
   const [acting, setActing] = useState(''); // `<username>:status` | `<username>:pw`
   const [resetFor, setResetFor] = useState(''); // 正在重置密码的用户名（空 = 未展开）
   const [resetPw, setResetPw] = useState('');
+  const [qosUser, setQosUser] = useState<AdminUser | null>(null);
 
   const user = getStoredUser();
   const canManageUsers = can('tenant:users:manage', user);
@@ -188,6 +189,7 @@ function TenantUsersPanel() {
                   <th style={{ ...th, textAlign: 'right' }}>UID</th>
                   <th style={th}>状态</th>
                   <th style={th}>显示名</th>
+                  <th style={th}>QOS 策略</th>
                   <th style={th}>操作</th>
                 </tr>
               </thead>
@@ -208,8 +210,16 @@ function TenantUsersPanel() {
                       <td style={{ ...td, ...num }}>{u.uid != null ? String(u.uid) : '-'}</td>
                       <td style={td}><StatusBadge status={u.status} /></td>
                       <td style={{ ...td, color: 'var(--text-muted,#94a3b8)' }}>{u.displayName || '-'}</td>
-                      <td style={{ ...td, minWidth: 260 }}>
+                      <td style={td}>
+                        <UserQOSCell username={u.username} />
+                      </td>
+                      <td style={{ ...td, minWidth: 280 }}>
                         <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                          {canManageUsers && (
+                            <MiniBtn onClick={() => setQosUser(u)}>
+                              QOS 设置
+                            </MiniBtn>
+                          )}
                           {canManageUsers && (
                             <MiniBtn disabled={rowBusy(u.username)} onClick={() => toggleStatus(u)}>
                               {active ? '禁用' : '启用'}
@@ -261,6 +271,21 @@ function TenantUsersPanel() {
           </div>
         )}
       </div>
+
+      {qosUser && (
+        <UserQOSModal
+          username={qosUser.username}
+          clusterUser={qosUser.clusterUser}
+          tenantSlug={qosUser.tenantSlug}
+          scope="tenant"
+          onClose={() => setQosUser(null)}
+          onSuccess={(m) => {
+            setInfo(m);
+            setQosUser(null);
+            refresh();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -402,6 +427,7 @@ function PlatformAdminPanel({ showTenantTopMargin }: { showTenantTopMargin?: boo
   const [dirQ, setDirQ] = useState('');
   const [userResetFor, setUserResetFor] = useState('');
   const [userResetPw, setUserResetPw] = useState('');
+  const [platQosUser, setPlatQosUser] = useState<AdminUser | null>(null);
   const loadDir = async () => {
     try {
       const r = await slurm.listPlatformUsers();
@@ -609,6 +635,7 @@ function PlatformAdminPanel({ showTenantTopMargin }: { showTenantTopMargin?: boo
                   <th style={th}>集群用户</th>
                   <th style={th}>状态</th>
                   <th style={th}>显示名</th>
+                  <th style={th}>QOS 策略</th>
                   <th style={th}>操作</th>
                 </tr>
               </thead>
@@ -633,8 +660,16 @@ function PlatformAdminPanel({ showTenantTopMargin }: { showTenantTopMargin?: boo
                       <td style={{ ...td, ...mono, color: 'var(--text-muted,#94a3b8)' }}>{u.clusterUser || '-'}</td>
                       <td style={td}><StatusBadge status={u.status} /></td>
                       <td style={{ ...td, color: 'var(--text-muted,#94a3b8)' }}>{u.displayName || '-'}</td>
-                      <td style={{ ...td, minWidth: 260 }}>
+                      <td style={td}>
+                        <UserQOSCell username={u.username} />
+                      </td>
+                      <td style={{ ...td, minWidth: 280 }}>
                         <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                          {canManageUsers && (
+                            <MiniBtn onClick={() => setPlatQosUser(u)}>
+                              QOS 设置
+                            </MiniBtn>
+                          )}
                           <MiniBtn
                             disabled={acting === `user:${u.username}` || (isSelf && active)}
                             onClick={() => toggleUser(u)}
@@ -689,6 +724,21 @@ function PlatformAdminPanel({ showTenantTopMargin }: { showTenantTopMargin?: boo
       </div>
       )}
 
+      {platQosUser && (
+        <UserQOSModal
+          username={platQosUser.username}
+          clusterUser={platQosUser.clusterUser}
+          tenantSlug={platQosUser.tenantSlug}
+          scope="platform"
+          onClose={() => setPlatQosUser(null)}
+          onSuccess={(m) => {
+            setInfo(m);
+            setPlatQosUser(null);
+            loadDir();
+          }}
+        />
+      )}
+
       {can('users:create', getStoredUser()) && (
       <form onSubmit={submitPlatUser} style={{ ...cardStyle, marginTop: '1.5rem' }}>
         <div style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '0.75rem' }}>新建平台用户</div>
@@ -736,4 +786,379 @@ function PlatformAdminPanel({ showTenantTopMargin }: { showTenantTopMargin?: boo
     </div>
   );
 }
+
+// ----------------------------------------------------
+// QOS 用户关联与状态组件 (QOSBadge / UserQOSCell / UserQOSModal)
+// ----------------------------------------------------
+
+export function QOSBadge({ qos }: { qos?: string }) {
+  const name = (qos || 'normal').toLowerCase();
+  let bg = 'rgba(6, 182, 212, 0.12)';
+  let color = 'var(--accent-cyan,#06b6d4)';
+  let border = 'rgba(6, 182, 212, 0.25)';
+
+  if (name.includes('vip') || name.includes('high') || name.includes('prio')) {
+    bg = 'rgba(245, 158, 11, 0.15)';
+    color = '#f59e0b';
+    border = 'rgba(245, 158, 11, 0.3)';
+  } else if (name.includes('debug') || name.includes('test')) {
+    bg = 'rgba(16, 185, 129, 0.15)';
+    color = '#34d399';
+    border = 'rgba(16, 185, 129, 0.3)';
+  } else if (name.includes('gpu')) {
+    bg = 'rgba(168, 85, 247, 0.15)';
+    color = '#c084fc';
+    border = 'rgba(168, 85, 247, 0.3)';
+  }
+
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '0.3rem',
+        padding: '0.15rem 0.5rem',
+        borderRadius: 6,
+        fontSize: '0.75rem',
+        fontFamily: "'JetBrains Mono', monospace",
+        fontWeight: 700,
+        background: bg,
+        color,
+        border: `1px solid ${border}`,
+      }}
+    >
+      <span style={{ width: 6, height: 6, borderRadius: '50%', background: color }} />
+      {qos || 'normal'}
+    </span>
+  );
+}
+
+export function UserQOSCell({ username }: { username: string }) {
+  const [qos, setQos] = useState<string>('normal');
+  const [allowed, setAllowed] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    slurm
+      .getUserQOS(username)
+      .then((r) => {
+        if (!active) return;
+        const uQos = r.qos || r;
+        const def = uQos.defaultQos || uQos.defaultQOS || (r as any).defaultQos || (r as any).defaultQOS || 'normal';
+        const all = (uQos.allowedQos && uQos.allowedQos.length > 0)
+          ? uQos.allowedQos
+          : (uQos.allowedQOS && uQos.allowedQOS.length > 0)
+          ? uQos.allowedQOS
+          : (r as any).allowedQos || (r as any).allowedQOS || [def];
+        setQos(def);
+        setAllowed(all);
+      })
+      .catch(() => {
+        if (active) {
+          setQos('normal');
+          setAllowed(['normal']);
+        }
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [username]);
+
+  if (loading) {
+    return <span style={{ fontSize: '0.75rem', color: 'var(--text-muted,#94a3b8)' }}>…</span>;
+  }
+
+  const otherAllowed = allowed.filter((a) => a !== qos);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+        <QOSBadge qos={qos} />
+      </div>
+      {otherAllowed.length > 0 && (
+        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted,#94a3b8)', fontFamily: "'JetBrains Mono', monospace" }}>
+          + {otherAllowed.join(', ')}
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface UserQOSModalProps {
+  username: string;
+  clusterUser?: string;
+  tenantSlug?: string;
+  scope: 'platform' | 'tenant';
+  onClose: () => void;
+  onSuccess: (msg: string) => void;
+}
+
+export function UserQOSModal({
+  username,
+  clusterUser,
+  tenantSlug,
+  scope,
+  onClose,
+  onSuccess,
+}: UserQOSModalProps) {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [allQos, setAllQos] = useState<QOSInfo[]>([]);
+  const [allowedQos, setAllowedQos] = useState<string[]>(['normal']);
+  const [defaultQos, setDefaultQos] = useState<string>('normal');
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        setLoading(true);
+        const [qosRes, userQosRes] = await Promise.all([
+          slurm.listQOS(),
+          slurm.getUserQOS(username).catch(() => null),
+        ]);
+        if (!active) return;
+        setAllQos(qosRes.qos || []);
+        if (userQosRes) {
+          const uQos = userQosRes.qos || userQosRes;
+          const allowed = (uQos.allowedQos && uQos.allowedQos.length > 0)
+            ? uQos.allowedQos
+            : (uQos.allowedQOS && uQos.allowedQOS.length > 0)
+            ? uQos.allowedQOS
+            : (userQosRes as any).allowedQos || (userQosRes as any).allowedQOS || ['normal'];
+          setAllowedQos(allowed);
+          const def = uQos.defaultQos || uQos.defaultQOS || (userQosRes as any).defaultQos || (userQosRes as any).defaultQOS || allowed[0] || 'normal';
+          setDefaultQos(def);
+        }
+      } catch (e: any) {
+        if (active) setError(e?.message || '加载用户 QOS 数据失败');
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [username]);
+
+  const toggleQos = (name: string) => {
+    let next: string[];
+    if (allowedQos.includes(name)) {
+      if (allowedQos.length <= 1) return; // 至少保留一个
+      next = allowedQos.filter((q) => q !== name);
+      if (defaultQos === name) {
+        setDefaultQos(next[0] || 'normal');
+      }
+    } else {
+      next = [...allowedQos, name];
+    }
+    setAllowedQos(next);
+  };
+
+  const handleSave = async () => {
+    if (allowedQos.length === 0) {
+      setError('至少需要保留一个允许使用的 QOS');
+      return;
+    }
+    if (!allowedQos.includes(defaultQos)) {
+      setError('默认 QOS 必须包含在允许的 QOS 清单中');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      const payload: UserQOSUpdates = {
+        defaultQos,
+        allowedQos,
+      };
+      if (scope === 'tenant') {
+        await slurm.setTenantUserQOS(username, payload);
+      } else {
+        await slurm.setUserQOS(username, payload);
+      }
+      onSuccess(`用户 ${username} QOS 关联已更新（默认: ${defaultQos}，允许: ${allowedQos.join(', ')}）`);
+      onClose();
+    } catch (e: any) {
+      setError(e?.message || '保存失败');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0,0,0,0.65)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1100,
+        padding: '1.5rem',
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="neu-chiseled-card"
+        style={{ maxWidth: 640, width: '100%', maxHeight: '90vh', overflowY: 'auto', padding: '1.75rem' }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 700 }}>
+              用户 QOS 配额与调度治理
+            </h3>
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted,#94a3b8)', marginTop: '0.25rem' }}>
+              用户：<strong style={{ color: 'var(--text-main,#f1f5f9)' }}>{username}</strong> {clusterUser && `(${clusterUser})`} · 租户：<code>{tenantSlug || 'system'}</code>
+            </div>
+          </div>
+          <MiniBtn onClick={onClose}>关闭</MiniBtn>
+        </div>
+
+        {error && <Notice color="#f43f5e" bg="rgba(239,68,68,.12)">{error}</Notice>}
+
+        {loading ? (
+          <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted,#94a3b8)' }}>加载配置中…</div>
+        ) : (
+          <div style={{ display: 'grid', gap: '1.25rem' }}>
+            {/* 快捷模板预设 */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '0.78rem', color: 'var(--text-muted,#94a3b8)', fontWeight: 600 }}>快捷预设：</span>
+              <button
+                type="button"
+                className="neu-btn"
+                style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }}
+                onClick={() => {
+                  setAllowedQos(['normal']);
+                  setDefaultQos('normal');
+                }}
+              >
+                标准成员 (normal)
+              </button>
+              <button
+                type="button"
+                className="neu-btn"
+                style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }}
+                onClick={() => {
+                  const hasVip = allQos.some((q) => q.name === 'vip');
+                  const allowed = hasVip ? ['normal', 'vip'] : ['normal'];
+                  setAllowedQos(allowed);
+                  setDefaultQos(hasVip ? 'vip' : 'normal');
+                }}
+              >
+                科研骨干 (normal + vip)
+              </button>
+              <button
+                type="button"
+                className="neu-btn"
+                style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }}
+                onClick={() => {
+                  const names = allQos.map((q) => q.name);
+                  setAllowedQos(names.length ? names : ['normal']);
+                  setDefaultQos(names.includes('vip') ? 'vip' : names[0] || 'normal');
+                }}
+              >
+                全权限授予
+              </button>
+            </div>
+
+            {/* 允许使用的 QOS 复选框列表 */}
+            <div>
+              <div style={{ fontSize: '0.85rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--text-main,#f1f5f9)' }}>
+                允许使用的 QOS 清单 (Allowed QOS)
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '0.65rem' }}>
+                {allQos.map((q) => {
+                  const checked = allowedQos.includes(q.name);
+                  const isDefault = defaultQos === q.name;
+                  return (
+                    <div
+                      key={q.name}
+                      onClick={() => toggleQos(q.name)}
+                      style={{
+                        padding: '0.75rem 0.9rem',
+                        borderRadius: 10,
+                        cursor: 'pointer',
+                        background: checked ? 'rgba(6, 182, 212, 0.08)' : 'var(--card-bg)',
+                        border: checked ? '1px solid var(--accent-cyan,#06b6d4)' : '1px solid var(--border-color,#2a2f3a)',
+                        display: 'grid',
+                        gap: '0.35rem',
+                        transition: 'all .2s ease',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => {}} // 由外层 div 驱动
+                            style={{ cursor: 'pointer' }}
+                          />
+                          <span style={{ fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", fontSize: '0.9rem' }}>{q.name}</span>
+                        </div>
+                        {isDefault && (
+                          <span style={{ fontSize: '0.7rem', padding: '0.1rem 0.4rem', borderRadius: 4, background: 'var(--accent-cyan,#06b6d4)', color: '#fff', fontWeight: 700 }}>
+                            当前默认
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted,#94a3b8)', display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
+                        <span>优先级: {q.priority || '0'}</span>
+                        {(q.max_wall || q.max_wall_duration) && <span>限时: {q.max_wall_duration || q.max_wall}</span>}
+                        {(q.max_tres_per_user || q.max_tres) && <span>单人: {q.max_tres_per_user || q.max_tres}</span>}
+                        {(q.max_jobs_per_user || q.max_jobs) && <span>并发: {q.max_jobs_per_user || q.max_jobs}</span>}
+                      </div>
+                      {q.description && (
+                        <div style={{ fontSize: '0.72rem', color: 'var(--text-dim,#64748b)', fontStyle: 'italic' }}>
+                          {q.description}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 默认 QOS 下拉选择 */}
+            <div>
+              <div style={{ fontSize: '0.85rem', fontWeight: 700, marginBottom: '0.4rem', color: 'var(--text-main,#f1f5f9)' }}>
+                默认 QOS (Default QOS)
+              </div>
+              <Select
+                value={defaultQos}
+                onChange={setDefaultQos}
+                options={allowedQos.map((name) => {
+                  const q = allQos.find((x) => x.name === name);
+                  return {
+                    value: name,
+                    label: `${name}${q?.description ? ` (${q.description})` : ''}${q?.priority ? ` · 优先级 ${q.priority}` : ''}`,
+                  };
+                })}
+              />
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted,#94a3b8)', marginTop: '0.35rem' }}>
+                用户在提交作业或启动 IDE 未显式指定 QOS 时，将自动套用该默认 QOS。
+              </div>
+            </div>
+
+            {/* 底部按钮 */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
+              <button type="button" className="neu-btn" onClick={onClose} disabled={saving}>
+                取消
+              </button>
+              <button type="button" className="btn-primary" onClick={handleSave} disabled={saving} style={{ padding: '0.5rem 1.5rem' }}>
+                {saving ? '保存中…' : '保存 QOS 配置'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 
