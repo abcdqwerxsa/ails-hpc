@@ -565,12 +565,13 @@ func (h *AdminHandler) DeleteQOS(c *gin.Context) {
 }
 
 // SetTenantQOS PATCH /api/v1/admin/tenants/:slug/qos {name}
+// name 为空字符串时表示清除该租户的 QOS 绑定。
 func (h *AdminHandler) SetTenantQOS(c *gin.Context) {
 	var req struct {
-		Name string `json:"name" binding:"required"`
+		Name string `json:"name"` // 空字符串 = 清除绑定
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.BadRequest(c, "name is required")
+		httpx.BadRequest(c, "invalid request body")
 		return
 	}
 	actor, _ := actorAndTenant(c)
@@ -578,8 +579,26 @@ func (h *AdminHandler) SetTenantQOS(c *gin.Context) {
 		httpx.BadRequest(c, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "tenant qos updated"})
+	msg := "tenant qos updated"
+	if req.Name == "" {
+		msg = "tenant qos cleared"
+	}
+	c.JSON(http.StatusOK, gin.H{"message": msg})
 }
+
+// GetTenantQOS GET /api/v1/admin/tenants/:slug/qos —— 查询租户当前绑定的 QOS 信息。
+func (h *AdminHandler) GetTenantQOS(c *gin.Context) {
+	defaultQOS, allowedQOS, err := h.service.GetTenantQOS(c.Request.Context(), c.Param("slug"))
+	if err != nil {
+		httpx.BadRequest(c, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"default_qos": defaultQOS,
+		"allowed_qos": allowedQOS,
+	})
+}
+
 
 // GetUserQOS GET /api/v1/admin/users/:username/qos —— 平台管理员查询指定用户 QOS 关联。
 func (h *AdminHandler) GetUserQOS(c *gin.Context) {

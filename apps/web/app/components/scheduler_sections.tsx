@@ -1074,27 +1074,58 @@ interface TenantQOSBindModalProps {
 
 function TenantQOSBindModal({ tenants, qosList, onClose, onSuccess }: TenantQOSBindModalProps) {
   const [selectedTenant, setSelectedTenant] = useState(tenants[0]?.slug || '');
+  // '__clear__' 是特殊占位符，表示"清除绑定"
   const [selectedQos, setSelectedQos] = useState(qosList[0]?.name || 'normal');
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState('');
+  const [currentBinding, setCurrentBinding] = useState<{ default_qos: string; allowed_qos: string[] } | null>(null);
+  const [loadingBinding, setLoadingBinding] = useState(false);
+
+  // 切换租户时自动拉取当前绑定
+  useEffect(() => {
+    if (!selectedTenant) { setCurrentBinding(null); return; }
+    setLoadingBinding(true);
+    setCurrentBinding(null);
+    slurm.getTenantQOS(selectedTenant)
+      .then((res) => setCurrentBinding(res))
+      .catch(() => setCurrentBinding(null))
+      .finally(() => setLoadingBinding(false));
+  }, [selectedTenant]);
+
+  const isClear = selectedQos === '__clear__';
 
   const handleBind = async (e: FormEvent) => {
     e.preventDefault();
-    if (!selectedTenant || !selectedQos) {
-      setErr('请选择要绑定的租户与 QOS 策略');
+    if (!selectedTenant) {
+      setErr('请选择目标租户');
       return;
     }
     setSubmitting(true);
     setErr('');
     try {
-      await slurm.setTenantQOS(selectedTenant, selectedQos);
-      onSuccess(`租户 ${selectedTenant} 默认 QOS 已成功绑定为 ${selectedQos}`);
+      const qosName = isClear ? '' : selectedQos;
+      await slurm.setTenantQOS(selectedTenant, qosName);
+      if (isClear) {
+        onSuccess(`租户 ${selectedTenant} 的 QOS 绑定已成功清除`);
+      } else {
+        onSuccess(`租户 ${selectedTenant} 默认 QOS 已成功绑定为 ${selectedQos}`);
+      }
     } catch (e: any) {
-      setErr(e?.message || '租户 QOS 绑定失败');
+      setErr(e?.message || '操作失败');
     } finally {
       setSubmitting(false);
     }
   };
+
+  const qosOptions = [
+    { value: '__clear__', label: '—— 清除绑定（恢复默认）' },
+    ...(qosList.length === 0
+      ? [{ value: 'normal', label: 'normal' }]
+      : qosList.map((q) => ({
+          value: q.name,
+          label: `${q.name}${q.priority ? ` (P:${q.priority})` : ''}${q.description ? ` · ${q.description}` : ''}`,
+        }))),
+  ];
 
   return (
     <div
@@ -1119,7 +1150,7 @@ function TenantQOSBindModal({ tenants, qosList, onClose, onSuccess }: TenantQOSB
           <div>
             <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 700 }}>租户默认 QOS 绑定</h3>
             <div style={{ fontSize: '0.8rem', color: 'var(--text-muted,#94a3b8)', marginTop: '0.25rem' }}>
-              为指定租户设置默认关联的 Slurm QOS 策略。
+              为指定租户设置或清除默认关联的 Slurm QOS 策略。
             </div>
           </div>
           <MiniBtn onClick={onClose}>关闭</MiniBtn>
@@ -1140,27 +1171,69 @@ function TenantQOSBindModal({ tenants, qosList, onClose, onSuccess }: TenantQOSB
             />
           </Field>
 
-          <Field label="绑定默认 QOS 策略">
+          {/* 当前绑定状态提示 */}
+          {selectedTenant && (
+            <div style={{
+              padding: '0.6rem 0.9rem',
+              borderRadius: 8,
+              background: 'var(--surface-2,rgba(100,116,139,0.1))',
+              fontSize: '0.82rem',
+              color: 'var(--text-muted,#94a3b8)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+            }}>
+              {loadingBinding ? (
+                <span>查询当前绑定中…</span>
+              ) : currentBinding ? (
+                currentBinding.default_qos ? (
+                  <>
+                    <span style={{ color: '#22d3ee' }}>●</span>
+                    当前绑定：
+                    <strong style={{ color: 'var(--text-primary,#e2e8f0)' }}>{currentBinding.default_qos}</strong>
+                    {currentBinding.allowed_qos?.length > 1 && (
+                      <span>（允许：{currentBinding.allowed_qos.join('、')}）</span>
+                    )}
+                  </>
+                ) : (
+                  <><span style={{ color: '#94a3b8' }}>○</span> 当前未绑定 QOS</>
+                )
+              ) : (
+                <span>暂无绑定信息</span>
+              )}
+            </div>
+          )}
+
+          <Field label={isClear ? '操作' : '绑定默认 QOS 策略'}>
             <Select
               value={selectedQos}
               onChange={setSelectedQos}
-              options={
-                qosList.length === 0
-                  ? [{ value: 'normal', label: 'normal' }]
-                  : qosList.map((q) => ({
-                      value: q.name,
-                      label: `${q.name}${q.priority ? ` (P:${q.priority})` : ''}${q.description ? ` · ${q.description}` : ''}`,
-                    }))
-              }
+              options={qosOptions}
             />
           </Field>
+
+          {isClear && (
+            <Notice color="#f59e0b" bg="rgba(245,158,11,.1)">
+              清除后该租户将使用 Slurm 集群默认 QOS，已绑定用户的个人 QOS 设置不受影响。
+            </Notice>
+          )}
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
             <button type="button" className="neu-btn" onClick={onClose} disabled={submitting}>
               取消
             </button>
-            <button type="submit" className="btn-primary" disabled={submitting} style={{ padding: '0.5rem 1.5rem' }}>
-              {submitting ? '绑定中…' : '保存租户绑定'}
+            <button
+              type="submit"
+              className="btn-primary"
+              disabled={submitting || !selectedTenant}
+              style={{
+                padding: '0.5rem 1.5rem',
+                background: isClear ? 'var(--accent-rose,#f43f5e)' : undefined,
+              }}
+            >
+              {submitting
+                ? (isClear ? '清除中…' : '绑定中…')
+                : (isClear ? '确认清除绑定' : '保存租户绑定')}
             </button>
           </div>
         </form>

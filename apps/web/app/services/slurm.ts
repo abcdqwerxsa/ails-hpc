@@ -699,11 +699,16 @@ export const slurm = {
     }),
   deleteQOS: (name: string) =>
     apiFetch<{ message: string }>(`/admin/qos/${encodeURIComponent(name)}`, { method: "DELETE" }),
+  getTenantQOS: (slug: string) =>
+    apiFetch<{ default_qos: string; allowed_qos: string[] }>(
+      `/admin/tenants/${encodeURIComponent(slug)}/qos`,
+    ),
   setTenantQOS: (slug: string, name: string) =>
     apiFetch<{ message: string }>(`/admin/tenants/${encodeURIComponent(slug)}/qos`, {
       method: "PATCH",
       body: JSON.stringify({ name }),
     }),
+
   getUserQOS: (username: string) =>
     apiFetch<UserQOSInfo>(`/admin/users/${encodeURIComponent(username)}/qos`),
   setUserQOS: (username: string, payload: UserQOSUpdates) =>

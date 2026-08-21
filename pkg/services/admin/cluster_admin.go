@@ -778,9 +778,11 @@ func (s *Service) DeleteQOS(ctx context.Context, actor, name, rid string) error 
 }
 
 // SetTenantQOS 把 QOS 绑到租户父账号（sacctmgr modify account <parent> set qos=...）。
+// 若 qosName 为空字符串，则清除租户的 QOS 绑定（set qos=）。
 // v3-X1：成功后落审计。
 func (s *Service) SetTenantQOS(ctx context.Context, actor, tenantSlug, qosName, rid string) error {
-	if !nameRE.MatchString(qosName) {
+	// 非空时才做格式校验，空字符串表示"清除绑定"
+	if qosName != "" && !nameRE.MatchString(qosName) {
 		return fmt.Errorf("invalid qos name")
 	}
 	t, err := s.st.TenantBySlug(ctx, tenantSlug)
@@ -790,9 +792,47 @@ func (s *Service) SetTenantQOS(ctx context.Context, actor, tenantSlug, qosName, 
 	if _, err := s.runCluster("sacctmgr", "-i", "modify", "account", t.ParentAccount, "set", "qos="+qosName); err != nil {
 		return fmt.Errorf("sacctmgr modify account qos: %w", err)
 	}
-	s.clusterAudit(ctx, actor, "tenant.qos", "tenant:"+tenantSlug, rid, `{"qos":`+strconv.Quote(qosName)+`}`)
+	action := qosName
+	if action == "" {
+		action = "<cleared>"
+	}
+	s.clusterAudit(ctx, actor, "tenant.qos", "tenant:"+tenantSlug, rid, `{"qos":`+strconv.Quote(action)+`}`)
 	return nil
 }
+
+// GetTenantQOS 查询租户父账号当前绑定的默认 QOS（sacctmgr show account <parent>）。
+// 返回 defaultQOS 与允许的 qos 清单；若未绑定则均为空。
+func (s *Service) GetTenantQOS(ctx context.Context, tenantSlug string) (defaultQOS string, allowedQOS []string, err error) {
+	t, err := s.st.TenantBySlug(ctx, tenantSlug)
+	if err != nil {
+		return "", nil, err
+	}
+	out, err := s.runCluster("sacctmgr", "-nP", "show", "account", t.ParentAccount,
+		"format=defaultqos,qos")
+	if err != nil {
+		return "", nil, fmt.Errorf("sacctmgr show account: %w", err)
+	}
+	// 输出格式：defaultqos|qos\n  e.g. "normal|normal,vip\n"
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		parts := strings.SplitN(line, "|", 2)
+		if len(parts) < 2 {
+			continue
+		}
+		defaultQOS = strings.TrimSpace(parts[0])
+		qosStr := strings.TrimSpace(parts[1])
+		if qosStr != "" {
+			for _, q := range strings.Split(qosStr, ",") {
+				q = strings.TrimSpace(q)
+				if q != "" {
+					allowedQOS = append(allowedQOS, q)
+				}
+			}
+		}
+		break
+	}
+	return defaultQOS, allowedQOS, nil
+}
+
 
 // SetUserQOS 设置指定用户的 Slurm 关联 QOS（默认 QOS 与允许使用的 QOS 清单）。
 // actor: 操作人用户名
