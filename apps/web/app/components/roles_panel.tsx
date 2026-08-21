@@ -298,8 +298,8 @@ export function RoleAssignSelect({
   );
 }
 
-// TenantMoveControl 用户行内租户迁移（平台面板）：选目标租户 + 该租户下合法的角色，
-// 一次请求完成（后端同事务改派——单改租户或单改角色会被归属规则互斥拒绝）。
+// TenantMoveControl 用户行内租户与角色一体化调整（平台面板）：
+// 选目标租户 + 自动联动该租户下合法的角色，一次请求完成。
 export function TenantMoveControl({
   username,
   currentTenant,
@@ -322,18 +322,32 @@ export function TenantMoveControl({
         const r = await slurm.listTenants();
         setTenants(r.tenants || []);
       } catch {
-        /* 清单拉取失败 → 保留当前值（提交前仍可手改不存在的租户，后端 404/400 兜底） */
+        /* 清单拉取失败 → 保留当前值 */
       }
     })();
   }, []);
+
+  // 租户切换时智能联动合法角色范围，防止平台/租户角色错配
+  const handleTenantChange = (newTenant: string) => {
+    setTenant(newTenant);
+    if (newTenant === 'system') {
+      if (role !== 'admin' && role !== 'ops_admin') {
+        setRole('admin');
+      }
+    } else {
+      if (role === 'admin' || role === 'ops_admin') {
+        setRole('member');
+      }
+    }
+  };
 
   const apply = async () => {
     setBusy(true);
     try {
       await slurm.movePlatformUserTenant(username, tenant, role);
-      onDone(`用户 ${username} 已迁移到租户 ${tenant}（角色 ${role}）`);
+      onDone(`用户 ${username} 租户/角色已更新为：租户 ${tenant} · 角色 ${role}`);
     } catch (e: any) {
-      onDone(`迁移失败：${e?.message || e}`);
+      onDone(`变更失败：${e?.message || e}`);
     } finally {
       setBusy(false);
     }
@@ -343,19 +357,32 @@ export function TenantMoveControl({
     ...(tenants.some((t) => t.slug === tenant) ? [] : [{ value: tenant, label: tenant }]),
     ...tenants.map((t) => ({ value: t.slug, label: t.slug })),
   ];
+
+  const roleOptions = tenant === 'system'
+    ? [
+        { value: 'admin', label: 'admin' },
+        { value: 'ops_admin', label: 'ops_admin' },
+      ]
+    : [
+        { value: 'member', label: 'member' },
+        { value: 'tenant_admin', label: 'tenant_admin' },
+      ];
+
+  const isChanged = tenant !== currentTenant || role !== currentRole;
+
   return (
     <div style={{ display: 'inline-flex', gap: '0.35rem', alignItems: 'center' }}>
-      <Select small width={130} value={tenant} onChange={setTenant} options={tenantOptions} ariaLabel="目标租户" />
+      <Select small width={120} value={tenant} onChange={handleTenantChange} options={tenantOptions} ariaLabel="目标租户" />
       <Select
         small
         width={130}
         value={role}
         onChange={setRole}
-        options={['member', 'tenant_admin', 'ops_admin', 'admin'].map((r) => ({ value: r, label: r }))}
-        ariaLabel="迁移后角色"
+        options={roleOptions}
+        ariaLabel="角色"
       />
-      <MiniBtn disabled={busy || (tenant === currentTenant && role === currentRole)} onClick={apply}>
-        {busy ? '…' : '迁租户'}
+      <MiniBtn disabled={busy || !isChanged} onClick={apply}>
+        {busy ? '…' : '变更'}
       </MiniBtn>
     </div>
   );

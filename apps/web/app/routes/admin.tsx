@@ -671,18 +671,6 @@ function PlatformAdminPanel() {
                             显示名
                           </MiniBtn>
                           {canAssignRoles && (
-                            <RoleAssignSelect
-                              username={u.username}
-                              currentRole={u.role || 'ops_admin'}
-                              currentRoleName={u.roleName}
-                              scope="platform"
-                              onDone={(m) => {
-                                setInfo(m);
-                                loadDir();
-                              }}
-                            />
-                          )}
-                          {canAssignRoles && (
                             <TenantMoveControl
                               username={u.username}
                               currentTenant={u.tenantSlug || ''}
