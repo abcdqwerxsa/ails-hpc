@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 // --- fakes ---
 
 type fakeJobsAPI struct {
+	mu          sync.Mutex
 	lastSubmit  *slurmrest.SlurmJobSubmitReq
 	lastActAs   string
 	submitResp  *slurmrest.SlurmJobSubmitResp
@@ -25,6 +27,8 @@ type fakeJobsAPI struct {
 }
 
 func (f *fakeJobsAPI) SubmitJobAs(req *slurmrest.SlurmJobSubmitReq, actAs string) (*slurmrest.SlurmJobSubmitResp, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.lastSubmit = req
 	f.lastActAs = actAs
 	if f.submitErr != nil {
@@ -33,12 +37,32 @@ func (f *fakeJobsAPI) SubmitJobAs(req *slurmrest.SlurmJobSubmitReq, actAs string
 	return f.submitResp, nil
 }
 func (f *fakeJobsAPI) GetJobs() (*slurmrest.JobsResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.jobs == nil {
 		return &slurmrest.JobsResponse{}, nil
 	}
-	return f.jobs, nil
+	cp := &slurmrest.JobsResponse{
+		Errors: f.jobs.Errors,
+		Jobs:   make([]struct {
+			JobID      int    `json:"job_id"`
+			Name       string `json:"name"`
+			Partition  string `json:"partition"`
+			JobState   string `json:"job_state"`
+			Nodes      string `json:"nodes"`
+			TimeLimit  int    `json:"time_limit"`
+			SubmitTime int64  `json:"submit_time"`
+			Account    string `json:"account"`
+			Qos        string `json:"qos,omitempty"`
+		}, len(f.jobs.Jobs)),
+	}
+	copy(cp.Jobs, f.jobs.Jobs)
+	return cp, nil
 }
+
 func (f *fakeJobsAPI) CancelJobAs(jobID int, actAs string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.cancelled = append(f.cancelled, jobID)
 	f.cancelActAs = actAs
 	if f.jobs != nil {
@@ -50,24 +74,41 @@ func (f *fakeJobsAPI) CancelJobAs(jobID int, actAs string) error {
 	}
 	return f.cancelErr
 }
+func (f *fakeJobsAPI) getCancelled() []int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	res := make([]int, len(f.cancelled))
+	copy(res, f.cancelled)
+	return res
+}
 
 type fakeMeta struct {
+	mu      sync.Mutex
 	m       map[string]containers.SessionMeta
 	deleted []string
 	readErr error
 }
 
 func (f *fakeMeta) ReadAll() (map[string]containers.SessionMeta, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.readErr != nil {
 		return nil, f.readErr
 	}
-	return f.m, nil
+	res := make(map[string]containers.SessionMeta, len(f.m))
+	for k, v := range f.m {
+		res[k] = v
+	}
+	return res, nil
 }
 func (f *fakeMeta) Delete(sid string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.deleted = append(f.deleted, sid)
 	delete(f.m, sid)
 	return nil
 }
+
 
 // jrow + jobsResp 构造 *slurmrest.JobsResponse（元素匿名结构须与 slurmrest 一致）
 type jrow struct {
@@ -344,9 +385,12 @@ func TestIdleReaper_ReclaimsExpiredSessions(t *testing.T) {
 	}
 	svc := containers.NewContainerServiceWithDeps(jobs, meta)
 
+	var cbMu sync.Mutex
 	var reclaimedSid string
 	var reclaimedJobID int
 	callback := func(sessionID string, jobID int, owner string, idleMin int) {
+		cbMu.Lock()
+		defer cbMu.Unlock()
 		reclaimedSid = sessionID
 		reclaimedJobID = jobID
 	}
@@ -360,12 +404,19 @@ func TestIdleReaper_ReclaimsExpiredSessions(t *testing.T) {
 	// 等待 reaper 触发
 	time.Sleep(50 * time.Millisecond)
 
-	if reclaimedSid != sid || reclaimedJobID != 777 {
-		t.Errorf("expected session %s (job 777) to be reclaimed, got sid=%q jobID=%d", sid, reclaimedSid, reclaimedJobID)
+	cbMu.Lock()
+	gotSid := reclaimedSid
+	gotJobID := reclaimedJobID
+	cbMu.Unlock()
+
+	if gotSid != sid || gotJobID != 777 {
+		t.Errorf("expected session %s (job 777) to be reclaimed, got sid=%q jobID=%d", sid, gotSid, gotJobID)
 	}
-	if len(jobs.cancelled) != 1 || jobs.cancelled[0] != 777 {
-		t.Errorf("expected job 777 to be cancelled in Slurm, got cancelled: %v", jobs.cancelled)
+	cancelledList := jobs.getCancelled()
+	if len(cancelledList) != 1 || cancelledList[0] != 777 {
+		t.Errorf("expected job 777 to be cancelled in Slurm, got cancelled: %v", cancelledList)
 	}
+
 }
 
 func TestLaunchContainer_CPU_QOS_Injected(t *testing.T) {
