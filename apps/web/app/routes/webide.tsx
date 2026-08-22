@@ -60,6 +60,7 @@ function WebIDEPage() {
   const [memMb, setMemMb] = useState('4096');
   const [durationMin, setDurationMin] = useState('120');
   const [selectedQos, setSelectedQos] = useState('normal');
+  const [reservation, setReservation] = useState('');
   const [availableQosList, setAvailableQosList] = useState<QOSInfo[]>([]);
   const [launching, setLaunching] = useState(false);
   const [acting, setActing] = useState('');
@@ -116,9 +117,12 @@ function WebIDEPage() {
         memory_mb: Number(memMb) || 4096,
         time_limit_min: Number(durationMin) || 120,
         qos: selectedQos?.trim() || undefined,
+        reservation: reservation.trim() || undefined,
       });
       const gpuTag = Number(gpus) > 0 ? ` [${gpus} GPU]` : '';
-      setInfo(`已启动 ${envType}${gpuTag} 会话（作业 #${r.allocated?.job_id ?? '-'} · QOS: ${selectedQos}）。等状态变 RUNNING 后点"打开 IDE"。`);
+      const resvTag = reservation.trim() ? ` · 预约: ${reservation.trim()}` : '';
+      setInfo(`已启动 ${envType}${gpuTag} 会话（作业 #${r.allocated?.job_id ?? '-'} · QOS: ${selectedQos}${resvTag}）。等状态变 RUNNING 后点"打开 IDE"。`);
+      setReservation('');
       await refresh();
     } catch (e: any) {
       setError(`启动失败：${e?.message || e}`);
@@ -126,6 +130,7 @@ function WebIDEPage() {
       setLaunching(false);
     }
   };
+
 
   const extend = async (id: string) => {
     const v = prompt('延长会话多少分钟？（1-720）', '60');
@@ -252,11 +257,22 @@ function WebIDEPage() {
             }))}
           />
         </label>
+        <label style={{ display: 'grid', gap: '0.25rem', fontSize: '0.8rem', color: 'var(--text-muted,#94a3b8)' }}>
+          资源预约 (可选)
+          <input
+            className="form-control"
+            value={reservation}
+            onChange={(e) => setReservation(e.target.value)}
+            placeholder="如 vip-gpu"
+            style={{ width: 120 }}
+          />
+        </label>
         {can('ide:manage') && (
           <button className="btn-primary" onClick={launch} disabled={launching} style={{ padding: '0.5rem 1.5rem' }}>
             {launching ? '启动中…' : '启动 IDE 会话'}
           </button>
         )}
+
 
         {/* QOS 策略提示卡 */}
         {(() => {

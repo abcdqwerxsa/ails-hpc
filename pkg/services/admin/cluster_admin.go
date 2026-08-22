@@ -38,8 +38,11 @@ type Reservation struct {
 	Nodes     string `json:"nodes"`
 	Users     string `json:"users"`
 	Accounts  string `json:"accounts,omitempty"`
+	Partition string `json:"partition,omitempty"`
+	Flags     string `json:"flags,omitempty"`
 	State     string `json:"state,omitempty"` // ACTIVE/INACTIVE
 }
+
 
 // ErrQOSNotFound QOS 不存在。
 var ErrQOSNotFound = errors.New("admin: qos not found")
@@ -327,7 +330,9 @@ var (
 	resvTimeRE  = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$`)
 	resvNodesRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_,\[\]\-]{0,127}$`)
 	resvUsersRE = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}(,[a-z_][a-z0-9_-]{0,31})*$`)
+	resvAcctsRE = regexp.MustCompile(`^[A-Za-z0-9_-]{1,31}(,[A-Za-z0-9_-]{1,31})*$`)
 	resvPartRE  = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,31}$`)
+	resvFlagsRE = regexp.MustCompile(`^[A-Za-z0-9_,]{1,63}$`)
 )
 
 // ListReservations scontrol show reserv（空列表=无预约）。
@@ -341,14 +346,14 @@ func (s *Service) ListReservations(ctx context.Context) ([]Reservation, error) {
 
 // CreateReservation scontrol create reservation。startTime 为 "YYYY-MM-DDTHH:MM" 或空=now+1min。
 // v3-X1：成功后落审计（st 为 nil 的 yaml 模式跳过——纯集群操作不依赖用户库）。
-func (s *Service) CreateReservation(ctx context.Context, actor, name, startTime string, durationMin int, nodes, users, partition, rid string) (*Reservation, error) {
+func (s *Service) CreateReservation(ctx context.Context, actor, name, startTime string, durationMin int, nodes, users, accounts, partition, flags, rid string) (*Reservation, error) {
 	if !nameRE.MatchString(name) || durationMin <= 0 || durationMin > 30*24*60 {
 		return nil, fmt.Errorf("invalid reservation name/duration")
 	}
 	if startTime == "" {
 		startTime = time.Now().Add(time.Minute).Format("2006-01-02T15:04")
 	}
-	// P0-2：spec 四字段白名单（用户可控且会被拼进 sh -c——防单引号逃逸注入）。
+	// P0-2：spec 字段白名单（用户可控且会被拼进 sh -c——防单引号逃逸注入）。
 	if !resvTimeRE.MatchString(startTime) {
 		return nil, fmt.Errorf("invalid reservation starttime (want YYYY-MM-DDTHH:MM)")
 	}
@@ -361,6 +366,13 @@ func (s *Service) CreateReservation(ctx context.Context, actor, name, startTime 
 	if users != "" && !resvUsersRE.MatchString(users) {
 		return nil, fmt.Errorf("invalid reservation users")
 	}
+	if accounts != "" && !resvAcctsRE.MatchString(accounts) {
+		return nil, fmt.Errorf("invalid reservation accounts")
+	}
+	if flags != "" && !resvFlagsRE.MatchString(flags) {
+		return nil, fmt.Errorf("invalid reservation flags")
+	}
+
 	// scontrol 要求 nodes= / nodecnt= / corecnt= 至少其一：未指定时默认 nodecnt=1。
 	spec := []string{"reservationname=" + name, "starttime=" + startTime,
 		fmt.Sprintf("duration=%d", durationMin)}
@@ -375,6 +387,12 @@ func (s *Service) CreateReservation(ctx context.Context, actor, name, startTime 
 	if users != "" {
 		spec = append(spec, "users="+users)
 	}
+	if accounts != "" {
+		spec = append(spec, "accounts="+accounts)
+	}
+	if flags != "" {
+		spec = append(spec, "flags="+flags)
+	}
 	quoted := make([]string, len(spec))
 	for i, kv := range spec {
 		quoted[i] = "'" + kv + "'"
@@ -384,10 +402,11 @@ func (s *Service) CreateReservation(ctx context.Context, actor, name, startTime 
 		return nil, fmt.Errorf("scontrol create reservation: %s", strings.TrimSpace(string(out)))
 	}
 	s.clusterAudit(ctx, actor, "reservations.create", "reservation:"+name, rid,
-		fmt.Sprintf(`{"duration":%d,"users":%q}`, durationMin, users))
+		fmt.Sprintf(`{"duration":%d,"users":%q,"accounts":%q}`, durationMin, users, accounts))
 	res, _ := s.findReservation(ctx, name)
 	return res, nil
 }
+
 
 // DeleteReservation scontrol delete reservation <name>（v3-X1：成功后落审计）。
 func (s *Service) DeleteReservation(ctx context.Context, actor, name, rid string) error {
@@ -483,16 +502,35 @@ func parseReservations(out string) []Reservation {
 		if kv["ReservationName"] == "" {
 			continue
 		}
+		part := kv["PartitionName"]
+		if part == "(null)" {
+			part = ""
+		}
+		flg := kv["Flags"]
+		if flg == "(null)" {
+			flg = ""
+		}
+		accts := kv["Accounts"]
+		if accts == "(null)" {
+			accts = ""
+		}
+		usrs := kv["Users"]
+		if usrs == "(null)" {
+			usrs = ""
+		}
 		res = append(res, Reservation{
 			Name:      kv["ReservationName"],
 			StartTime: kv["StartTime"],
 			EndTime:   kv["EndTime"],
 			Duration:  kv["Duration"],
 			Nodes:     kv["Nodes"],
-			Users:     kv["Users"],
-			Accounts:  kv["Accounts"],
+			Users:     usrs,
+			Accounts:  accts,
+			Partition: part,
+			Flags:     flg,
 			State:     strings.TrimSuffix(strings.TrimPrefix(kv["State"], "("), ")"),
 		})
+
 	}
 	return res
 }

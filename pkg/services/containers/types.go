@@ -59,7 +59,9 @@ type ContainerLaunchRequest struct {
 	GPUs         int    `json:"gpus"`                        // GPU 数量（0=CPU standard分区, >0=GPU performance分区）
 	TimeLimitMin int    `json:"time_limit_min"`              // 会话时长（分钟，1.4；0=默认 2h，上限 12h）
 	QOS          string `json:"qos,omitempty"`               // 用户指定的 Slurm QOS (可选)
+	Reservation  string `json:"reservation,omitempty"`       // 用户指定的 Slurm 预约名称 (可选)
 }
+
 
 // ContainerLaunchResponse defines the response payload for a launched session
 type ContainerLaunchResponse struct {

@@ -5,11 +5,314 @@ import { slurm, type QOSInfo, type CreateQOSRequest, type UpdateQOSRequest, type
 import { Select } from './select';
 import { Field, MiniBtn, Notice, StatusBadge, cardStyle, emptyStyle, mono, th, td } from './panel_ui';
 
+// 新建预约模态框组件
+interface CreateReservationModalProps {
+  onClose: () => void;
+  onSuccess: (name: string) => void;
+}
+
+function CreateReservationModal({ onClose, onSuccess }: CreateReservationModalProps) {
+  const [name, setName] = useState('');
+  const [startMode, setStartMode] = useState<'now' | 'custom'>('now');
+  const [customStartTime, setCustomStartTime] = useState('');
+  const [durationVal, setDurationVal] = useState('60');
+  const [durationUnit, setDurationUnit] = useState<'minutes' | 'hours' | 'days'>('minutes');
+  const [partition, setPartition] = useState('');
+  const [nodes, setNodes] = useState('');
+  const [accounts, setAccounts] = useState('');
+  const [users, setUsers] = useState('');
+  const [flags, setFlags] = useState('');
+  const [err, setErr] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  // 依赖选项数据
+  const [tenants, setTenants] = useState<TenantInfo[]>([]);
+  const [partitionsList, setPartitionsList] = useState<string[]>([]);
+
+  useEffect(() => {
+    // 异步加载租户列表与分区列表
+    slurm.listTenants().then((res) => {
+      setTenants(res.tenants || []);
+    }).catch(() => {});
+
+    slurm.getPartitions().then((res) => {
+      const parts = res.partitions?.map((p) => p.name) || [];
+      setPartitionsList(parts);
+    }).catch(() => {});
+  }, []);
+
+  // 快速模板套用
+  const applyPreset = (preset: 'maint' | 'gpu') => {
+    const now = new Date();
+    const timeStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
+    if (preset === 'maint') {
+      setName(`maint_${timeStr}`);
+      setStartMode('now');
+      setDurationVal('120');
+      setDurationUnit('minutes');
+      setPartition('');
+      setNodes('');
+      setAccounts('');
+      setUsers('');
+      setFlags('MAINT,IGNORE_JOBS');
+    } else if (preset === 'gpu') {
+      const firstTenant = tenants.length > 0 ? tenants[0].slug : 'hpc-lab';
+      setName(`gpu_vip_${timeStr}`);
+      setStartMode('now');
+      setDurationVal('4');
+      setDurationUnit('hours');
+      setPartition('performance');
+      setNodes('node1');
+      setAccounts(firstTenant);
+      setUsers('');
+      setFlags('');
+    }
+  };
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setErr('');
+    const cleanName = name.trim();
+    if (!cleanName) {
+      setErr('请填写预约名称');
+      return;
+    }
+
+    let durMin = parseInt(durationVal, 10);
+    if (isNaN(durMin) || durMin <= 0) {
+      setErr('请输入有效的持续时长');
+      return;
+    }
+    if (durationUnit === 'hours') durMin *= 60;
+    if (durationUnit === 'days') durMin *= 24 * 60;
+
+    let startTimeParam: string | undefined;
+    if (startMode === 'custom') {
+      if (!customStartTime) {
+        setErr('请选择开始时间');
+        return;
+      }
+      // customStartTime 为 YYYY-MM-DDTHH:MM 格式
+      startTimeParam = customStartTime;
+    }
+
+    setSubmitting(true);
+    try {
+      await slurm.createReservation({
+        name: cleanName,
+        durationMinutes: durMin,
+        startTime: startTimeParam,
+        partition: partition.trim() || undefined,
+        nodes: nodes.trim() || undefined,
+        accounts: accounts.trim() || undefined,
+        users: users.trim() || undefined,
+        flags: flags.trim() || undefined,
+      });
+      onSuccess(cleanName);
+      onClose();
+    } catch (e: any) {
+      setErr(`创建预约失败：${e?.message || e}`);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0,0,0,0.65)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1100,
+        padding: '1.5rem',
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="neu-chiseled-card"
+        style={{ maxWidth: 660, width: '100%', maxHeight: '90vh', overflowY: 'auto', padding: '1.75rem' }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 700 }}>新建 Slurm 资源预约 (Reservation)</h3>
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted,#94a3b8)', marginTop: '0.25rem' }}>
+              预留指定计算节点或分区资源，支持按租户/用户授权或排班维护窗口。
+            </div>
+          </div>
+          <MiniBtn onClick={onClose}>关闭</MiniBtn>
+        </div>
+
+        {/* 快捷模板 */}
+        <div style={{ marginBottom: '1.25rem', padding: '0.75rem', background: 'rgba(255,255,255,0.03)', borderRadius: 8, border: '1px dashed rgba(255,255,255,0.1)' }}>
+          <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted,#94a3b8)', marginBottom: '0.45rem' }}>⚡ 常用快捷模板</div>
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <button type="button" onClick={() => applyPreset('maint')} className="btn-secondary" style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }}>
+              🛠️ 集群排班维护窗口 (MAINT)
+            </button>
+            <button type="button" onClick={() => applyPreset('gpu')} className="btn-secondary" style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }}>
+              🚀 租户 GPU 节点专享预约 (node1)
+            </button>
+          </div>
+        </div>
+
+        {err && <Notice color="#f43f5e" bg="rgba(239,68,68,.12)">{err}</Notice>}
+
+        <form onSubmit={submit} style={{ display: 'grid', gap: '1rem' }}>
+          {/* 基础信息 */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(260px,1fr))', gap: '0.75rem' }}>
+            <Field label="预约名称 (必填)">
+              <input
+                className="form-control"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="如 maint-2026 或 vip-exp"
+                required
+              />
+            </Field>
+
+            <Field label="持续时长">
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <input
+                  type="number"
+                  className="form-control"
+                  value={durationVal}
+                  onChange={(e) => setDurationVal(e.target.value)}
+                  min="1"
+                  style={{ flex: 1 }}
+                  required
+                />
+                <Select
+                  value={durationUnit}
+                  onChange={(v) => setDurationUnit(v as any)}
+                  options={[
+                    { value: 'minutes', label: '分钟' },
+                    { value: 'hours', label: '小时' },
+                    { value: 'days', label: '天' },
+                  ]}
+                  style={{ width: '90px' }}
+                />
+              </div>
+            </Field>
+          </div>
+
+          {/* 生效时间 */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(260px,1fr))', gap: '0.75rem' }}>
+            <Field label="生效时间模式">
+              <div style={{ display: 'flex', gap: '1rem', marginTop: '0.35rem' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.85rem', cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="startMode"
+                    checked={startMode === 'now'}
+                    onChange={() => setStartMode('now')}
+                  />
+                  立即生效 (NOW)
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.85rem', cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="startMode"
+                    checked={startMode === 'custom'}
+                    onChange={() => setStartMode('custom')}
+                  />
+                  指定未来时间
+                </label>
+              </div>
+            </Field>
+
+            {startMode === 'custom' && (
+              <Field label="自定义开始时间 (YYYY-MM-DDTHH:MM)">
+                <input
+                  type="datetime-local"
+                  className="form-control"
+                  value={customStartTime}
+                  onChange={(e) => setCustomStartTime(e.target.value)}
+                  required={startMode === 'custom'}
+                />
+              </Field>
+            )}
+          </div>
+
+          {/* 目标资源 */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(260px,1fr))', gap: '0.75rem' }}>
+            <Field label="目标分区 (可选)">
+              <Select
+                value={partition}
+                onChange={(v) => setPartition(v)}
+                options={[
+                  { value: '', label: '不限分区（全部）' },
+                  ...partitionsList.map((p) => ({ value: p, label: `分区: ${p}` })),
+                ]}
+              />
+            </Field>
+
+            <Field label="指定节点 (可选，逗号分隔)">
+              <input
+                className="form-control"
+                value={nodes}
+                onChange={(e) => setNodes(e.target.value)}
+                placeholder="如 node1 或 node[2-3]，留空按数量分配"
+              />
+            </Field>
+          </div>
+
+          {/* 授权范围 */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(260px,1fr))', gap: '0.75rem' }}>
+            <Field label="授权租户/账号 (Accounts，推荐)">
+              <Select
+                value={accounts}
+                onChange={(v) => setAccounts(v)}
+                options={[
+                  { value: '', label: '不限租户（留空）' },
+                  ...tenants.map((t) => ({ value: t.slug, label: `租户: ${t.name || t.slug} (${t.slug})` })),
+                ]}
+              />
+            </Field>
+
+
+            <Field label="授权特定用户 (Users，可选)">
+              <input
+                className="form-control"
+                value={users}
+                onChange={(e) => setUsers(e.target.value)}
+                placeholder="如 alice,bob（逗号分隔）"
+              />
+            </Field>
+          </div>
+
+          {/* 高级标志位 */}
+          <Field label="高级 Flags 标志 (可选)">
+            <input
+              className="form-control"
+              value={flags}
+              onChange={(e) => setFlags(e.target.value)}
+              placeholder="如 MAINT,IGNORE_JOBS"
+            />
+          </Field>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
+            <button type="button" className="btn-secondary" onClick={onClose} disabled={submitting}>
+              取消
+            </button>
+            <button type="submit" className="btn-primary" disabled={submitting}>
+              {submitting ? '创建中...' : '提交创建预约'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 export function ReservationsPanel() {
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [reservations, setReservations] = useState<Reservation[]>([]);
-  const [resvForm, setResvForm] = useState({ name: '', durationMinutes: '30', users: '' });
+  const [showCreateModal, setShowCreateModal] = useState(false);
 
   const loadResv = async () => {
     try {
@@ -19,71 +322,121 @@ export function ReservationsPanel() {
       setError(`预约读取失败：${e?.message || e}`);
     }
   };
-  const submitResv = async () => {
-    setError(''); setInfo('');
-    try {
-      await slurm.createReservation({ name: resvForm.name.trim(), durationMinutes: Number(resvForm.durationMinutes) || 30, users: resvForm.users.trim() || undefined });
-      setInfo(`预约 ${resvForm.name.trim()} 已创建`);
-      setResvForm({ name: '', durationMinutes: '30', users: '' });
-      await loadResv();
-    } catch (e: any) {
-      setError(`创建预约失败：${e?.message || e}`);
-    }
-  };
+
   const delResv = async (name: string) => {
+    if (!window.confirm(`确定要删除预约 "${name}" 吗？删除后相关节点将恢复常规调度。`)) {
+      return;
+    }
     setError(''); setInfo('');
     try {
       await slurm.deleteReservation(name);
-      setInfo(`预约 ${name} 已删除`);
+      setInfo(`预约 ${name} 已成功删除`);
       await loadResv();
     } catch (e: any) {
       setError(`删除预约失败：${e?.message || e}`);
     }
   };
+
   useEffect(() => { loadResv(); }, []);
 
   return (
     <div style={{ ...cardStyle, marginTop: '1.5rem', display: 'block' }}>
-      <div style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '0.75rem' }}>预约管理</div>
-      {error && <div style={{ padding: '0.5rem 0.7rem', background: 'rgba(239,68,68,.1)', color: 'var(--accent-rose)', borderRadius: 6, fontSize: '0.8rem', marginBottom: '0.8rem' }}>{error}</div>}
-      {info && <div style={{ padding: '0.5rem 0.7rem', background: 'rgba(16,185,129,.1)', color: '#10b981', borderRadius: 6, fontSize: '0.8rem', marginBottom: '0.8rem' }}>{info}</div>}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(160px,1fr))', gap: '0.75rem', marginBottom: '0.75rem' }}>
-        <Field label="预约名">
-          <input className="form-control" value={resvForm.name} onChange={(e) => setResvForm({ ...resvForm, name: e.target.value })} placeholder="maint-window" />
-        </Field>
-        <Field label="时长(分钟)">
-          <input className="form-control" value={resvForm.durationMinutes} onChange={(e) => setResvForm({ ...resvForm, durationMinutes: e.target.value })} />
-        </Field>
-        <Field label="用户(可选,逗号分隔)">
-          <input className="form-control" value={resvForm.users} onChange={(e) => setResvForm({ ...resvForm, users: e.target.value })} placeholder="留空=全租户" />
-        </Field>
-        <div style={{ display: 'flex', alignItems: 'end', gap: '0.5rem' }}>
-          <button className="btn-primary" type="button" onClick={submitResv} style={{ padding: '0.45rem 1.2rem' }}>创建预约</button>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+        <div>
+          <div style={{ fontSize: '1.05rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span>📅 预约管理 (Reservation)</span>
+            <span style={{ fontSize: '0.75rem', padding: '0.1rem 0.5rem', borderRadius: 999, background: 'rgba(59,130,246,0.15)', color: '#60a5fa', fontWeight: 600 }}>
+              {reservations.length} 个当前预约
+            </span>
+          </div>
+          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted,#94a3b8)', marginTop: '0.2rem' }}>
+            管理集群专用资源预约窗口，支持为特定租户/用户排班独占节点或设置系统维护期。
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button
+            className="btn-primary"
+            type="button"
+            onClick={() => setShowCreateModal(true)}
+            style={{ padding: '0.4rem 1rem', fontSize: '0.85rem' }}
+          >
+            + 新建资源预约
+          </button>
           <MiniBtn onClick={loadResv}>刷新</MiniBtn>
         </div>
       </div>
+
+      {error && <div style={{ padding: '0.5rem 0.7rem', background: 'rgba(239,68,68,.1)', color: 'var(--accent-rose)', borderRadius: 6, fontSize: '0.8rem', marginBottom: '0.8rem' }}>{error}</div>}
+      {info && <div style={{ padding: '0.5rem 0.7rem', background: 'rgba(16,185,129,.1)', color: '#10b981', borderRadius: 6, fontSize: '0.8rem', marginBottom: '0.8rem' }}>{info}</div>}
+
       {reservations.length === 0 ? (
-        <div style={emptyStyle}>暂无预约</div>
+        <div style={emptyStyle}>当前集群暂无有效资源预约</div>
       ) : (
         <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
             <thead>
-              <tr style={{ textAlign: 'left' }}>
-                <th style={th}>名称</th><th style={th}>开始</th><th style={th}>结束</th>
-                <th style={th}>节点</th><th style={th}>用户</th><th style={th}>状态</th><th style={th}>操作</th>
+              <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--row-line,#2a2f3a)' }}>
+                <th style={th}>预约名称</th>
+                <th style={th}>状态</th>
+                <th style={th}>生效区间 (开始 ~ 结束)</th>
+                <th style={th}>时长</th>
+                <th style={th}>目标节点 / 分区</th>
+                <th style={th}>授权对象 (租户 / 用户)</th>
+                <th style={th}>高级标志</th>
+                <th style={{ ...th, textAlign: 'right' }}>操作</th>
               </tr>
             </thead>
             <tbody>
               {reservations.map((r, i) => (
                 <tr key={r.name} style={{ borderBottom: i === reservations.length - 1 ? 'none' : '1px solid var(--row-line,#2a2f3a)' }}>
-                  <td style={{ ...td, ...mono, fontWeight: 700 }}>{r.name}</td>
-                  <td style={{ ...td, ...mono, fontSize: '0.8rem' }}>{r.start_time || '-'}</td>
-                  <td style={{ ...td, ...mono, fontSize: '0.8rem' }}>{r.end_time || '-'}</td>
-                  <td style={{ ...td, ...mono, fontSize: '0.8rem' }}>{r.nodes || '-'}</td>
-                  <td style={{ ...td, ...mono, fontSize: '0.8rem' }}>{r.users || 'ALL'}</td>
-                  <td style={td}><StatusBadge status={r.state || ''} /></td>
+                  <td style={{ ...td, ...mono, fontWeight: 700, color: 'var(--text-main,#f1f5f9)' }}>
+                    {r.name}
+                  </td>
                   <td style={td}>
-                    <MiniBtn onClick={() => delResv(r.name)}>删除</MiniBtn>
+                    <StatusBadge status={r.state || 'ACTIVE'} />
+                  </td>
+                  <td style={{ ...td, ...mono, fontSize: '0.8rem' }}>
+                    <div>{r.start_time || '-'}</div>
+                    <div style={{ color: 'var(--text-muted,#94a3b8)', fontSize: '0.75rem' }}>至 {r.end_time || '-'}</div>
+                  </td>
+                  <td style={{ ...td, ...mono, fontSize: '0.8rem' }}>{r.duration || '-'}</td>
+                  <td style={td}>
+                    <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                      {r.nodes && (
+                        <span style={{ fontSize: '0.72rem', padding: '0.1rem 0.4rem', borderRadius: 4, background: 'rgba(59,130,246,0.15)', color: '#60a5fa', fontFamily: 'monospace' }}>
+                          节点: {r.nodes}
+                        </span>
+                      )}
+                      {r.partition && (
+                        <span style={{ fontSize: '0.72rem', padding: '0.1rem 0.4rem', borderRadius: 4, background: 'rgba(168,85,247,0.15)', color: '#c084fc', fontFamily: 'monospace' }}>
+                          分区: {r.partition}
+                        </span>
+                      )}
+                      {!r.nodes && !r.partition && <span style={{ color: 'var(--text-muted,#94a3b8)' }}>全部节点</span>}
+                    </div>
+                  </td>
+                  <td style={td}>
+                    <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                      {r.accounts && (
+                        <span style={{ fontSize: '0.72rem', padding: '0.1rem 0.4rem', borderRadius: 4, background: 'rgba(16,185,129,0.15)', color: '#34d399', fontWeight: 600 }}>
+                          租户: {r.accounts}
+                        </span>
+                      )}
+                      {r.users && r.users !== '(null)' && (
+                        <span style={{ fontSize: '0.72rem', padding: '0.1rem 0.4rem', borderRadius: 4, background: 'rgba(245,158,11,0.15)', color: '#fbbf24' }}>
+                          用户: {r.users}
+                        </span>
+                      )}
+                      {!r.accounts && (!r.users || r.users === '(null)') && (
+                        <span style={{ color: 'var(--text-muted,#94a3b8)', fontSize: '0.75rem' }}>全员可用</span>
+                      )}
+                    </div>
+                  </td>
+                  <td style={{ ...td, fontSize: '0.75rem', color: 'var(--text-muted,#94a3b8)', fontFamily: 'monospace' }}>
+                    {r.flags || '-'}
+                  </td>
+                  <td style={{ ...td, textAlign: 'right' }}>
+                    <MiniBtn onClick={() => delResv(r.name)}>删除预约</MiniBtn>
                   </td>
                 </tr>
               ))}
@@ -91,9 +444,20 @@ export function ReservationsPanel() {
           </table>
         </div>
       )}
+
+      {showCreateModal && (
+        <CreateReservationModal
+          onClose={() => setShowCreateModal(false)}
+          onSuccess={(newResvName) => {
+            setInfo(`预约 "${newResvName}" 创建成功！`);
+            loadResv();
+          }}
+        />
+      )}
     </div>
   );
 }
+
 
 // 格式化 TRES 字符串（如 "gres/gpu=4,cpu=32,mem=64G"）为结构化彩色徽章
 export function formatTRES(tres?: string) {

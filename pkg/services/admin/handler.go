@@ -346,7 +346,7 @@ func (h *AdminHandler) ListReservations(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"reservations": rs})
 }
 
-// CreateReservation POST /api/v1/admin/reservations {name,startTime,durationMinutes,nodes,users,partition}
+// CreateReservation POST /api/v1/admin/reservations {name,startTime,durationMinutes,nodes,users,accounts,partition,flags}
 // v3-X1：成功经 service 落审计（reservations.create）。
 func (h *AdminHandler) CreateReservation(c *gin.Context) {
 	var req struct {
@@ -355,20 +355,23 @@ func (h *AdminHandler) CreateReservation(c *gin.Context) {
 		DurationMinutes int    `json:"durationMinutes" binding:"required"`
 		Nodes           string `json:"nodes"`
 		Users           string `json:"users"`
+		Accounts        string `json:"accounts"`
 		Partition       string `json:"partition"`
+		Flags           string `json:"flags"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		httpx.BadRequest(c, "name and durationMinutes are required")
 		return
 	}
 	actor, _ := actorAndTenant(c)
-	r, err := h.service.CreateReservation(c.Request.Context(), actor, req.Name, req.StartTime, req.DurationMinutes, req.Nodes, req.Users, req.Partition, requestID(c))
+	r, err := h.service.CreateReservation(c.Request.Context(), actor, req.Name, req.StartTime, req.DurationMinutes, req.Nodes, req.Users, req.Accounts, req.Partition, req.Flags, requestID(c))
 	if err != nil {
 		httpx.BadRequest(c, err.Error())
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"reservation": r})
 }
+
 
 // DeleteReservation DELETE /api/v1/admin/reservations/:name
 func (h *AdminHandler) DeleteReservation(c *gin.Context) {

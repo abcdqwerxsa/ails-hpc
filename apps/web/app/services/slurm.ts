@@ -148,6 +148,7 @@ export interface SubmitJobRequest {
   script: string;
   current_working_directory?: string;
   qos?: string; // 注入用户选择的 QOS
+  reservation?: string; // 注入用户指定的预约
 }
 export interface SubmitJobResponse {
   code: number;
@@ -194,7 +195,9 @@ export interface ContainerLaunchRequest {
   gpus?: number; // GPU 数量（0=CPU, 1=1 GPU）
   time_limit_min?: number; // 会话时长分钟（1.4；默认 120，上限 720）
   qos?: string; // 用户指定的 Slurm QOS
+  reservation?: string; // 用户指定的 Slurm 预约名称
 }
+
 export interface ContainerLaunchResponse {
   container_id: string;
   env_type: string;
@@ -344,8 +347,12 @@ export interface Reservation {
   duration?: string;
   nodes?: string;
   users?: string;
+  accounts?: string;
+  partition?: string;
+  flags?: string;
   state?: string;
 }
+
 export interface QOSInfo {
   name: string;
   description?: string;
@@ -679,12 +686,13 @@ export const slurm = {
       body: JSON.stringify({ slug, name }),
     }),
   listReservations: () => apiFetch<{ reservations: Reservation[] }>("/admin/reservations"),
-  createReservation: (p: { name: string; durationMinutes: number; startTime?: string; nodes?: string; users?: string; partition?: string }) =>
+  createReservation: (p: { name: string; durationMinutes: number; startTime?: string; nodes?: string; users?: string; accounts?: string; partition?: string; flags?: string }) =>
     apiFetch<{ reservation: Reservation }>("/admin/reservations", {
       method: "POST",
       body: JSON.stringify(p),
     }),
   deleteReservation: (name: string) =>
+
     apiFetch<{ message: string }>(`/admin/reservations/${encodeURIComponent(name)}`, { method: "DELETE" }),
   listQOS: () => apiFetch<{ qos: QOSInfo[] }>("/admin/qos"),
   getQOS: (name: string) => apiFetch<{ qos: QOSInfo }>(`/admin/qos/${encodeURIComponent(name)}`),

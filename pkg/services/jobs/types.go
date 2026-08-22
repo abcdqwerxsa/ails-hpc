@@ -65,7 +65,9 @@ type SubmitJobRequest struct {
 	Script                  string        `json:"script"`
 	CurrentWorkingDirectory string        `json:"current_working_directory"`
 	QOS                     string        `json:"qos,omitempty"`
+	Reservation             string        `json:"reservation,omitempty"`
 }
+
 
 // SubmitJobResponse 作业提交成功响应
 type SubmitJobResponse struct {

@@ -87,6 +87,7 @@ type CliSubmitOpts struct {
 	Tasks       int
 	TimeLimit   int // 分钟
 	QOS         string
+	Reservation string
 }
 
 type containerServiceImpl struct {
@@ -131,6 +132,9 @@ func defaultCliSubmit(o CliSubmitOpts) (int, error) {
 	if o.QOS != "" {
 		args = append(args, fmt.Sprintf("--qos=%s", o.QOS))
 	}
+	if o.Reservation != "" {
+		args = append(args, fmt.Sprintf("--reservation=%s", o.Reservation))
+	}
 	if o.Nodes > 1 {
 		args = append(args, fmt.Sprintf("--nodes=%d", o.Nodes))
 	}
@@ -138,6 +142,7 @@ func defaultCliSubmit(o CliSubmitOpts) (int, error) {
 		args = append(args, fmt.Sprintf("--ntasks=%d", o.Tasks))
 	}
 	args = append(args, scriptPath)
+
 	out, err := slurmrest.RunInSlurmctld(args...)
 	if err != nil {
 		return 0, fmt.Errorf("sbatch: %w: %s", err, strings.TrimSpace(string(out)))
@@ -231,9 +236,14 @@ func (s *containerServiceImpl) LaunchContainer(ctx context.Context, req *Contain
 		return nil, ErrInvalidQOS
 	}
 
+	reservation := strings.TrimSpace(req.Reservation)
+	if reservation != "" && !qosNameRE.MatchString(reservation) {
+		return nil, errors.New("invalid reservation name")
+	}
+
 	sessionID := newSessionID()
 	port := portFor(sessionID)
-	script := buildIDEScript(envType, envPreset, sessionID, port, cpus, memoryMB, req.GPUs, nodes, clusterUser, qos)
+	script := buildIDEScript(envType, envPreset, sessionID, port, cpus, memoryMB, req.GPUs, nodes, clusterUser, qos, reservation)
 
 	timeLimit := ideTimeLimit
 	// 1.4：会话时长可调（分钟；默认 2h，1..720min 上限 12h）
@@ -261,7 +271,9 @@ func (s *containerServiceImpl) LaunchContainer(ctx context.Context, req *Contain
 			Tasks:       1,
 			TimeLimit:   timeLimitMin,
 			QOS:         qos,
+			Reservation: reservation,
 		}
+
 		var err error
 		jobID, err = s.cliSubmit(opts)
 		if err != nil {
@@ -285,6 +297,10 @@ func (s *containerServiceImpl) LaunchContainer(ctx context.Context, req *Contain
 		if qos != "" {
 			subReq.Job.Qos = qos
 		}
+		if reservation != "" {
+			subReq.Job.Reservation = reservation
+		}
+
 
 		resp, err := s.jobs.SubmitJobAs(subReq, clusterUser)
 		if err != nil {
@@ -564,14 +580,18 @@ func (s *containerServiceImpl) reapIdleSessions(ctx context.Context, timeoutMin 
 
 // buildIDEScript 生成在计算节点上拉起 IDE 应用并回写连接信息的 sbatch 脚本。
 // 应用 auth 关闭——访问由 apiserver 的 JWT 网关守门；base_url 对齐反代前缀。
-func buildIDEScript(envType, envPreset, sessionID string, port, cpus, memoryMB, gpus, nodes int, clusterUser string, qos string) string {
+func buildIDEScript(envType, envPreset, sessionID string, port, cpus, memoryMB, gpus, nodes int, clusterUser string, qos string, reservation string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "#!/bin/bash\n")
 	if qos != "" {
 		fmt.Fprintf(&b, "#SBATCH --qos=%s\n", qos)
 	}
-	fmt.Fprintf(&b, "# AILS interactive dev session env=%s preset=%s session=%s port=%d cpus=%d mem=%d gpus=%d nodes=%d qos=%s\n",
-		envType, envPreset, sessionID, port, cpus, memoryMB, gpus, nodes, qos)
+	if reservation != "" {
+		fmt.Fprintf(&b, "#SBATCH --reservation=%s\n", reservation)
+	}
+	fmt.Fprintf(&b, "# AILS interactive dev session env=%s preset=%s session=%s port=%d cpus=%d mem=%d gpus=%d nodes=%d qos=%s resv=%s\n",
+		envType, envPreset, sessionID, port, cpus, memoryMB, gpus, nodes, qos, reservation)
+
 	fmt.Fprintf(&b, "SESSION_ID=%q\n", sessionID)
 	fmt.Fprintf(&b, "PORT=%d\n", port)
 	fmt.Fprintf(&b, "BASE_URL=%q\n", ideBaseURLPath+"/"+sessionID)

@@ -197,7 +197,7 @@ func TestClusterAdminAudit_X1(t *testing.T) {
 		t.Fatalf("seed tenant: %v", err)
 	}
 
-	if _, err := s.CreateReservation(ctx, "padmin", "maint", "", 30, "", "u1", "", "rid-1"); err != nil {
+	if _, err := s.CreateReservation(ctx, "padmin", "maint", "", 30, "", "u1", "", "", "", "rid-1"); err != nil {
 		t.Fatalf("CreateReservation: %v", err)
 	}
 	if err := s.DeleteReservation(ctx, "padmin", "maint", "rid-2"); err != nil {

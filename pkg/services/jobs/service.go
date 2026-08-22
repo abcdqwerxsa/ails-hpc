@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 
 	"ails-hpc/pkg/slurmrest"
 )
+
 
 var globalJobIDCounter int64 = 1000
 
@@ -80,6 +82,7 @@ type CliSubmitOpts struct {
 	ArraySpec   string // sbatch --array（4.1；空=不用）
 	Dependency  string // sbatch --dependency（4.1；空=不用）
 	QOS         string
+	Reservation string
 }
 
 // defaultCliSubmit 生产实现：脚本写入 /shared/portal-jobs/<name>-<rand>.job，
@@ -109,9 +112,13 @@ func defaultCliSubmit(o CliSubmitOpts) (int, error) {
 	if o.QOS != "" {
 		args = append(args, "--qos="+o.QOS)
 	}
+	if o.Reservation != "" {
+		args = append(args, "--reservation="+o.Reservation)
+	}
 	if o.ArraySpec != "" {
 		args = append(args, "--array="+o.ArraySpec)
 	}
+
 	if o.Dependency != "" {
 		args = append(args, "--dependency="+o.Dependency)
 	}
@@ -195,6 +202,9 @@ func (s *jobServiceImpl) SubmitJob(ctx context.Context, req *SubmitJobRequest, c
 	if req.QOS != "" && !qosNameRE.MatchString(req.QOS) {
 		return nil, ErrInvalidQOS
 	}
+	if req.Reservation != "" && !qosNameRE.MatchString(req.Reservation) {
+		return nil, errors.New("invalid reservation name")
+	}
 
 	if cpus > 1000 || req.Nodes > 100 {
 		return nil, ErrInvalidResourceLimit
@@ -255,7 +265,7 @@ func (s *jobServiceImpl) SubmitJob(ctx context.Context, req *SubmitJobRequest, c
 			Script: req.Script, MemoryMB: req.MemoryMB, Gpus: req.Gpus,
 			Nodes: nodesCount, Tasks: req.Tasks, TimeLimit: timeLimit,
 			ArraySpec: req.ArraySpec, Dependency: req.Dependency,
-			QOS: req.QOS,
+			QOS: req.QOS, Reservation: req.Reservation,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("gpu job submit: %w", err)
@@ -281,6 +291,10 @@ func (s *jobServiceImpl) SubmitJob(ctx context.Context, req *SubmitJobRequest, c
 		if req.QOS != "" {
 			slurmReq.Job.Qos = req.QOS
 		}
+		if req.Reservation != "" {
+			slurmReq.Job.Reservation = req.Reservation
+		}
+
 		// 1.2 输出管理：统一落 /shared/jobs/%j.out（stdout/stderr 合流；%j 由 Slurm 展开，
 		// 实测可用），cwd=/shared（容器家目录是临时的）。旧作业输出在临时 home 即丢。
 		slurmReq.Job.CurrentWorkingDirectory = "/shared"

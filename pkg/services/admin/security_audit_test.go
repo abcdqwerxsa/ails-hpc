@@ -53,22 +53,24 @@ func TestCreateReservation_InjectionRejected(t *testing.T) {
 	})
 	ctx := context.Background()
 
-	bad := []struct{ start, nodes, part, users string }{
-		{"2026-01-01T00:00'; id; '", "", "", ""}, // starttime 单引号逃逸
-		{"", "node1'; id; '", "", ""},            // nodes
-		{"", "", "stand;ard", ""},                // partition 分号
-		{"", "", "", "u1'; touch /tmp/x; '"},     // users
-		{"2086-01-01 00:00", "", "", ""},         // 时间格式（空格替代 T）
-		{"", "", "", "u1 u2"},                    // 空格列表
+	bad := []struct{ start, nodes, part, users, accounts, flags string }{
+		{"2026-01-01T00:00'; id; '", "", "", "", "", ""}, // starttime 单引号逃逸
+		{"", "node1'; id; '", "", "", "", ""},            // nodes
+		{"", "", "stand;ard", "", "", ""},                // partition 分号
+		{"", "", "", "u1'; touch /tmp/x; '", "", ""},     // users
+		{"", "", "", "", "hpc-lab; rm -rf /", ""},        // accounts 注入
+		{"", "", "", "", "", "MAINT'; id; '"},            // flags 注入
+		{"2086-01-01 00:00", "", "", "", "", ""},         // 时间格式（空格替代 T）
+		{"", "", "", "u1 u2", "", ""},                    // 空格列表
 	}
 	for i, c := range bad {
-		_, err := svc.CreateReservation(ctx, "padmin", "maint"+strings.Repeat("a", 0), c.start, 30, c.nodes, c.users, c.part, "")
+		_, err := svc.CreateReservation(ctx, "padmin", "maint"+strings.Repeat("a", 0), c.start, 30, c.nodes, c.users, c.accounts, c.part, c.flags, "")
 		if err == nil {
-			t.Errorf("case %d: want reject (start=%q nodes=%q part=%q users=%q), got nil；cmds=%v", i, c.start, c.nodes, c.part, c.users, cmds)
+			t.Errorf("case %d: want reject, got nil；cmds=%v", i, cmds)
 		}
 	}
 	// 良性值仍通（命令确实到达 runner）
-	if _, err := svc.CreateReservation(ctx, "padmin", "maint-ok", "2026-12-31T09:30", 30, "node[1-2]", "tadmin,alice", "standard", ""); err != nil {
+	if _, err := svc.CreateReservation(ctx, "padmin", "maint-ok", "2026-12-31T09:30", 30, "node[1-2]", "tadmin,alice", "hpc-lab", "standard", "MAINT", ""); err != nil {
 		t.Fatalf("benign reservation rejected: %v", err)
 	}
 	sawCreate := false

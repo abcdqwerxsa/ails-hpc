@@ -589,10 +589,12 @@ type SlurmJobSubmitReq struct {
 		StandardOutput string `json:"standard_output,omitempty"`
 		// Account 携带提交者用户名，作为 apiserver 层归属隔离的 owner 载体
 		// （集群 AccountingStorageEnforce=none，不校验 account 存在性，可安全复用）。
-		Account string `json:"account,omitempty"`
-		Qos     string `json:"qos,omitempty"`
+		Account     string `json:"account,omitempty"`
+		Qos         string `json:"qos,omitempty"`
+		Reservation string `json:"reservation,omitempty"`
 	} `json:"job"`
 }
+
 
 // SlurmJobSubmitResp 定义 SlurmREST v0.0.37 提交作业返回体
 type SlurmJobSubmitResp struct {

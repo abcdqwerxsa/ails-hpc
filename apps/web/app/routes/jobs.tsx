@@ -127,6 +127,7 @@ function JobsPage() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [arraySpec, setArraySpec] = useState('');
   const [dependency, setDependency] = useState('');
+  const [reservation, setReservation] = useState('');
 
   // 分区列表与可用 QOS 发现
   useEffect(() => {
@@ -149,22 +150,17 @@ function JobsPage() {
         setAvailableQosList(list);
         const def = r.defaultQos || r.defaultQOS || list[0]?.name || 'normal';
         setDefaultQos(def);
-        setForm((f) => ({ ...f, qos: f.qos || def }));
+        setForm((prev) => (prev.qos ? prev : { ...prev, qos: def }));
       })
-      .catch(() => {
-        setAvailableQosList([{ name: 'normal', description: '标准调度策略' }]);
-      });
+      .catch(() => {});
   }, []);
 
   const refresh = useCallback(async () => {
     try {
       const r = await slurm.getJobs();
       setJobs(r.jobs || []);
-      setError('');
-    } catch (e: any) {
-      setError(e?.message || '加载作业失败');
-    } finally {
-      setLoading(false);
+    } catch (err: any) {
+      setError(`加载作业失败：${err?.message || err}`);
     }
   }, []);
 
@@ -196,9 +192,11 @@ function JobsPage() {
         time_limit: String(form.time_limit || '60'),
         script: form.script,
         qos: form.qos?.trim() || undefined,
+        reservation: reservation.trim() || undefined,
       });
-      setInfo(`已提交：作业 #${r.job_id}${form.qos ? ` (QOS: ${form.qos})` : ''}`);
+      setInfo(`已提交：作业 #${r.job_id}${form.qos ? ` (QOS: ${form.qos})` : ''}${reservation.trim() ? ` (预约: ${reservation.trim()})` : ''}`);
       setForm({ ...emptyForm, qos: defaultQos });
+      setReservation('');
       await refresh();
     } catch (err: any) {
       setError(`提交失败：${err?.message || err}`);
@@ -375,15 +373,19 @@ function JobsPage() {
             );
           })()}
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
             <button type="button" className="neu-btn" onClick={() => setShowAdvanced(!showAdvanced)}>
-              {showAdvanced ? '收起高级选项' : '高级选项（数组/依赖）'}
+              {showAdvanced ? '收起高级选项' : '高级选项（预约/数组/依赖）'}
             </button>
-            {arraySpec.trim() && <span style={{ fontSize: '0.78rem', color: 'var(--accent-primary)' }}>数组 {arraySpec.trim()}</span>}
-            {dependency.trim() && <span style={{ fontSize: '0.78rem', color: 'var(--accent-amber,#f59e0b)' }}>依赖 {dependency.trim()}</span>}
+            {reservation.trim() && <span style={{ fontSize: '0.78rem', color: '#60a5fa' }}>📅 预约: {reservation.trim()}</span>}
+            {arraySpec.trim() && <span style={{ fontSize: '0.78rem', color: 'var(--accent-primary)' }}>数组: {arraySpec.trim()}</span>}
+            {dependency.trim() && <span style={{ fontSize: '0.78rem', color: 'var(--accent-amber,#f59e0b)' }}>依赖: {dependency.trim()}</span>}
           </div>
           {showAdvanced && (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(180px,1fr))', gap: '0.75rem' }}>
+              <Field label="Slurm 资源预约（可选）">
+                <input className="form-control" value={reservation} onChange={(e) => setReservation(e.target.value)} placeholder="如 maint-2026 或 vip-gpu" />
+              </Field>
               <Field label="作业数组（可选）">
                 <input className="form-control" value={arraySpec} onChange={(e) => setArraySpec(e.target.value)} placeholder="如 1-4 或 1-10%2" />
               </Field>
@@ -392,6 +394,7 @@ function JobsPage() {
               </Field>
             </div>
           )}
+
           <Field label="脚本">
             <textarea
               className="form-control"
