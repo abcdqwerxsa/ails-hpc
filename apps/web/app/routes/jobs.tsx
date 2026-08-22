@@ -161,8 +161,11 @@ function JobsPage() {
       setJobs(r.jobs || []);
     } catch (err: any) {
       setError(`加载作业失败：${err?.message || err}`);
+    } finally {
+      setLoading(false);
     }
   }, []);
+
 
   useEffect(() => {
     refresh();
