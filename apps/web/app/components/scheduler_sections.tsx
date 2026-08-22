@@ -147,23 +147,35 @@ function CreateReservationModal({ onClose, onSuccess }: CreateReservationModalPr
         </div>
 
         {/* 快捷模板 */}
-        <div style={{ marginBottom: '1.25rem', padding: '0.75rem', background: 'rgba(255,255,255,0.02)', borderRadius: 8, border: '1px dashed var(--border-color,#2a2f3a)' }}>
-          <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted,#94a3b8)', marginBottom: '0.45rem' }}>快捷预设模板</div>
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-            <button type="button" onClick={() => applyPreset('maint')} className="btn-secondary" style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }}>
-              维护窗口 (MAINT)
+        <div style={{ marginBottom: '1.25rem', padding: '0.85rem 1rem', background: 'var(--card-bg)', border: '1px solid var(--border-color,#2a2f3a)', borderRadius: 10, boxShadow: 'var(--shadow-card)' }}>
+          <div style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary,#64748b)', marginBottom: '0.6rem' }}>快捷预设模板</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '0.6rem' }}>
+            <button
+              type="button"
+              onClick={() => applyPreset('maint')}
+              className="neu-btn"
+              style={{ padding: '0.55rem 0.85rem', textAlign: 'left', display: 'flex', flexDirection: 'column', gap: '0.15rem' }}
+            >
+              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main,#f1f5f9)' }}>维护窗口 (MAINT)</span>
+              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted,#94a3b8)' }}>全集群节点独占 · 2 小时 · 忽略常规排队</span>
             </button>
-            <button type="button" onClick={() => applyPreset('gpu')} className="btn-secondary" style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }}>
-              GPU 节点专享预约 (node1)
+            <button
+              type="button"
+              onClick={() => applyPreset('gpu')}
+              className="neu-btn"
+              style={{ padding: '0.55rem 0.85rem', textAlign: 'left', display: 'flex', flexDirection: 'column', gap: '0.15rem' }}
+            >
+              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--accent-cyan,#06b6d4)' }}>GPU 节点专享预约 (node1)</span>
+              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted,#94a3b8)' }}>performance 分区 · 4 小时 · 指定租户专用</span>
             </button>
           </div>
         </div>
 
         {err && <Notice color="#f43f5e" bg="rgba(239,68,68,.12)">{err}</Notice>}
 
-        <form onSubmit={submit} style={{ display: 'grid', gap: '1rem' }}>
-          {/* 基础信息 */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(260px,1fr))', gap: '0.75rem' }}>
+        <form onSubmit={submit} style={{ display: 'grid', gap: '1.15rem' }}>
+          {/* 分组 1：基础信息与时长 */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem' }}>
             <Field label="预约名称 (必填)">
               <input
                 className="form-control"
@@ -175,7 +187,7 @@ function CreateReservationModal({ onClose, onSuccess }: CreateReservationModalPr
             </Field>
 
             <Field label="持续时长">
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                 <input
                   type="number"
                   className="form-control"
@@ -199,80 +211,80 @@ function CreateReservationModal({ onClose, onSuccess }: CreateReservationModalPr
             </Field>
           </div>
 
-          {/* 生效时间 */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(260px,1fr))', gap: '0.75rem' }}>
-            <Field label="生效时间模式">
-              <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.2rem' }}>
-                <button
-                  type="button"
-                  onClick={() => setStartMode('now')}
-                  className={startMode === 'now' ? 'btn-primary' : 'btn-secondary'}
-                  style={{ padding: '0.35rem 0.8rem', fontSize: '0.8rem' }}
-                >
-                  立即生效 (NOW)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setStartMode('custom')}
-                  className={startMode === 'custom' ? 'btn-primary' : 'btn-secondary'}
-                  style={{ padding: '0.35rem 0.8rem', fontSize: '0.8rem' }}
-                >
-                  指定未来时间
-                </button>
-              </div>
-            </Field>
-
-            {startMode === 'custom' && (
-              <Field label="自定义开始时间 (YYYY-MM-DDTHH:MM)">
-                <input
-                  type="datetime-local"
-                  className="form-control"
-                  value={customStartTime}
-                  onChange={(e) => setCustomStartTime(e.target.value)}
-                  required={startMode === 'custom'}
-                  style={{ colorScheme: 'inherit' }}
-                />
+          {/* 分组 2：生效时间与排期 */}
+          <div style={{ padding: '0.85rem', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-color,#2a2f3a)', borderRadius: 8 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: startMode === 'custom' ? '1fr 1fr' : '1fr', gap: '0.85rem', alignItems: 'end' }}>
+              <Field label="生效排期模式">
+                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.2rem' }}>
+                  <button
+                    type="button"
+                    onClick={() => setStartMode('now')}
+                    className={startMode === 'now' ? 'btn-primary' : 'neu-btn'}
+                    style={{ flex: 1, padding: '0.45rem 0.75rem', fontSize: '0.82rem', fontWeight: 600 }}
+                  >
+                    立即生效 (NOW)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setStartMode('custom')}
+                    className={startMode === 'custom' ? 'btn-primary' : 'neu-btn'}
+                    style={{ flex: 1, padding: '0.45rem 0.75rem', fontSize: '0.82rem', fontWeight: 600 }}
+                  >
+                    指定未来时间
+                  </button>
+                </div>
               </Field>
-            )}
+
+              {startMode === 'custom' && (
+                <Field label="未来开始时间 (本地时间)">
+                  <input
+                    type="datetime-local"
+                    className="form-control"
+                    value={customStartTime}
+                    onChange={(e) => setCustomStartTime(e.target.value)}
+                    required={startMode === 'custom'}
+                    style={{ colorScheme: 'inherit' }}
+                  />
+                </Field>
+              )}
+            </div>
           </div>
 
-
-          {/* 目标资源 */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(260px,1fr))', gap: '0.75rem' }}>
+          {/* 分组 3：目标资源 */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem' }}>
             <Field label="目标分区 (可选)">
               <Select
                 value={partition}
                 onChange={(v) => setPartition(v)}
                 options={[
-                  { value: '', label: '不限分区（全部）' },
+                  { value: '', label: '不限分区（全集群）' },
                   ...partitionsList.map((p) => ({ value: p, label: `分区: ${p}` })),
                 ]}
               />
             </Field>
 
-            <Field label="指定节点 (可选，逗号分隔)">
+            <Field label="指定计算节点 (可选)">
               <input
                 className="form-control"
                 value={nodes}
                 onChange={(e) => setNodes(e.target.value)}
-                placeholder="如 node1 或 node[2-3]，留空按数量分配"
+                placeholder="如 node1 或 node[2-3]"
               />
             </Field>
           </div>
 
-          {/* 授权范围 */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(260px,1fr))', gap: '0.75rem' }}>
+          {/* 分组 4：授权范围 */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem' }}>
             <Field label="授权租户/账号 (Accounts，推荐)">
               <Select
                 value={accounts}
                 onChange={(v) => setAccounts(v)}
                 options={[
-                  { value: '', label: '不限租户（留空）' },
+                  { value: '', label: '不限租户（公共资源）' },
                   ...tenants.map((t) => ({ value: t.slug, label: `租户: ${t.name || t.slug} (${t.slug})` })),
                 ]}
               />
             </Field>
-
 
             <Field label="授权特定用户 (Users，可选)">
               <input
@@ -284,8 +296,8 @@ function CreateReservationModal({ onClose, onSuccess }: CreateReservationModalPr
             </Field>
           </div>
 
-          {/* 高级标志位 */}
-          <Field label="高级 Flags 标志 (可选)">
+          {/* 分组 5：高级标志位 */}
+          <Field label="高级 Flags 标志位 (可选)">
             <input
               className="form-control"
               value={flags}
@@ -295,14 +307,15 @@ function CreateReservationModal({ onClose, onSuccess }: CreateReservationModalPr
           </Field>
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
-            <button type="button" className="btn-secondary" onClick={onClose} disabled={submitting}>
+            <button type="button" className="neu-btn" onClick={onClose} disabled={submitting}>
               取消
             </button>
-            <button type="submit" className="btn-primary" disabled={submitting}>
+            <button type="submit" className="btn-primary" disabled={submitting} style={{ padding: '0.5rem 1.4rem' }}>
               {submitting ? '创建中...' : '提交创建预约'}
             </button>
           </div>
         </form>
+
       </div>
     </div>
   );
