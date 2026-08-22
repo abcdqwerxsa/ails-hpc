@@ -920,7 +920,7 @@ func (s *Service) SetUserQOS(ctx context.Context, actor, username, tenantSlug st
 		setClauses = append(setClauses, "defaultqos="+req.DefaultQOS)
 	}
 
-	cmd := fmt.Sprintf("sacctmgr -i modify user %s account=%s set %s 2>&1", clusterUser, parentAccount, strings.Join(setClauses, " "))
+	cmd := fmt.Sprintf("sacctmgr -i modify user %s set %s 2>&1", clusterUser, strings.Join(setClauses, " "))
 	out, err := s.runCluster("sh", "-c", cmd)
 	if err != nil {
 		return fmt.Errorf("sacctmgr modify user qos: %w", err)

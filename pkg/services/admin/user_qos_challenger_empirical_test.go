@@ -533,7 +533,7 @@ func TestChallenger_SetUserQOS_CommandSyntaxAndExecution(t *testing.T) {
 				AllowedQOS: []string{"normal", "gpu-vip", "high"},
 			},
 			wantModifyTokens: []string{
-				"sacctmgr -i modify user alice account=hpc-lab",
+				"sacctmgr -i modify user alice",
 				"qos=normal,gpu-vip,high",
 				"defaultqos=gpu-vip",
 			},
@@ -544,7 +544,7 @@ func TestChallenger_SetUserQOS_CommandSyntaxAndExecution(t *testing.T) {
 				AllowedQOS: []string{"normal", "ai-train"},
 			},
 			wantModifyTokens: []string{
-				"sacctmgr -i modify user alice account=hpc-lab",
+				"sacctmgr -i modify user alice",
 				"qos=normal,ai-train",
 			},
 			unwantTokens: []string{"defaultqos="},
@@ -555,7 +555,7 @@ func TestChallenger_SetUserQOS_CommandSyntaxAndExecution(t *testing.T) {
 				DefaultQOS: "normal",
 			},
 			wantModifyTokens: []string{
-				"sacctmgr -i modify user alice account=hpc-lab",
+				"sacctmgr -i modify user alice",
 				"defaultqos=normal",
 			},
 			unwantTokens: []string{" qos="},
@@ -567,7 +567,7 @@ func TestChallenger_SetUserQOS_CommandSyntaxAndExecution(t *testing.T) {
 				AllowedQOS: []string{"-1"},
 			},
 			wantModifyTokens: []string{
-				"sacctmgr -i modify user alice account=hpc-lab",
+				"sacctmgr -i modify user alice",
 				"qos=-1",
 				"defaultqos=-1",
 			},

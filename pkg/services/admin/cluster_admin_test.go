@@ -816,7 +816,7 @@ func TestSetUserQOS_HappyPath_And_CommandSyntax(t *testing.T) {
 	}
 
 	modifyCmd := capturedCmds[0]
-	if !strings.Contains(modifyCmd, "sacctmgr -i modify user alice account=hpc-lab") {
+	if !strings.Contains(modifyCmd, "sacctmgr -i modify user alice") {
 		t.Errorf("modifyCmd prefix mismatch: %s", modifyCmd)
 	}
 	if !strings.Contains(modifyCmd, "qos=normal,gpu-vip,high") {
