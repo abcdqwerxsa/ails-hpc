@@ -351,20 +351,20 @@ function JobsPage() {
                 }}
               >
                 <div style={{ color: 'var(--text-main,#f1f5f9)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                  <span>QOS 配额策略：</span>
+                  <span>QOS 策略：</span>
                   <QOSBadge qos={curQos.name} />
                 </div>
                 {curQos.priority && (
-                  <div>🚀 优先级: <span style={{ color: 'var(--accent-cyan,#06b6d4)', fontWeight: 700 }}>{curQos.priority}</span></div>
+                  <div>优先级: <span style={{ color: 'var(--accent-cyan,#06b6d4)', fontWeight: 700 }}>{curQos.priority}</span></div>
                 )}
                 {(curQos.max_wall || curQos.max_wall_duration) && (
-                  <div>⏱️ 限时: <span style={{ color: 'var(--text-main,#f1f5f9)', fontWeight: 600 }}>{curQos.max_wall_duration || curQos.max_wall}</span></div>
+                  <div>时限: <span style={{ color: 'var(--text-main,#f1f5f9)', fontWeight: 600 }}>{curQos.max_wall_duration || curQos.max_wall}</span></div>
                 )}
                 {(curQos.max_tres_per_user || curQos.max_tres) && (
-                  <div>⚡ 单人上限: <span style={{ color: 'var(--text-main,#f1f5f9)', fontWeight: 600 }}>{curQos.max_tres_per_user || curQos.max_tres}</span></div>
+                  <div>单人上限: <span style={{ color: 'var(--text-main,#f1f5f9)', fontWeight: 600 }}>{curQos.max_tres_per_user || curQos.max_tres}</span></div>
                 )}
                 {(curQos.max_jobs_per_user || curQos.max_jobs) && (
-                  <div>📊 并发作业: <span style={{ color: '#f59e0b', fontWeight: 600 }}>{curQos.max_jobs_per_user || curQos.max_jobs}</span></div>
+                  <div>并发限制: <span style={{ color: '#f59e0b', fontWeight: 600 }}>{curQos.max_jobs_per_user || curQos.max_jobs}</span></div>
                 )}
                 {curQos.description && (
                   <div style={{ color: 'var(--text-dim,#64748b)', fontStyle: 'italic' }}>({curQos.description})</div>
@@ -377,10 +377,11 @@ function JobsPage() {
             <button type="button" className="neu-btn" onClick={() => setShowAdvanced(!showAdvanced)}>
               {showAdvanced ? '收起高级选项' : '高级选项（预约/数组/依赖）'}
             </button>
-            {reservation.trim() && <span style={{ fontSize: '0.78rem', color: '#60a5fa' }}>📅 预约: {reservation.trim()}</span>}
+            {reservation.trim() && <span style={{ fontSize: '0.78rem', color: '#60a5fa' }}>预约: {reservation.trim()}</span>}
             {arraySpec.trim() && <span style={{ fontSize: '0.78rem', color: 'var(--accent-primary)' }}>数组: {arraySpec.trim()}</span>}
             {dependency.trim() && <span style={{ fontSize: '0.78rem', color: 'var(--accent-amber,#f59e0b)' }}>依赖: {dependency.trim()}</span>}
           </div>
+
           {showAdvanced && (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(180px,1fr))', gap: '0.75rem' }}>
               <Field label="Slurm 资源预约（可选）">

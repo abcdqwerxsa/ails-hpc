@@ -147,14 +147,14 @@ function CreateReservationModal({ onClose, onSuccess }: CreateReservationModalPr
         </div>
 
         {/* 快捷模板 */}
-        <div style={{ marginBottom: '1.25rem', padding: '0.75rem', background: 'rgba(255,255,255,0.03)', borderRadius: 8, border: '1px dashed rgba(255,255,255,0.1)' }}>
-          <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted,#94a3b8)', marginBottom: '0.45rem' }}>⚡ 常用快捷模板</div>
+        <div style={{ marginBottom: '1.25rem', padding: '0.75rem', background: 'rgba(255,255,255,0.02)', borderRadius: 8, border: '1px dashed var(--border-color,#2a2f3a)' }}>
+          <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted,#94a3b8)', marginBottom: '0.45rem' }}>快捷预设模板</div>
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
             <button type="button" onClick={() => applyPreset('maint')} className="btn-secondary" style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }}>
-              🛠️ 集群排班维护窗口 (MAINT)
+              维护窗口 (MAINT)
             </button>
             <button type="button" onClick={() => applyPreset('gpu')} className="btn-secondary" style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }}>
-              🚀 租户 GPU 节点专享预约 (node1)
+              GPU 节点专享预约 (node1)
             </button>
           </div>
         </div>
@@ -202,25 +202,23 @@ function CreateReservationModal({ onClose, onSuccess }: CreateReservationModalPr
           {/* 生效时间 */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(260px,1fr))', gap: '0.75rem' }}>
             <Field label="生效时间模式">
-              <div style={{ display: 'flex', gap: '1rem', marginTop: '0.35rem' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.85rem', cursor: 'pointer' }}>
-                  <input
-                    type="radio"
-                    name="startMode"
-                    checked={startMode === 'now'}
-                    onChange={() => setStartMode('now')}
-                  />
+              <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.2rem' }}>
+                <button
+                  type="button"
+                  onClick={() => setStartMode('now')}
+                  className={startMode === 'now' ? 'btn-primary' : 'btn-secondary'}
+                  style={{ padding: '0.35rem 0.8rem', fontSize: '0.8rem' }}
+                >
                   立即生效 (NOW)
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.85rem', cursor: 'pointer' }}>
-                  <input
-                    type="radio"
-                    name="startMode"
-                    checked={startMode === 'custom'}
-                    onChange={() => setStartMode('custom')}
-                  />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStartMode('custom')}
+                  className={startMode === 'custom' ? 'btn-primary' : 'btn-secondary'}
+                  style={{ padding: '0.35rem 0.8rem', fontSize: '0.8rem' }}
+                >
                   指定未来时间
-                </label>
+                </button>
               </div>
             </Field>
 
@@ -232,10 +230,12 @@ function CreateReservationModal({ onClose, onSuccess }: CreateReservationModalPr
                   value={customStartTime}
                   onChange={(e) => setCustomStartTime(e.target.value)}
                   required={startMode === 'custom'}
+                  style={{ colorScheme: 'inherit' }}
                 />
               </Field>
             )}
           </div>
+
 
           {/* 目标资源 */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(260px,1fr))', gap: '0.75rem' }}>
@@ -344,11 +344,12 @@ export function ReservationsPanel() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
         <div>
           <div style={{ fontSize: '1.05rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span>📅 预约管理 (Reservation)</span>
+            <span>预约管理 (Reservation)</span>
             <span style={{ fontSize: '0.75rem', padding: '0.1rem 0.5rem', borderRadius: 999, background: 'rgba(59,130,246,0.15)', color: '#60a5fa', fontWeight: 600 }}>
               {reservations.length} 个当前预约
             </span>
           </div>
+
           <div style={{ fontSize: '0.8rem', color: 'var(--text-muted,#94a3b8)', marginTop: '0.2rem' }}>
             管理集群专用资源预约窗口，支持为特定租户/用户排班独占节点或设置系统维护期。
           </div>
@@ -1519,11 +1520,13 @@ function DeleteQOSModal({ qos, onClose, onSuccess }: DeleteQOSModalProps) {
               display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
-              fontSize: '1.5rem',
+              fontSize: '0.85rem',
+              fontWeight: 800,
+              fontFamily: "'JetBrains Mono', monospace",
               marginBottom: '0.75rem',
             }}
           >
-            ⚠️
+            WARN
           </div>
           <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 700 }}>确认删除 QOS 策略？</h3>
           <div style={{ marginTop: '0.5rem', fontSize: '0.9rem', color: 'var(--text-main,#f1f5f9)' }}>
@@ -1547,7 +1550,7 @@ function DeleteQOSModal({ qos, onClose, onSuccess }: DeleteQOSModalProps) {
         >
           {isNormal ? (
             <div style={{ color: 'var(--accent-rose,#f43f5e)', fontWeight: 600 }}>
-              ⚠️ 警告：<code>normal</code> 是 Slurm 集群的标准默认 QOS。删除可能导致未配置专用 QOS 的用户作业与会话排队失败！
+              警告：<code>normal</code> 是 Slurm 集群的标准默认 QOS。删除可能导致未配置专用 QOS 的用户作业与会话排队失败！
             </div>
           ) : (
             <div>
@@ -1555,6 +1558,7 @@ function DeleteQOSModal({ qos, onClose, onSuccess }: DeleteQOSModalProps) {
             </div>
           )}
         </div>
+
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
           <button type="button" className="neu-btn" onClick={onClose} disabled={submitting}>

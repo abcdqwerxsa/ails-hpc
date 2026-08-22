@@ -3,8 +3,10 @@ import { useCallback, useEffect, useState, type ChangeEvent, type ReactNode } fr
 import { can } from '../services/auth';
 import { slurm, ideFullURL, type ContainerInstance, type QOSInfo } from '../services/slurm';
 import { Select } from '../components/select';
+import { StatusBadge } from '../components/panel_ui';
 
 export const Route = createFileRoute('/webide')({ component: WebIDEPage });
+
 
 function QOSBadge({ qos }: { qos?: string }) {
   const name = (qos || 'normal').toLowerCase();
@@ -300,13 +302,13 @@ function WebIDEPage() {
                 <QOSBadge qos={curQos.name} />
               </div>
               {curQos.priority && (
-                <span>🚀 优先级: <strong style={{ color: 'var(--accent-cyan,#06b6d4)' }}>{curQos.priority}</strong></span>
+                <span>优先级: <strong style={{ color: 'var(--accent-cyan,#06b6d4)' }}>{curQos.priority}</strong></span>
               )}
               {(curQos.max_wall || curQos.max_wall_duration) && (
-                <span>⏱️ 最大时长: <strong>{curQos.max_wall_duration || curQos.max_wall}</strong></span>
+                <span>最大时长: <strong>{curQos.max_wall_duration || curQos.max_wall}</strong></span>
               )}
               {(curQos.max_tres_per_user || curQos.max_tres) && (
-                <span>⚡ 配额限制: <strong>{curQos.max_tres_per_user || curQos.max_tres}</strong></span>
+                <span>配额限制: <strong>{curQos.max_tres_per_user || curQos.max_tres}</strong></span>
               )}
               {curQos.description && (
                 <span style={{ fontStyle: 'italic', color: 'var(--text-dim,#64748b)' }}>({curQos.description})</span>
@@ -314,6 +316,7 @@ function WebIDEPage() {
             </div>
           );
         })()}
+
       </div>
 
       <h3 style={{ margin: '0 0 0.75rem', fontSize: '1.05rem' }}>活跃会话</h3>
@@ -355,7 +358,7 @@ function WebIDEPage() {
                     )}
                     {hasGpu ? (
                       <span style={{ fontSize: '0.75rem', padding: '0.1rem 0.4rem', borderRadius: 4, background: 'rgba(16,185,129,0.15)', color: '#34d399', fontWeight: 600 }}>
-                        ⚡ {s.gpus} GPU
+                        {s.gpus} GPU
                       </span>
                     ) : (
                       <span style={{ fontSize: '0.75rem', padding: '0.1rem 0.4rem', borderRadius: 4, background: 'rgba(148,163,184,0.15)', color: '#94a3b8' }}>
@@ -368,45 +371,53 @@ function WebIDEPage() {
                     <span>CPU {s.cpus} · 内存 {s.memory_mb}MB · 节点 {s.nodes}</span>
                     {running && (
                       <span style={{ color: idleMin >= 45 ? '#f59e0b' : 'var(--text-muted,#94a3b8)' }}>
-                        {idleMin === 0 ? '刚刚活跃' : `已空闲 ${idleMin} 分钟`}
+                        最后活跃: {idleMin === 0 ? '刚刚' : `${idleMin}分钟前`}
                       </span>
                     )}
                   </div>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <span style={{ padding: '0.2rem 0.6rem', borderRadius: 6, fontSize: '0.72rem', fontWeight: 700, color: '#fff', background: running ? '#10b981' : '#f59e0b' }}>
-                    {s.status}
-                  </span>
-                  {can('ide:manage') && (
-                    <button
-                      className="btn-primary"
-                      disabled={!running}
-                      onClick={() => window.open(ideFullURL(s.web_url), '_blank')}
-                      style={{ padding: '0.35rem 1rem' }}
-                    >
-                      打开 IDE
-                    </button>
-                  )}
-                  {can('ide:manage') && (
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                  <StatusBadge status={s.status} />
+                  {running && (
                     <>
-                      <button
+                      <a
+                        href={s.web_url}
+                        target="_blank"
+                        rel="noreferrer"
                         className="neu-btn"
-                        onClick={() => extend(s.container_id)}
-                        disabled={!!acting || !running}
+                        style={{
+                          textDecoration: 'none',
+                          padding: '0.4rem 0.9rem',
+                          fontSize: '0.82rem',
+                          fontWeight: 600,
+                          color: 'var(--accent-cyan,#06b6d4)',
+                        }}
                       >
-                        续期
+                        打开 IDE →
+                      </a>
+                      <button
+                        onClick={() => extend(s.container_id)}
+                        disabled={acting === s.container_id + ':extend'}
+                        className="neu-btn"
+                        style={{
+                          padding: '0.4rem 0.7rem',
+                          fontSize: '0.82rem',
+                        }}
+                      >
+                        {acting === s.container_id + ':extend' ? '续期中…' : '续期'}
                       </button>
                       <button
                         onClick={() => recycle(s.container_id)}
-                        disabled={!!acting}
+                        disabled={acting === s.container_id + ':recycle'}
                         style={{
-                          padding: '0.4rem 0.9rem',
-                          borderRadius: 8,
+                          padding: '0.4rem 0.7rem',
+                          fontSize: '0.82rem',
                           border: 'none',
-                          background: 'var(--card-bg)',
-                          boxShadow: 'var(--shadow-btn)',
-                          color: 'var(--accent-rose)',
+                          borderRadius: 6,
+                          background: 'rgba(239,68,68,0.15)',
+                          color: 'var(--accent-rose,#f43f5e)',
                           cursor: 'pointer',
+                          fontWeight: 600,
                           transition: 'box-shadow .2s ease',
                         }}
                       >
@@ -421,7 +432,7 @@ function WebIDEPage() {
         </div>
       )}
       <div style={{ marginTop: '1rem', fontSize: '0.78rem', color: 'var(--text-muted,#888)', lineHeight: '1.5' }}>
-        💡 <strong>使用提示与防浪费机制</strong>：<br />
+        <strong>使用说明与资源释放机制</strong>：<br />
         1. 启动后约 10–30s 进入 RUNNING；VS Code 与 Jupyter 均支持在网页内流畅交互。<br />
         2. <strong>空闲自动回收（Idle Auto-Reclaim）</strong>：会话在连续无活跃超过 60 分钟后会自动释放，避免昂贵算力与 GPU 机时闲置浪费；如需长时间运行建议改用批量批处理作业（Jobs 页面提交）。
       </div>

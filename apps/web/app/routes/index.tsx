@@ -100,8 +100,9 @@ function OverviewPage() {
         if (alerts.length === 0) return null;
         return (
           <Notice color="#f43f5e" bg="rgba(244,63,94,.12)">
-            ⚠ {alerts.join('；')} —— <Link to="/nodes" style={{ color: 'inherit', fontWeight: 700 }}>查看节点</Link> / <Link to="/jobs" style={{ color: 'inherit', fontWeight: 700 }}>查看队列</Link>
+            <strong>集群告警：</strong>{alerts.join('；')} —— <Link to="/nodes" style={{ color: 'inherit', fontWeight: 700 }}>查看节点</Link> / <Link to="/jobs" style={{ color: 'inherit', fontWeight: 700 }}>查看队列</Link>
           </Notice>
+
         );
       })()}
 
