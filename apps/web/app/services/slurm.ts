@@ -302,7 +302,10 @@ export interface TenantInfo {
   parentAccount?: string; // Slurm 父账号（fair-share 归属，可缺省）
   status: string; // active | suspended
   userCount: number;
+  defaultQos?: string; // 当前绑定的默认 QOS 策略
+  allowedQos?: string[]; // 允许使用的 QOS 清单
 }
+
 export interface TenantsListResponse {
   tenants: TenantInfo[];
 }

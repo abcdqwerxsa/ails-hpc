@@ -185,6 +185,8 @@ export function QOSPanel() {
   const [editingQos, setEditingQos] = useState<QOSInfo | null>(null);
   const [deletingQos, setDeletingQos] = useState<QOSInfo | null>(null);
   const [showBindModal, setShowBindModal] = useState(false);
+  const [selectedTenantSlugForBind, setSelectedTenantSlugForBind] = useState('');
+
 
   const loadQos = async () => {
     setLoading(true);
@@ -454,6 +456,150 @@ export function QOSPanel() {
         </div>
       )}
 
+      {/* 租户 QOS 关联与配额总览区块 */}
+      <div style={{ marginTop: '1.75rem', paddingTop: '1.25rem', borderTop: '1px solid var(--border-color,#2a2f3a)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+          <div>
+            <div style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-main,#f1f5f9)' }}>
+              租户 QOS 关联总览 (Tenant QOS Bindings)
+            </div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted,#94a3b8)', marginTop: '0.15rem' }}>
+              实时查看各租户绑定的默认 QOS 策略及可用清单，支持针对单个租户快捷换绑或解绑。
+            </div>
+          </div>
+          <button
+            type="button"
+            className="neu-btn"
+            style={{ fontSize: '0.78rem', padding: '0.25rem 0.65rem' }}
+            onClick={loadTenants}
+          >
+            刷新租户
+          </button>
+        </div>
+
+        {tenants.length === 0 ? (
+          <div style={emptyStyle}>暂无租户信息</div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+              <thead>
+                <tr style={{ textAlign: 'left' }}>
+                  <th style={th}>租户标识</th>
+                  <th style={th}>租户名称</th>
+                  <th style={th}>默认 QOS 策略</th>
+                  <th style={th}>允许 QOS 清单</th>
+                  <th style={{ ...th, textAlign: 'right' }}>成员数</th>
+                  <th style={{ ...th, textAlign: 'center' }}>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tenants.map((t, idx) => {
+                  const isLast = idx === tenants.length - 1;
+                  const hasQos = !!t.defaultQos;
+                  return (
+                    <tr
+                      key={t.slug}
+                      style={{
+                        borderBottom: isLast ? 'none' : '1px solid var(--row-line,#2a2f3a)',
+                        transition: 'background-color .15s ease',
+                      }}
+                    >
+                      <td style={{ ...td, ...mono }}>
+                        <span style={{ fontWeight: 700, color: 'var(--text-main,#f1f5f9)' }}>{t.slug}</span>
+                      </td>
+                      <td style={td}>
+                        <div>{t.name || '-'}</div>
+                      </td>
+                      <td style={td}>
+                        {hasQos ? (
+                          <span
+                            style={{
+                              padding: '0.15rem 0.5rem',
+                              borderRadius: 6,
+                              background: t.defaultQos === 'normal' ? 'rgba(16,185,129,0.15)' : 'rgba(6,182,212,0.15)',
+                              color: t.defaultQos === 'normal' ? '#10b981' : 'var(--accent-cyan,#06b6d4)',
+                              fontWeight: 700,
+                              fontFamily: "'JetBrains Mono', monospace",
+                              fontSize: '0.78rem',
+                            }}
+                          >
+                            {t.defaultQos}
+                          </span>
+                        ) : (
+                          <span style={{ color: 'var(--text-dim,#64748b)', fontSize: '0.78rem' }}>
+                            — 默认继承
+                          </span>
+                        )}
+                      </td>
+                      <td style={td}>
+                        {t.allowedQos && t.allowedQos.length > 0 ? (
+                          <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap' }}>
+                            {t.allowedQos.map((q) => (
+                              <span
+                                key={q}
+                                style={{
+                                  fontSize: '0.72rem',
+                                  padding: '0.1rem 0.35rem',
+                                  borderRadius: 4,
+                                  background: 'var(--surface-2,rgba(100,116,139,0.15))',
+                                  color: 'var(--text-main,#f1f5f9)',
+                                  fontFamily: "'JetBrains Mono', monospace",
+                                }}
+                              >
+                                {q}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span style={{ color: 'var(--text-dim,#64748b)', fontSize: '0.75rem' }}>全部 / 全局默认</span>
+                        )}
+                      </td>
+                      <td style={{ ...td, textAlign: 'right', fontFamily: "'JetBrains Mono', monospace" }}>{t.userCount}</td>
+                      <td style={{ ...td, textAlign: 'center', minWidth: 150 }}>
+                        <div style={{ display: 'inline-flex', gap: '0.4rem' }}>
+                          <MiniBtn
+                            onClick={() => {
+                              setSelectedTenantSlugForBind(t.slug);
+                              setShowBindModal(true);
+                            }}
+                          >
+                            {hasQos ? '更换策略' : '绑定策略'}
+                          </MiniBtn>
+                          {hasQos && (
+                            <button
+                              type="button"
+                              className="neu-btn"
+                              style={{
+                                padding: '0.25rem 0.55rem',
+                                fontSize: '0.75rem',
+                                borderRadius: 6,
+                                color: 'var(--accent-rose,#f43f5e)',
+                              }}
+                              onClick={async () => {
+                                if (!confirm(`确定解除租户 ${t.slug} 的 QOS 绑定？解除后该租户将恢复使用 Slurm 集群全局默认 QOS。`)) return;
+                                try {
+                                  await slurm.setTenantQOS(t.slug, '');
+                                  setInfo(`租户 ${t.slug} 的 QOS 绑定已成功解除`);
+                                  loadTenants();
+                                } catch (e: any) {
+                                  setError(e?.message || '解除绑定失败');
+                                }
+                              }}
+                            >
+                              解除绑定
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
       {/* 新建模态框 */}
       {showCreateModal && (
         <CreateQOSModal
@@ -497,16 +643,23 @@ export function QOSPanel() {
         <TenantQOSBindModal
           tenants={tenants}
           qosList={qosList}
-          onClose={() => setShowBindModal(false)}
+          initialTenantSlug={selectedTenantSlugForBind}
+          onClose={() => {
+            setShowBindModal(false);
+            setSelectedTenantSlugForBind('');
+          }}
           onSuccess={(msg) => {
             setInfo(msg);
             setShowBindModal(false);
+            setSelectedTenantSlugForBind('');
+            loadTenants();
           }}
         />
       )}
     </div>
   );
 }
+
 
 // ----------------------------------------------------
 // 弹窗子组件体系 (Create / Edit / Delete / Bind Modals)
@@ -1068,12 +1221,13 @@ function DeleteQOSModal({ qos, onClose, onSuccess }: DeleteQOSModalProps) {
 interface TenantQOSBindModalProps {
   tenants: TenantInfo[];
   qosList: QOSInfo[];
+  initialTenantSlug?: string;
   onClose: () => void;
   onSuccess: (msg: string) => void;
 }
 
-function TenantQOSBindModal({ tenants, qosList, onClose, onSuccess }: TenantQOSBindModalProps) {
-  const [selectedTenant, setSelectedTenant] = useState(tenants[0]?.slug || '');
+function TenantQOSBindModal({ tenants, qosList, initialTenantSlug, onClose, onSuccess }: TenantQOSBindModalProps) {
+  const [selectedTenant, setSelectedTenant] = useState(initialTenantSlug || tenants[0]?.slug || '');
   // '__clear__' 是特殊占位符，表示"清除绑定"
   const [selectedQos, setSelectedQos] = useState(qosList[0]?.name || 'normal');
   const [submitting, setSubmitting] = useState(false);
@@ -1081,16 +1235,28 @@ function TenantQOSBindModal({ tenants, qosList, onClose, onSuccess }: TenantQOSB
   const [currentBinding, setCurrentBinding] = useState<{ default_qos: string; allowed_qos: string[] } | null>(null);
   const [loadingBinding, setLoadingBinding] = useState(false);
 
+  useEffect(() => {
+    if (initialTenantSlug) {
+      setSelectedTenant(initialTenantSlug);
+    }
+  }, [initialTenantSlug]);
+
   // 切换租户时自动拉取当前绑定
   useEffect(() => {
     if (!selectedTenant) { setCurrentBinding(null); return; }
     setLoadingBinding(true);
     setCurrentBinding(null);
     slurm.getTenantQOS(selectedTenant)
-      .then((res) => setCurrentBinding(res))
+      .then((res) => {
+        setCurrentBinding(res);
+        if (res.default_qos) {
+          setSelectedQos(res.default_qos);
+        }
+      })
       .catch(() => setCurrentBinding(null))
       .finally(() => setLoadingBinding(false));
   }, [selectedTenant]);
+
 
   const isClear = selectedQos === '__clear__';
 

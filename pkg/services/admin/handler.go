@@ -92,7 +92,7 @@ func mapErr(c *gin.Context, err error, op string) {
 
 // --- 平台级 ---
 
-// ListTenants GET /api/v1/admin/tenants（附每租户用户数，前端契约含 userCount）
+// ListTenants GET /api/v1/admin/tenants（附每租户用户数与 QOS 绑定信息）
 func (h *AdminHandler) ListTenants(c *gin.Context) {
 	ts, err := h.service.ListTenants(c.Request.Context())
 	if err != nil {
@@ -101,8 +101,13 @@ func (h *AdminHandler) ListTenants(c *gin.Context) {
 	}
 	type tenantWithCount struct {
 		store.Tenant
-		UserCount int `json:"userCount"`
+		UserCount  int      `json:"userCount"`
+		DefaultQOS string   `json:"defaultQos"`
+		AllowedQOS []string `json:"allowedQos"`
 	}
+	// 批量查询租户 QOS 绑定
+	qosMap, _ := h.service.GetAllTenantsQOSMap(c.Request.Context())
+
 	out := make([]tenantWithCount, 0, len(ts))
 	for _, t := range ts {
 		us, err := h.service.ListTenantUsers(c.Request.Context(), t.Slug)
@@ -110,10 +115,25 @@ func (h *AdminHandler) ListTenants(c *gin.Context) {
 		if err == nil {
 			n = len(us)
 		}
-		out = append(out, tenantWithCount{Tenant: t, UserCount: n})
+		item := tenantWithCount{
+			Tenant:    t,
+			UserCount: n,
+		}
+		if qosMap != nil {
+			acct := t.ParentAccount
+			if acct == "" {
+				acct = t.Slug
+			}
+			if qInfo, ok := qosMap[acct]; ok {
+				item.DefaultQOS = qInfo.DefaultQOS
+				item.AllowedQOS = qInfo.AllowedQOS
+			}
+		}
+		out = append(out, item)
 	}
 	c.JSON(http.StatusOK, gin.H{"tenants": out})
 }
+
 
 // CreateTenant POST /api/v1/admin/tenants {slug,name}
 func (h *AdminHandler) CreateTenant(c *gin.Context) {

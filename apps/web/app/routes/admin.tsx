@@ -313,6 +313,8 @@ function PlatformAdminPanel({ showTenantTopMargin }: { showTenantTopMargin?: boo
   const [platUserForm, setPlatUserForm] = useState(emptyPlatUserForm);
   const [creatingUser, setCreatingUser] = useState(false);
   const [acting, setActing] = useState(''); // `tenant:<slug>`
+  const [tenantForQos, setTenantForQos] = useState<TenantInfo | null>(null);
+
 
   const refresh = useCallback(async () => {
     try {
@@ -557,6 +559,7 @@ function PlatformAdminPanel({ showTenantTopMargin }: { showTenantTopMargin?: boo
                   <th style={th}>名称</th>
                   <th style={th}>状态</th>
                   <th style={{ ...th, textAlign: 'right' }}>用户数</th>
+                  <th style={th}>默认 QOS 策略</th>
                   <th style={th}>操作</th>
                 </tr>
               </thead>
@@ -576,9 +579,35 @@ function PlatformAdminPanel({ showTenantTopMargin }: { showTenantTopMargin?: boo
                       <td style={td}><StatusBadge status={t.status} /></td>
                       <td style={{ ...td, ...num }}>{t.userCount}</td>
                       <td style={td}>
-                        <div style={{ display: 'flex', gap: '0.4rem' }}>
+                        {t.defaultQos ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                            <span
+                              style={{
+                                padding: '0.15rem 0.5rem',
+                                borderRadius: 6,
+                                background: t.defaultQos === 'normal' ? 'rgba(16,185,129,0.15)' : 'rgba(6,182,212,0.15)',
+                                color: t.defaultQos === 'normal' ? '#10b981' : 'var(--accent-cyan,#06b6d4)',
+                                fontWeight: 700,
+                                fontFamily: "'JetBrains Mono', monospace",
+                                fontSize: '0.78rem',
+                              }}
+                            >
+                              {t.defaultQos}
+                            </span>
+                          </div>
+                        ) : (
+                          <span style={{ color: 'var(--text-dim,#64748b)', fontSize: '0.78rem' }}>
+                            — 默认继承
+                          </span>
+                        )}
+                      </td>
+                      <td style={td}>
+                        <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
                           {can('tenants:manage', getStoredUser()) && (
                             <>
+                              <MiniBtn onClick={() => setTenantForQos(t)}>
+                                QOS 策略
+                              </MiniBtn>
                               <MiniBtn disabled={acting === `tenant:${t.slug}`} onClick={() => toggleTenant(t)}>
                                 {active ? '停用' : '启用'}
                               </MiniBtn>
@@ -597,6 +626,7 @@ function PlatformAdminPanel({ showTenantTopMargin }: { showTenantTopMargin?: boo
           </div>
         )}
       </div>
+
 
       {canManageUsers && (
       <div className="table-card" style={{ marginTop: '1.5rem' }}>
@@ -738,6 +768,19 @@ function PlatformAdminPanel({ showTenantTopMargin }: { showTenantTopMargin?: boo
           }}
         />
       )}
+
+      {tenantForQos && (
+        <TenantQOSModal
+          tenant={tenantForQos}
+          onClose={() => setTenantForQos(null)}
+          onSuccess={(m) => {
+            setInfo(m);
+            setTenantForQos(null);
+            refresh();
+          }}
+        />
+      )}
+
 
       {can('users:create', getStoredUser()) && (
       <form onSubmit={submitPlatUser} style={{ ...cardStyle, marginTop: '1.5rem' }}>
@@ -1160,5 +1203,232 @@ export function UserQOSModal({
     </div>
   );
 }
+
+// ---------- 租户默认 QOS 管理模态框（CRUD：查看当前绑定、更换绑定、一键解绑） ----------
+
+interface TenantQOSModalProps {
+  tenant: TenantInfo;
+  onClose: () => void;
+  onSuccess: (msg: string) => void;
+}
+
+function TenantQOSModal({ tenant, onClose, onSuccess }: TenantQOSModalProps) {
+  const [allQos, setAllQos] = useState<QOSInfo[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [selectedQos, setSelectedQos] = useState(tenant.defaultQos || 'normal');
+  const [currentBinding, setCurrentBinding] = useState<{ default_qos: string; allowed_qos: string[] } | null>(null);
+
+  useEffect(() => {
+    let cancel = false;
+    setLoading(true);
+    setError('');
+
+    Promise.all([
+      slurm.listQOS().catch(() => ({ qos: [] })),
+      slurm.getTenantQOS(tenant.slug).catch(() => ({ default_qos: '', allowed_qos: [] })),
+    ])
+      .then(([qosRes, bindingRes]) => {
+        if (cancel) return;
+        const qList = qosRes.qos || [];
+        setAllQos(qList);
+        setCurrentBinding(bindingRes);
+        if (bindingRes.default_qos) {
+          setSelectedQos(bindingRes.default_qos);
+        } else if (tenant.defaultQos) {
+          setSelectedQos(tenant.defaultQos);
+        } else if (qList.length > 0) {
+          setSelectedQos(qList[0].name);
+        }
+      })
+      .catch((e: any) => {
+        if (!cancel) setError(e?.message || '加载 QOS 策略信息失败');
+      })
+      .finally(() => {
+        if (!cancel) setLoading(false);
+      });
+
+    return () => { cancel = true; };
+  }, [tenant.slug, tenant.defaultQos]);
+
+  const isClear = selectedQos === '__clear__';
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError('');
+    try {
+      const qosName = isClear ? '' : selectedQos;
+      await slurm.setTenantQOS(tenant.slug, qosName);
+      if (isClear) {
+        onSuccess(`租户 ${tenant.slug} 的 QOS 绑定已成功解除（恢复集群默认）`);
+      } else {
+        onSuccess(`租户 ${tenant.slug} 默认 QOS 策略已成功绑定为 ${selectedQos}`);
+      }
+    } catch (e: any) {
+      setError(e?.message || '保存租户 QOS 配置失败');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleClearDirectly = async () => {
+    if (!confirm(`确定清除租户 ${tenant.slug} 的默认 QOS 绑定？清除后该租户将继承 Slurm 集群全局默认策略。`)) return;
+    setSaving(true);
+    setError('');
+    try {
+      await slurm.setTenantQOS(tenant.slug, '');
+      onSuccess(`租户 ${tenant.slug} 的 QOS 绑定已成功解除`);
+    } catch (e: any) {
+      setError(e?.message || '解除绑定失败');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const qosOptions = [
+    { value: '__clear__', label: '—— 清除绑定（恢复集群全局默认）' },
+    ...(allQos.length === 0
+      ? [{ value: 'normal', label: 'normal (默认)' }]
+      : allQos.map((q) => ({
+          value: q.name,
+          label: `${q.name}${q.priority ? ` (优先级 ${q.priority})` : ''}${q.description ? ` · ${q.description}` : ''}`,
+        }))),
+  ];
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0,0,0,0.65)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1100,
+        padding: '1.5rem',
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="neu-chiseled-card"
+        style={{ maxWidth: 520, width: '100%', maxHeight: '90vh', overflowY: 'auto', padding: '1.75rem' }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 700 }}>租户 QOS 策略绑定</h3>
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted,#94a3b8)', marginTop: '0.25rem' }}>
+              租户：<strong style={{ color: 'var(--text-primary,#e2e8f0)' }}>{tenant.slug}</strong> ({tenant.name || tenant.slug})
+            </div>
+          </div>
+          <MiniBtn onClick={onClose}>关闭</MiniBtn>
+        </div>
+
+        {error && <Notice color="#f43f5e" bg="rgba(239,68,68,.12)">{error}</Notice>}
+
+        {loading ? (
+          <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted,#94a3b8)' }}>
+            加载 QOS 配置信息中…
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gap: '1.2rem' }}>
+            {/* 当前绑定状态卡片 */}
+            <div
+              style={{
+                padding: '0.85rem 1rem',
+                borderRadius: 10,
+                background: 'var(--surface-2,rgba(100,116,139,0.1))',
+                border: '1px solid var(--border-color,#2a2f3a)',
+                display: 'grid',
+                gap: '0.35rem',
+              }}
+            >
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted,#94a3b8)' }}>当前生效绑定：</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                {currentBinding?.default_qos ? (
+                  <>
+                    <span style={{ color: '#22d3ee', fontSize: '0.9rem' }}>●</span>
+                    <strong style={{ fontSize: '0.95rem', fontFamily: "'JetBrains Mono', monospace", color: 'var(--accent-cyan,#06b6d4)' }}>
+                      {currentBinding.default_qos}
+                    </strong>
+                    {currentBinding.allowed_qos?.length > 1 && (
+                      <span style={{ fontSize: '0.78rem', color: 'var(--text-muted,#94a3b8)' }}>
+                        （允许清单: {currentBinding.allowed_qos.join(', ')}）
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <span style={{ color: '#94a3b8' }}>○</span>
+                    <span style={{ fontSize: '0.85rem', color: 'var(--text-muted,#94a3b8)' }}>
+                      未单独绑定（默认继承 Slurm 集群全局策略）
+                    </span>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* 选择目标策略 */}
+            <div>
+              <Field label="绑定 QOS 策略">
+                <Select
+                  value={selectedQos}
+                  onChange={setSelectedQos}
+                  options={qosOptions}
+                />
+              </Field>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted,#94a3b8)', marginTop: '0.35rem' }}>
+                选择该租户下成员作业默认套用的 Slurm QOS 策略。
+              </div>
+            </div>
+
+            {/* 警告/提示 */}
+            {isClear && (
+              <Notice color="#f59e0b" bg="rgba(245,158,11,.1)">
+                清除绑定后，该租户将不再强制指定特定 QOS，成员提交作业将使用 Slurm 全局默认策略。
+              </Notice>
+            )}
+
+            {/* 底部按钮 */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.5rem' }}>
+              <div>
+                {currentBinding?.default_qos && (
+                  <button
+                    type="button"
+                    className="neu-btn"
+                    style={{ color: 'var(--accent-rose,#f43f5e)', fontSize: '0.78rem', padding: '0.35rem 0.75rem' }}
+                    onClick={handleClearDirectly}
+                    disabled={saving}
+                  >
+                    解除当前绑定
+                  </button>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: '0.75rem' }}>
+                <button type="button" className="neu-btn" onClick={onClose} disabled={saving}>
+                  取消
+                </button>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={handleSave}
+                  disabled={saving}
+                  style={{
+                    padding: '0.5rem 1.5rem',
+                    background: isClear ? 'var(--accent-rose,#f43f5e)' : undefined,
+                  }}
+                >
+                  {saving ? '保存中…' : isClear ? '确认清除绑定' : '保存租户绑定'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 
 

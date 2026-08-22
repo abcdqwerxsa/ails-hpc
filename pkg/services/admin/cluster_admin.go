@@ -777,8 +777,8 @@ func (s *Service) DeleteQOS(ctx context.Context, actor, name, rid string) error 
 	return nil
 }
 
-// SetTenantQOS 把 QOS 绑到租户父账号（sacctmgr modify account <parent> set qos=...）。
-// 若 qosName 为空字符串，则清除租户的 QOS 绑定（set qos=）。
+// SetTenantQOS 把 QOS 绑到租户父账号（sacctmgr modify account <parent> set qos=... defaultqos=...）。
+// 若 qosName 为空字符串，则清除租户的 QOS 绑定（set qos=-1 defaultqos=-1）。
 // v3-X1：成功后落审计。
 func (s *Service) SetTenantQOS(ctx context.Context, actor, tenantSlug, qosName, rid string) error {
 	// 非空时才做格式校验，空字符串表示"清除绑定"
@@ -789,7 +789,20 @@ func (s *Service) SetTenantQOS(ctx context.Context, actor, tenantSlug, qosName, 
 	if err != nil {
 		return err
 	}
-	if _, err := s.runCluster("sacctmgr", "-i", "modify", "account", t.ParentAccount, "set", "qos="+qosName); err != nil {
+	parent := t.ParentAccount
+	if parent == "" {
+		parent = t.Slug
+	}
+
+	var setArgs string
+	if qosName != "" {
+		setArgs = fmt.Sprintf("qos=%s defaultqos=%s", qosName, qosName)
+	} else {
+		setArgs = "qos=normal defaultqos=normal"
+	}
+
+	cmd := fmt.Sprintf("sacctmgr -i modify account %s set %s 2>&1", parent, setArgs)
+	if _, err := s.runCluster("sh", "-c", cmd); err != nil {
 		return fmt.Errorf("sacctmgr modify account qos: %w", err)
 	}
 	action := qosName
@@ -800,38 +813,75 @@ func (s *Service) SetTenantQOS(ctx context.Context, actor, tenantSlug, qosName, 
 	return nil
 }
 
-// GetTenantQOS 查询租户父账号当前绑定的默认 QOS（sacctmgr show account <parent>）。
+// TenantQOSSummary 租户 QOS 绑定信息摘要。
+type TenantQOSSummary struct {
+	DefaultQOS string   `json:"defaultQos"`
+	AllowedQOS []string `json:"allowedQos"`
+}
+
+// GetTenantQOS 查询租户父账号当前绑定的默认 QOS（从 sacctmgr show assoc 读取）。
 // 返回 defaultQOS 与允许的 qos 清单；若未绑定则均为空。
 func (s *Service) GetTenantQOS(ctx context.Context, tenantSlug string) (defaultQOS string, allowedQOS []string, err error) {
 	t, err := s.st.TenantBySlug(ctx, tenantSlug)
 	if err != nil {
 		return "", nil, err
 	}
-	out, err := s.runCluster("sacctmgr", "-nP", "show", "account", t.ParentAccount,
-		"format=defaultqos,qos")
-	if err != nil {
-		return "", nil, fmt.Errorf("sacctmgr show account: %w", err)
+	parent := t.ParentAccount
+	if parent == "" {
+		parent = t.Slug
 	}
-	// 输出格式：defaultqos|qos\n  e.g. "normal|normal,vip\n"
+	all, err := s.GetAllTenantsQOSMap(ctx)
+	if err != nil {
+		return "", nil, err
+	}
+	if info, ok := all[parent]; ok {
+		return info.DefaultQOS, info.AllowedQOS, nil
+	}
+	return "", nil, nil
+}
+
+// GetAllTenantsQOSMap 批量查询所有账号自身的 QOS 绑定（account -> TenantQOSSummary）。
+// 查询 sacctmgr show assoc format=account,user,defaultqos,qos 并筛选 user 为空的 account 级别记录。
+func (s *Service) GetAllTenantsQOSMap(ctx context.Context) (map[string]TenantQOSSummary, error) {
+	out, err := s.runCluster("sacctmgr", "-nP", "show", "assoc", "format=account,user,defaultqos,qos")
+	if err != nil {
+		return nil, fmt.Errorf("sacctmgr show assoc: %w", err)
+	}
+	res := make(map[string]TenantQOSSummary)
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		parts := strings.SplitN(line, "|", 2)
-		if len(parts) < 2 {
+		parts := strings.Split(line, "|")
+		if len(parts) < 4 {
 			continue
 		}
-		defaultQOS = strings.TrimSpace(parts[0])
-		qosStr := strings.TrimSpace(parts[1])
+		acct := strings.TrimSpace(parts[0])
+		user := strings.TrimSpace(parts[1])
+		defQ := strings.TrimSpace(parts[2])
+		qosStr := strings.TrimSpace(parts[3])
+
+		// 只取 account 自身（非用户）的 association 记录
+		if user != "" {
+			continue
+		}
+
+		var allowed []string
 		if qosStr != "" {
 			for _, q := range strings.Split(qosStr, ",") {
 				q = strings.TrimSpace(q)
 				if q != "" {
-					allowedQOS = append(allowedQOS, q)
+					allowed = append(allowed, q)
 				}
 			}
 		}
-		break
+		res[acct] = TenantQOSSummary{
+			DefaultQOS: defQ,
+			AllowedQOS: allowed,
+		}
 	}
-	return defaultQOS, allowedQOS, nil
+	return res, nil
 }
+
+
+
 
 
 // SetUserQOS 设置指定用户的 Slurm 关联 QOS（默认 QOS 与允许使用的 QOS 清单）。
